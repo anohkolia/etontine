@@ -1,0 +1,67 @@
+name: CI
+
+# Trois portes, dans cet ordre : la qualité du code, puis les parcours, puis
+# les budgets. Le plus rapide échoue en premier — une faute de type ne doit pas
+# attendre trois minutes de Lighthouse pour se signaler.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  qualite:
+    name: Types, lint et tests unitaires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  parcours:
+    name: Parcours de bout en bout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:migrate
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: rapport-playwright
+          path: playwright-report/
+
+  budgets:
+    name: Budgets de poids et de performance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `pnpm build` enchaîne sur `verifier-bundle` : le build échoue de
+      # lui-même si un budget de poids est dépassé, ou si une bibliothèque
+      # serveur a basculé dans le lot client.
+      - run: pnpm build
+      - run: pnpm exec lhci autorun
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rapport-lighthouse
+          path: .lighthouseci/

@@ -1,0 +1,43 @@
+# dépendances
+node_modules
+.pnpm-store
+
+# artefacts Nuxt / Nitro
+.nuxt
+.output
+.data
+dist
+.nitro
+.cache
+
+# tests
+coverage
+test-results
+playwright-report
+blob-report
+.playwright
+
+# base de données locale (dev)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# environnement — ne jamais commiter de secret
+.env
+.env.*
+!.env.example
+
+# système / éditeur
+.DS_Store
+*.log
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# base de données locale (dev)
+data/
+
+# rapports Lighthouse
+.lighthouseci

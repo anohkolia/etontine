@@ -1,0 +1,156 @@
+/* ------------------------------------------------------------------ *
+ * Ordre des couches CSS — déclaré AVANT tout @import.
+ *
+ * La première déclaration `@layer` d'une feuille fixe la priorité ;
+ * Tailwind 4 déclare ensuite `theme, base, components, utilities`, qui
+ * s'aligne sur celle-ci. La couche `primevue` est insérée entre `base` et
+ * `components` : les utilitaires Tailwind gagnent toujours sur PrimeVue,
+ * ce qui rend tout `!important` inutile.
+ *
+ * En mode unstyled, PrimeVue n'émet presque aucun CSS. Il injecte tout de même
+ * dans le <head>, hors couche, deux classes d'accessibilité
+ * (`.p-hidden-accessible`, `.p-overflow-hidden`). Hors couche, elles battent
+ * n'importe quel utilitaire Tailwind — et c'est exactement ce qu'il faut :
+ * l'une masque un élément à l'écran en le laissant aux lecteurs d'écran,
+ * l'autre bloque le défilement derrière une modale. Ni l'une ni l'autre ne
+ * doit pouvoir être écrasée par un utilitaire de passage. Aucun conflit
+ * possible avec Tailwind, qui ne génère pas ces deux noms.
+ * Tranché en T02 : on les laisse à PrimeVue. Voir docs/decisions/T02-couches-css.md.
+ * ------------------------------------------------------------------ */
+@layer theme, base, primevue, components, utilities;
+
+@import "tailwindcss";
+@import "tailwindcss-primeui";
+
+/* ------------------------------------------------------------------ *
+ * Sources supplémentaires à balayer.
+ *
+ * La racine Vite de Nuxt 4 est `app/` : Tailwind y détecte les classes tout
+ * seul, mais ne regarde jamais `shared/`. Or les classes de couleur des
+ * statuts vivent dans `shared/constants/statuts.ts`, qui est partagé avec le
+ * serveur. Sans cette ligne, `<StatusBadge>` rend des badges transparents —
+ * les classes sont bien posées sur l'élément, mais aucune règle ne les définit.
+ * La panne est silencieuse : rien n'échoue, le badge est simplement incolore.
+ * ------------------------------------------------------------------ */
+@source "../../../shared";
+
+/* ------------------------------------------------------------------ *
+ * Tokens de thème — configuration en CSS, pas de tailwind.config.js.
+ * Palette sémantique complète, contraste AA vérifié par test (T03).
+ * ------------------------------------------------------------------ */
+@theme {
+  /* Règle 16 : police système uniquement, aucune police téléchargée. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Règle 13 : cible tactile minimale de 44 × 44 px.
+     Sert aussi bien à `min-h-touch` qu'à `size-touch`. */
+  --spacing-touch: 2.75rem;
+
+  /* --- Surfaces et traits ------------------------------------------ *
+     Toute la palette est en hexadécimal, et non en oklch : le contrôle de
+     contraste de `tests/unit/contraste.spec.ts` lit ces valeurs telles
+     quelles et calcule le rapport WCAG dessus. Une conversion intermédiaire
+     ferait reposer la conformité AA sur l'exactitude de la conversion.
+     Chaque paire texte/fond est vérifiée par ce test : ne change pas une
+     valeur ici sans le relancer. */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f4f5;
+
+  /* Deux traits, et la distinction n'est pas cosmétique : un séparateur
+     décoratif n'a aucune exigence de contraste, la bordure d'un champ de
+     saisie doit atteindre 3:1 (WCAG 1.4.11) — sans elle, on ne voit pas
+     où commence la zone de saisie. */
+  --color-line: #d4d4d8;
+  --color-line-strong: #8b8b96;
+
+  /* --- Encre --------------------------------------------------------- */
+  --color-ink: #18181b;
+  --color-ink-muted: #52525b;
+  --color-ink-subtle: #6d6d76;
+
+  /* --- Marque -------------------------------------------------------- */
+  --color-brand: #0f6e5c;
+  --color-brand-strong: #0a4f42;
+  --color-brand-ink: #ffffff;
+
+  /* Anneau de focus : visible sur fond blanc comme sur fond grisé. */
+  --color-ring: #0f6e5c;
+
+  /* --- Statuts ------------------------------------------------------- *
+     Un fond pâle et une encre foncée par statut. La couleur ne porte
+     jamais l'information à elle seule (règle 10) : <StatusBadge> impose
+     l'icône et le mot avec. Les couleurs sont assez distinctes pour rester
+     lisibles, mais personne ne doit avoir à les distinguer pour comprendre.
+
+     Le bleu de « Déclaré » n'est pas un choix esthétique : un paiement
+     déclaré n'est pas un paiement confirmé, et le vert dirait le contraire
+     au premier coup d'œil (T15). */
+  --color-due-surface: #f4f4f5;
+  --color-due-ink: #3f3f46;
+  --color-late-surface: #fef3c7;
+  --color-late-ink: #78350f;
+  --color-declared-surface: #dbeafe;
+  --color-declared-ink: #1e3a8a;
+  --color-confirmed-surface: #d1fae5;
+  --color-confirmed-ink: #065f46;
+  --color-disputed-surface: #fee2e2;
+  --color-disputed-ink: #991b1b;
+
+  /* --- Rayons ------------------------------------------------------- *
+     Deux rayons seulement : un pour les contrôles, un pour les blocs. */
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+}
+
+@layer base {
+  html {
+    /* Règle 13 : taille de texte de base à 16 px. */
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    @apply bg-surface text-ink antialiased;
+  }
+
+  /* Un montant ne doit jamais être coupé en fin de ligne : « 25 000 FCFA »
+     se lit d'un bloc. La classe est posée par <AmountDisplay>. */
+  .amount {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Squelette de chargement, posé par <LoadingSkeleton>. Le balayage indique
+     que quelque chose arrive ; il s'arrête si l'utilisateur a demandé moins
+     d'animation, auquel cas le bloc reste simplement grisé. */
+  .skeleton {
+    background-color: var(--color-surface-muted);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-line) 70%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-balayage 1.4s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-balayage {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      background-image: none;
+      animation: none;
+    }
+  }
+}

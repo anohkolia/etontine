@@ -1,0 +1,454 @@
+<script setup lang="ts">
+/**
+ * Cotiser : récapitulatif → où envoyer → déclaration.
+ *
+ * Trois étapes qui suivent le geste réel : le membre regarde ce qu'il doit,
+ * part envoyer dans son application de paiement, puis revient dire qu'il l'a
+ * fait. L'application ne touche jamais l'argent (règle 5) — elle enregistre une
+ * déclaration, que le trésorier confirmera.
+ *
+ * **Un membre à deux parts a deux cotisations** : l'écran les liste toutes, et
+ * n'en masque aucune. En montrer une seule le laisserait croire qu'il est à
+ * jour alors qu'il doit encore la moitié.
+ */
+definePageMeta({ layout: 'app', middleware: 'auth' })
+
+const route = useRoute()
+const tontineId = route.params.id as string
+const { compresser } = useCompressionImage()
+const { envoyerOuEnfiler } = useFileHorsLigne()
+const enLigne = useOnline()
+
+interface Cotisation {
+  id: string
+  rotationPosition: number
+  expectedAmount: number
+  confirmedAmount: number
+  status: 'due' | 'late' | 'declared' | 'confirmed' | 'disputed'
+  dueDate: string
+}
+
+interface Frais { amount: number | null, bearer: 'member' | 'tontine', totalToSend: number }
+interface Canal {
+  id: string
+  provider: string
+  msisdn: string
+  holderName: string
+  paymentLinkUrl: string | null
+  frozenUntil: string | null
+  fees: Frais
+}
+interface InfoPaiement {
+  expectedAmount: number
+  reference: string
+  feesBearer: 'member' | 'tontine'
+  channels: Canal[]
+}
+
+const etat = ref<'chargement' | 'contenu' | 'erreur' | 'vide'>('chargement')
+const erreur = ref<string | null>(null)
+const tour = ref<{ index: number, dueDate: string } | null>(null)
+const cotisations = ref<Cotisation[]>([])
+
+const etape = ref('1')
+const choisie = ref<string | null>(null)
+const info = ref<InfoPaiement | null>(null)
+
+const montantDeclare = ref(0)
+const canalDeclare = ref<'wave' | 'orange' | 'mtn' | 'moov' | 'cash'>('wave')
+const reference = ref('')
+const preuve = ref<File | null>(null)
+const poidsPreuve = ref<number | null>(null)
+const envoi = ref(false)
+const messageDeclaration = ref<string | null>(null)
+
+/**
+ * Verrou anti-double-déclaration.
+ *
+ * Le bouton reste inactif 90 secondes après un envoi réussi (acceptation T15).
+ * C'est plus long qu'un réseau qui rame, et plus court qu'un aller-retour réel
+ * vers l'application de paiement : un second envoi légitime dépassera
+ * largement ce délai.
+ */
+const VERROU_SECONDES = 90
+const verrou = ref(0)
+let minuterie: ReturnType<typeof setInterval> | undefined
+
+function demarrerVerrou() {
+  verrou.value = VERROU_SECONDES
+  clearInterval(minuterie)
+  minuterie = setInterval(() => {
+    verrou.value--
+    if (verrou.value <= 0) clearInterval(minuterie)
+  }, 1000)
+}
+
+onBeforeUnmount(() => clearInterval(minuterie))
+
+const cotisationChoisie = computed(() => cotisations.value.find(c => c.id === choisie.value) ?? null)
+const restantTotal = computed(() =>
+  cotisations.value.reduce((n, c) => n + Math.max(0, c.expectedAmount - c.confirmedAmount), 0),
+)
+
+function message(e: unknown): string {
+  return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
+    ?? 'Impossible de joindre le serveur.'
+}
+
+async function charger() {
+  etat.value = 'chargement'
+  try {
+    const reponse = await $fetch<{ round: { index: number, dueDate: string } | null, contributions: Cotisation[] }>(
+      `/api/v1/tontines/${tontineId}/my-contributions`,
+    )
+    tour.value = reponse.round
+    cotisations.value = reponse.contributions
+    etat.value = reponse.round ? 'contenu' : 'vide'
+  }
+  catch (e) {
+    // Hors-ligne est un état à part entière, distinct de l'erreur (règle 14).
+    // Sans cette distinction, une coupure réseau après une déclaration mise en
+    // file remplacerait la confirmation par un écran d'erreur — et le membre
+    // croirait que sa saisie est perdue, alors qu'elle attend simplement.
+    if (!navigator.onLine && cotisations.value.length > 0) {
+      etat.value = 'contenu'
+      return
+    }
+    erreur.value = message(e)
+    etat.value = 'erreur'
+  }
+}
+
+async function choisir(id: string) {
+  choisie.value = id
+  info.value = await $fetch<InfoPaiement>(`/api/v1/contributions/${id}/payment-info`)
+  montantDeclare.value = info.value.expectedAmount
+  reference.value = ''
+  etape.value = '2'
+}
+
+async function choisirFichier(evenement: Event) {
+  const fichier = (evenement.target as HTMLInputElement).files?.[0]
+  if (!fichier) return
+
+  try {
+    // Compression **avant** l'envoi : une photo brute de téléphone pèse
+    // plusieurs mégaoctets, et sur un forfait à la donnée cela coûte au membre.
+    const compresse = await compresser(fichier)
+    preuve.value = compresse
+    poidsPreuve.value = compresse.size
+  }
+  catch (e) {
+    erreur.value = (e as Error).message
+  }
+}
+
+async function declarer() {
+  if (!cotisationChoisie.value) return
+
+  messageDeclaration.value = null
+  erreur.value = null
+  envoi.value = true
+
+  try {
+    let proofUrl: string | undefined
+    // Le dépôt d'image ne se met pas en file : une preuve de plusieurs dizaines
+    // de kilo-octets dans IndexedDB, multipliée par les tentatives, remplirait
+    // le stockage du téléphone. La déclaration part sans, et le membre pourra
+    // joindre la capture ensuite.
+    if (preuve.value && enLigne.value) {
+      const formulaire = new FormData()
+      formulaire.append('file', preuve.value)
+      const depot = await $fetch<{ url: string }>('/api/v1/uploads/proof', {
+        method: 'POST',
+        body: formulaire,
+      })
+      proofUrl = depot.url
+    }
+    else if (preuve.value && !enLigne.value) {
+      erreur.value = 'La capture ne peut pas être envoyée sans réseau. '
+        + 'Ta déclaration partira quand même — tu pourras joindre l’image plus tard.'
+    }
+
+    // La clé d'idempotence est fabriquée **ici**, au moment de la saisie, et
+    // voyage avec l'intention : que l'envoi parte maintenant ou dans une heure
+    // au retour du réseau, le serveur ne créera qu'une seule déclaration.
+    const partie = await envoyerOuEnfiler({
+      url: `/api/v1/contributions/${cotisationChoisie.value.id}/declare`,
+      method: 'POST',
+      idempotencyKey: crypto.randomUUID(),
+      libelle: `Déclaration de cotisation, tour ${tour.value?.index}`,
+      body: {
+        amount: montantDeclare.value,
+        channel: canalDeclare.value,
+        providerRef: reference.value || undefined,
+        proofUrl,
+      },
+    })
+
+    messageDeclaration.value = partie
+      ? 'Déclaration enregistrée. Le trésorier va la confirmer.'
+      : 'Pas de réseau : ta déclaration est gardée et partira toute seule à la reconnexion. Tu n’as rien à refaire.'
+
+    demarrerVerrou()
+    preuve.value = null
+    poidsPreuve.value = null
+
+    // Sans réseau, il n'y a rien de neuf à recharger : le statut ne changera
+    // qu'à l'envoi effectif. On garde l'écran tel quel.
+    if (partie) await charger()
+
+    // On revient au récapitulatif : le membre doit voir son statut changer,
+    // pas rester sur un formulaire qu'il vient d'envoyer.
+    etape.value = '1'
+  }
+  catch (e) {
+    const err = e as { data?: { error?: { code?: string, message?: string } } }
+    // Une seconde déclaration sur une cotisation déjà déclarée : message
+    // explicite, jamais un doublon silencieux.
+    messageDeclaration.value = err.data?.error?.code === 'INVALID_TRANSITION'
+      ? 'Cette cotisation a déjà été déclarée. Attends la confirmation du trésorier.'
+      : (err.data?.error?.message ?? 'Impossible d’enregistrer la déclaration.')
+  }
+  finally {
+    envoi.value = false
+  }
+}
+
+onMounted(charger)
+useHead({ title: 'Cotiser — Tontine CI' })
+</script>
+
+<template>
+  <div class="flex flex-col gap-5">
+    <h1 class="text-xl font-bold text-ink">
+      Cotiser
+    </h1>
+
+    <LoadingSkeleton
+      v-if="etat === 'chargement'"
+      variant="card"
+      :count="2"
+    />
+
+    <ErrorState
+      v-else-if="etat === 'erreur'"
+      :detail="erreur ?? undefined"
+      @retry="charger"
+    />
+
+    <EmptyState
+      v-else-if="etat === 'vide'"
+      title="Aucun tour ouvert"
+      description="Il n’y a rien à cotiser pour l’instant. Tu seras prévenu à l’ouverture du prochain tour."
+      icon="lucide:calendar"
+    />
+
+    <template v-else>
+      <p
+        v-if="messageDeclaration"
+        role="status"
+        class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+        data-testid="message-declaration"
+      >
+        {{ messageDeclaration }}
+      </p>
+
+      <Stepper v-model:value="etape">
+        <StepList>
+          <Step value="1">
+            Récapitulatif
+          </Step>
+          <Step value="2">
+            Où envoyer
+          </Step>
+          <Step value="3">
+            Déclaration
+          </Step>
+        </StepList>
+
+        <StepPanels>
+          <!-- Étape 1 — ce que je dois -->
+          <StepPanel value="1">
+            <div class="flex flex-col gap-3">
+              <p class="text-sm text-ink-muted">
+                Tour {{ tour?.index }} · à verser avant le {{ tour?.dueDate }}
+              </p>
+
+              <p
+                v-if="cotisations.length > 1"
+                class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+                data-testid="avertissement-parts-multiples"
+              >
+                Tu as {{ cotisations.length }} parts dans cette tontine : il y a
+                donc {{ cotisations.length }} cotisations à verser ce tour-ci.
+              </p>
+
+              <ul
+                class="flex flex-col gap-2"
+                data-testid="liste-cotisations"
+              >
+                <li
+                  v-for="cotisation in cotisations"
+                  :key="cotisation.id"
+                  class="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3"
+                  :data-testid="`cotisation-${cotisation.id}`"
+                >
+                  <div class="flex flex-col gap-1">
+                    <span class="text-sm text-ink-muted">
+                      Part en position {{ cotisation.rotationPosition }}
+                    </span>
+                    <AmountDisplay
+                      :amount="cotisation.expectedAmount - cotisation.confirmedAmount"
+                      size="lg"
+                    />
+                  </div>
+
+                  <div class="flex flex-col items-end gap-2">
+                    <StatusBadge
+                      kind="contribution"
+                      :status="cotisation.status"
+                      compact
+                    />
+                    <Button
+                      v-if="cotisation.status === 'due' || cotisation.status === 'late'"
+                      label="Envoyer"
+                      class="bg-brand text-brand-ink hover:bg-brand-strong"
+                      :data-testid="`bouton-envoyer-${cotisation.id}`"
+                      @click="choisir(cotisation.id)"
+                    />
+                  </div>
+                </li>
+              </ul>
+
+              <p class="text-sm text-ink-muted">
+                Total restant à verser :
+                <AmountDisplay :amount="restantTotal" />
+              </p>
+            </div>
+          </StepPanel>
+
+          <!-- Étape 2 — où envoyer -->
+          <StepPanel value="2">
+            <div class="flex flex-col gap-4">
+              <OuEnvoyer
+                v-if="info"
+                :expected-amount="info.expectedAmount"
+                :reference="info.reference"
+                :channels="info.channels"
+                :fees-bearer="info.feesBearer"
+              />
+
+              <Button
+                label="J’ai envoyé"
+                class="bg-brand text-brand-ink hover:bg-brand-strong"
+                data-testid="bouton-jai-envoye"
+                @click="etape = '3'"
+              />
+            </div>
+          </StepPanel>
+
+          <!-- Étape 3 — déclaration -->
+          <StepPanel value="3">
+            <div class="flex flex-col gap-4">
+              <p class="text-base text-ink">
+                As-tu bien envoyé le montant depuis ton téléphone ?
+              </p>
+              <p class="text-sm text-ink-muted">
+                Déclare ton envoi : le trésorier le confirmera ensuite. Tant
+                qu’il ne l’a pas fait, ta cotisation reste au statut
+                « Déclaré ».
+              </p>
+
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                for="montant-declare"
+              >
+                Montant envoyé (FCFA)
+                <InputText
+                  id="montant-declare"
+                  :value="montantDeclare"
+                  inputmode="numeric"
+                  data-testid="champ-montant-declare"
+                  @input="montantDeclare = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+                />
+              </label>
+
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                for="canal-declare"
+              >
+                Par quel moyen ?
+                <select
+                  id="canal-declare"
+                  v-model="canalDeclare"
+                  class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-base text-ink"
+                  data-testid="champ-canal-declare"
+                >
+                  <option value="wave">Wave</option>
+                  <option value="orange">Orange Money</option>
+                  <option value="mtn">MTN MoMo</option>
+                  <option value="moov">Moov Money</option>
+                  <option value="cash">Espèces</option>
+                </select>
+              </label>
+
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                for="reference-transaction"
+              >
+                Référence de la transaction (facultatif)
+                <InputText
+                  id="reference-transaction"
+                  v-model="reference"
+                  data-testid="champ-reference-transaction"
+                />
+              </label>
+
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                for="preuve"
+              >
+                Capture du paiement (facultatif)
+                <input
+                  id="preuve"
+                  type="file"
+                  accept="image/*"
+                  class="min-h-touch rounded-control border border-line-strong bg-surface p-2 text-sm"
+                  data-testid="champ-preuve"
+                  @change="choisirFichier"
+                >
+                <span
+                  v-if="poidsPreuve !== null"
+                  class="text-sm font-normal text-ink-subtle"
+                  data-testid="poids-preuve"
+                >
+                  Image compressée à {{ Math.round(poidsPreuve / 1024) }} Ko avant envoi.
+                </span>
+              </label>
+
+              <Button
+                :label="envoi
+                  ? 'Envoi…'
+                  : (verrou > 0 ? `Déjà déclaré (${verrou} s)` : 'Déclarer mon envoi')"
+                :disabled="envoi || verrou > 0 || montantDeclare <= 0"
+                class="bg-brand text-brand-ink hover:bg-brand-strong"
+                data-testid="bouton-declarer"
+                @click="declarer"
+              />
+            </div>
+          </StepPanel>
+        </StepPanels>
+      </Stepper>
+    </template>
+  </div>
+</template>
+
+<!--
+  États d'écran (règle 14) :
+  · chargement — LoadingSkeleton
+  · vide       — EmptyState
+  · erreur     — ErrorState avec reprise
+  · hors-ligne — bandeau porté par `layouts/app.vue`
+  · contenu    — l'écran
+-->

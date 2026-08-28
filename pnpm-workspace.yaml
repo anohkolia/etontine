@@ -1,0 +1,7 @@
+# Compilations natives explicitement autorisées (pnpm 11 : `allowBuilds`).
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - happy-dom@20.11.8
