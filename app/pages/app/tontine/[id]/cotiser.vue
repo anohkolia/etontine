@@ -28,7 +28,6 @@ interface Cotisation {
   dueDate: string
 }
 
-interface Frais { amount: number | null, bearer: 'member' | 'tontine', totalToSend: number }
 interface Canal {
   id: string
   provider: string
@@ -36,12 +35,10 @@ interface Canal {
   holderName: string
   paymentLinkUrl: string | null
   frozenUntil: string | null
-  fees: Frais
 }
 interface InfoPaiement {
   expectedAmount: number
   reference: string
-  feesBearer: 'member' | 'tontine'
   channels: Canal[]
 }
 
@@ -336,7 +333,6 @@ useHead({ title: 'Cotiser — Tontine CI' })
                 :expected-amount="info.expectedAmount"
                 :reference="info.reference"
                 :channels="info.channels"
-                :fees-bearer="info.feesBearer"
               />
 
               <Button

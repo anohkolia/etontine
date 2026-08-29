@@ -13,9 +13,14 @@
  * Rejouable : le seed efface d'abord ce qu'il a créé, en repartant des mêmes
  * identifiants fixes. `pnpm db:seed` deux fois de suite donne le même état.
  */
+import { existsSync } from 'node:fs'
 import { eq, inArray } from 'drizzle-orm'
 import { useDb } from './index.ts'
 import * as t from './schema.ts'
+
+// Même raison que pour `cli.ts` : un script Node ordinaire ne lit pas `.env`,
+// et le seed doit viser la même base que le serveur.
+if (existsSync('.env')) process.loadEnvFile('.env')
 
 const db = useDb()
 

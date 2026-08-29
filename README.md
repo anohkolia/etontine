@@ -18,6 +18,24 @@ pnpm db:migrate
 pnpm dev                 # http://localhost:3000
 ```
 
+### Back-office
+
+Application distincte, sur le port 3001. Le statut d'administrateur vient de
+`NUXT_ADMIN_PHONES`, jamais de la base de données.
+
+```bash
+# 1. Ton numéro dans .env — plusieurs numéros séparés par des virgules
+#    NUXT_ADMIN_PHONES="07 07 12 34 56"
+
+# 2. Crée le compte correspondant (le back-office n'en crée aucun)
+pnpm db:admin
+
+# 3. Lance le back-office
+pnpm dev:admin        # http://localhost:3001
+```
+
+En développement, le code à usage unique s'affiche directement à l'écran.
+
 `/demo` est la page de vérification du socle : les composants PrimeVue en mode
 unstyled habillés par le préréglage pass-through, et les composants de base du
 design system avec leurs états.
@@ -26,7 +44,8 @@ design system avec leurs états.
 
 | Commande | Effet |
 |:--|:--|
-| `pnpm dev` | serveur de développement |
+| `pnpm dev` | serveur de développement (app membre) |
+| `pnpm dev:admin` | back-office, sur le port 3001 |
 | `pnpm build` | build de production |
 | `pnpm typecheck` | `vue-tsc` sur l'application **et** `tsc` sur `tests/` — doit passer avant tout commit |
 | `pnpm lint` / `pnpm lint:fix` | ESLint |
@@ -36,6 +55,8 @@ design system avec leurs états.
 | `pnpm db:migrate` | applique les migrations |
 | `pnpm db:rollback` | annule la dernière migration |
 | `pnpm db:seed` | jeu de développement, rejouable |
+| `pnpm db:admin` | crée les comptes des numéros de `NUXT_ADMIN_PHONES` |
+| `pnpm build:admin` | build du back-office |
 | `pnpm lighthouse` | performance et accessibilité, sur le build |
 
 Avant le premier `pnpm test:e2e`, installer le navigateur :
@@ -78,6 +99,9 @@ la production : [`docs/decisions/livraison-mvp.md`](./docs/decisions/livraison-m
   doit être ajoutée à `icon.clientBundle.icons` — un test le vérifie.
 - **Tailwind balaie aussi `shared/`** (`@source` dans `main.css`) : la racine
   Vite de Nuxt 4 est `app/`, et les classes des tables de statuts y échapperaient.
+- **Aucun frais n'est affiché** : le membre les supporte à l'envoi comme au
+  retrait et en connaît l'ordre de grandeur. Aucun taux ne figure donc dans le
+  code ni dans la configuration.
 - **Base de données** : SQLite en développement via Drizzle. `better-sqlite3`
   n'est importé que dans `server/db/index.ts`, pour que la bascule vers
   Postgres en production ne touche qu'un fichier.

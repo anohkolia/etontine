@@ -36,6 +36,9 @@ Poids mesurés sur le build, compressés :
 | Style PrimeVue | Préréglage pass-through global, jamais au point d'appel |
 | Non-régression visuelle | Assertions structurelles, pas de captures de référence |
 | Bibliothèques serveur | `qrcode`, `pdfkit`, `exceljs`, `web-push` — aucune dans le lot client |
+| Affichage des frais | **Aucun.** Le membre les supporte à l'envoi comme au retrait, et en connaît l'ordre de grandeur |
+| Back-office | Application Nuxt **distincte** (`admin/`), périmètre limité à la vérification d'identité |
+| Droits d'administration | Liste blanche de numéros en variable d'environnement, jamais une colonne en base |
 
 ---
 
@@ -57,6 +60,19 @@ sans elle l'organisateur serait membre sans jamais cotiser ni prendre la main :
 le pot attendu serait sous-évalué et la phrase d'engagement annoncerait un
 cycle plus court que la réalité.
 
+**Aucun frais n'est affiché nulle part.** `docs/cahier-des-charges.md` §6.2
+prévoit un décompte « cotisation + frais = total » sur l'écran de paiement, et
+§2.4 demande de rendre les taux administrables. Décision du commanditaire :
+on n'affiche rien. Le membre supporte les frais dans les deux sens — envoi et
+retrait — et il en connaît l'ordre de grandeur ; une estimation n'ajouterait
+qu'un chiffre approximatif là où la charge mentale doit être la plus basse, et
+un chiffre faux lui ferait envoyer le mauvais montant.
+
+Conséquences : aucun taux n'existe dans le code ni dans la configuration —
+l'acceptation de T14 sur ce point est satisfaite par construction. La colonne
+`tontines.fees_bearer` reste au modèle de données mais le wizard n'offre plus
+de choix : elle vaut `member`, ce qui décrit la réalité.
+
 **Le wizard compte six écrans, pas cinq.** `docs/backlog.md` parle de cinq
 étapes, `docs/cahier-des-charges.md` en détaille six (l'étape 0 « type
 d'accès » précède les cinq autres). La spécification détaillée a été suivie.
@@ -69,10 +85,6 @@ d'accès » précède les cinq autres). La spécification détaillée a été su
 mais leur contenu dépend de deux points que `CLAUDE.md` interdit de trancher
 seul : le modèle de monétisation et la formulation des CGU. Aucune page n'y
 renvoie ; les créer avec un contenu inventé serait pire que leur absence.
-
-**Un back-office de revue d'identité.** Hors périmètre MVP par la
-spécification. Conséquence assumée : en production, aucune tontine ne peut être
-publiée tant qu'un moyen d'approuver les dossiers n'existe pas.
 
 **L'envoi effectif des SMS et des appels vocaux.** Aucun opérateur n'est
 branché. Le point d'entrée est unique (`server/services/otp.ts`, fonction
@@ -96,10 +108,10 @@ Aucune n'est codée en dur ; toutes attendent une décision ou un back-office.
 
 | Réglage | Où | Aujourd'hui |
 |:--|:--|:--|
-| Barème des frais par opérateur | `runtimeConfig.fees` | `configured: false` — l'interface annonce l'existence des frais sans avancer de chiffre |
 | Seuil d'alerte de plafond de portefeuille | `runtimeConfig.public.potAlertThreshold` | 500 000 FCFA |
 | Seuil de contre-validation d'un versement | colonne `tontines.counter_validation_threshold` | 100 000 FCFA, par tontine |
 | Secret de session | `NUXT_SESSION_SECRET` | valeur de développement, à remplacer |
+| Numéros administrateurs | `NUXT_ADMIN_PHONES` | vide — le back-office est alors inaccessible, ce qui est le défaut sûr |
 
 ---
 

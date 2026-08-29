@@ -61,6 +61,10 @@ export const users = sqliteTable('users', {
   kycDocumentUrl: text('kyc_document_url'),
   kycSelfieUrl: text('kyc_selfie_url'),
   kycSubmittedAt: integer('kyc_submitted_at', { mode: 'timestamp' }),
+  /** Qui a statué, quand, et pourquoi en cas de refus. */
+  kycReviewedBy: text('kyc_reviewed_by'),
+  kycReviewedAt: integer('kyc_reviewed_at', { mode: 'timestamp' }),
+  kycRejectionReason: text('kyc_rejection_reason'),
   /** Consentements granulaires — deux cases distinctes (T08). */
   consentDataAt: integer('consent_data_at', { mode: 'timestamp' }),
   consentNotificationsAt: integer('consent_notifications_at', { mode: 'timestamp' }),
@@ -490,3 +494,33 @@ export type PaymentDeclaration = typeof paymentDeclarations.$inferSelect
 export type Payout = typeof payouts.$inferSelect
 export type LedgerEntry = typeof ledgerEntries.$inferSelect
 export type LedgerType = (typeof LEDGER_TYPES)[number]
+
+/* ------------------------------------------------------------------ *
+ * Journal d'administration
+ * ------------------------------------------------------------------ */
+
+/**
+ * Trace de toute action d'administration.
+ *
+ * Le registre (`ledger_entries`) est chaîné **par tontine** : une décision de
+ * vérification d'identité ne s'y range pas, elle ne concerne aucune tontine en
+ * particulier. Elle a pourtant besoin d'une trace, et pour la même raison —
+ * approuver une pièce d'identité, c'est autoriser quelqu'un à collecter
+ * l'argent d'un groupe. Sans journal, cette décision n'aurait aucun auteur.
+ *
+ * Append-only, comme le registre : ni mise à jour ni suppression.
+ */
+export const adminAudit = sqliteTable('admin_audit', {
+  id: id(),
+  /** L'administrateur qui a agi. Jamais déduit du payload. */
+  actorId: text('actor_id').notNull().references(() => users.id),
+  actorPhone: text('actor_phone').notNull(),
+  action: text('action').notNull(),
+  /** La personne concernée, quand il y en a une. */
+  targetUserId: text('target_user_id').references(() => users.id),
+  payload: text('payload', { mode: 'json' }).notNull(),
+  /** Horloge serveur, jamais celle du client. */
+  createdAt: createdAt(),
+}, t => [index('admin_audit_created_idx').on(t.createdAt)])
+
+export type AdminAudit = typeof adminAudit.$inferSelect

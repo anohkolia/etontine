@@ -67,16 +67,20 @@ test('le bouton Copier fonctionne sans contexte sécurisé', async ({ page }) =>
   await expect(page.getByTestId('bouton-copier-numero')).toContainText('copié')
 })
 
-test('les frais ne sont pas inventés quand la grille n’est pas renseignée', async ({ page }) => {
+test('l’écran de paiement n’affiche aucun frais', async ({ page }) => {
   const id = await tontineLancee(page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
 
-  // Acceptation T14 : aucun taux codé en dur. Sans grille renseignée, on
-  // annonce l'existence des frais sans avancer de chiffre.
-  await expect(page.getByTestId('frais-inconnus')).toBeVisible()
-  await expect(page.getByTestId('montant-a-envoyer')).toContainText('25 000 FCFA')
+  // Le membre supporte les frais dans tous les cas et en connaît l'ordre de
+  // grandeur : une estimation n'ajouterait qu'un chiffre approximatif là où la
+  // charge mentale doit être la plus basse. Et un chiffre faux lui ferait
+  // envoyer le mauvais montant.
+  await expect(page.getByTestId('montant-a-envoyer')).toHaveText('25 000 FCFA')
+
+  const ecran = await page.locator('[data-testid="section-inputotp"], main').first().textContent()
+  expect(ecran).not.toMatch(/frais/i)
 })
 
 test('une image de 4 Mo est compressée sous 100 Ko avant l’envoi', async ({ page }) => {

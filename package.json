@@ -24,7 +24,10 @@
     "db:seed": "node server/db/seed.ts",
     "db:reset": "node server/db/cli.ts rollback && drizzle-kit migrate && node server/db/seed.ts",
     "verify:bundle": "node scripts/verifier-bundle.ts",
-    "lighthouse": "lhci autorun"
+    "lighthouse": "lhci autorun",
+    "dev:admin": "nuxt dev admin --port 3001 --dotenv ../.env",
+    "build:admin": "nuxt build admin --dotenv ../.env",
+    "db:admin": "node server/db/cli.ts admin"
   },
   "dependencies": {
     "@nuxt/icon": "2.5.1",

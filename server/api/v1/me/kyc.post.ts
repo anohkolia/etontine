@@ -10,17 +10,18 @@ import { isProduction } from '../../../utils/env.ts'
 /**
  * Vérification d'identité — palier KYC 2.
  *
- * **Point à trancher avant la mise en production.** La revue des pièces relève
- * d'un back-office, explicitement hors périmètre MVP. Deux comportements
- * cohabitent donc :
+ * Deux comportements, selon l'environnement :
  *
- * - en production, le dossier reste en `pending_review` et le palier ne monte
- *   pas. C'est le comportement sûr : personne ne s'auto-certifie ;
- * - hors production, le palier est accordé immédiatement, faute de quoi aucun
- *   parcours de création ne serait ni testable ni démontrable.
+ * - **en production**, le dossier part en `pending_review` et le palier ne
+ *   monte pas. Un administrateur l'examine depuis le back-office (`admin/`) :
+ *   personne ne s'auto-certifie, et approuver une pièce d'identité, c'est
+ *   autoriser quelqu'un à collecter l'argent d'un groupe ;
+ * - **hors production**, le palier est accordé immédiatement. Sans cela, chaque
+ *   test du parcours de création exigerait qu'un administrateur intervienne, ce
+ *   qui rendrait la suite de bout en bout inutilisable.
  *
- * Tant que le back-office n'existe pas, une tontine ne peut donc pas être
- * créée en production. C'est délibéré et signalé, pas un oubli.
+ * Le parcours d'examen reste couvert : les tests du back-office placent
+ * eux-mêmes un dossier en attente pour l'éprouver.
  */
 const kycInput = z.object({
   documentUrl: z.string().url(),

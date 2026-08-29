@@ -14,13 +14,13 @@
  * 3. **La référence courte**, à mettre en commentaire du paiement : sur un pot
  *    où tout le monde envoie la même somme le même jour, c'est le seul moyen
  *    pour le trésorier de savoir qui a payé quoi.
+ *
+ * **Aucun frais n'est affiché.** Le membre les supporte de toute façon, à
+ * l'envoi comme au retrait, et il en connaît l'ordre de grandeur. Une
+ * estimation de plus n'ajouterait qu'un chiffre approximatif sur l'écran où la
+ * charge mentale doit être la plus basse — et si l'estimation était fausse, il
+ * enverrait le mauvais montant.
  */
-interface Frais {
-  amount: number | null
-  bearer: 'member' | 'tontine'
-  totalToSend: number
-}
-
 interface Canal {
   id: string
   provider: string
@@ -28,14 +28,12 @@ interface Canal {
   holderName: string
   paymentLinkUrl: string | null
   frozenUntil: string | null
-  fees: Frais
 }
 
 const props = defineProps<{
   expectedAmount: number
   reference: string
   channels: Canal[]
-  feesBearer: 'member' | 'tontine'
 }>()
 
 const { copie, copier } = useCopie()
@@ -88,41 +86,17 @@ const gele = computed(() => {
     </fieldset>
 
     <template v-if="canal">
-      <!-- Montant -->
+      <!-- Montant. Rien d'autre : pas d'estimation de frais, pas de total
+           approximatif. C'est ce chiffre-là que le membre doit taper. -->
       <div class="flex flex-col gap-1 rounded-card border border-line bg-surface p-4">
         <p class="text-sm text-ink-muted">
           Montant à envoyer
         </p>
         <AmountDisplay
-          :amount="canal.fees.totalToSend"
+          :amount="expectedAmount"
           size="xl"
           data-testid="montant-a-envoyer"
         />
-
-        <p
-          v-if="canal.fees.amount !== null && feesBearer === 'member'"
-          class="text-sm text-ink-muted"
-          data-testid="detail-frais"
-        >
-          Dont environ <AmountDisplay
-            :amount="canal.fees.amount"
-            size="sm"
-          /> de frais d’envoi.
-        </p>
-        <p
-          v-else-if="canal.fees.amount === null"
-          class="text-sm text-ink-muted"
-          data-testid="frais-inconnus"
-        >
-          Les frais de ton opérateur s’ajoutent à ce montant.
-        </p>
-        <p
-          v-else
-          class="text-sm text-ink-muted"
-          data-testid="frais-tontine"
-        >
-          Les frais d’envoi sont pris en charge par la tontine.
-        </p>
       </div>
 
       <!-- Titulaire et numéro -->

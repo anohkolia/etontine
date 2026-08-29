@@ -41,3 +41,6 @@ data/
 
 # rapports Lighthouse
 .lighthouseci
+
+# session de test du back-office
+tests/e2e/admin/.session-admin.json

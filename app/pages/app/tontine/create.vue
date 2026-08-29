@@ -38,7 +38,11 @@ const form = reactive({
   frequency: 'monthly' as 'daily' | 'weekly' | 'biweekly' | 'monthly',
   startDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
   rotationMode: 'fixed' as 'fixed' | 'draw',
-  feesBearer: 'member' as 'member' | 'tontine',
+  // Le membre supporte les frais, à l'envoi comme au retrait, et il en connaît
+  // l'ordre de grandeur. Le réglage reste dans le modèle de données, mais le
+  // wizard n'offre plus de choix : proposer une option sans effet visible
+  // serait un piège, et aucun écran n'affiche de frais.
+  feesBearer: 'member' as const,
   penaltyAmount: 0,
   penaltyPeriod: 'once' as 'once' | 'per_day',
   penaltyCap: null as number | null,
@@ -447,30 +451,6 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
               <span class="font-medium text-ink">{{ canal.holderName }}</span>
               <span class="block text-ink-muted">{{ canal.provider }} · {{ canal.msisdn }}</span>
             </span>
-          </label>
-        </fieldset>
-
-        <fieldset class="flex flex-col gap-2">
-          <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Qui paie les frais d’envoi ?
-          </legend>
-          <label class="flex min-h-touch items-center gap-3 text-sm">
-            <input
-              v-model="form.feesBearer"
-              type="radio"
-              value="member"
-              class="size-5 accent-brand"
-            >
-            Chaque membre, sur son envoi
-          </label>
-          <label class="flex min-h-touch items-center gap-3 text-sm">
-            <input
-              v-model="form.feesBearer"
-              type="radio"
-              value="tontine"
-              class="size-5 accent-brand"
-            >
-            La tontine, sur le pot
           </label>
         </fieldset>
       </section>

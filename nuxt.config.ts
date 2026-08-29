@@ -42,31 +42,6 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
-    /**
-     * Barème des frais d'envoi, par opérateur.
-     *
-     * **Aucun taux n'est codé en dur dans le code** (acceptation T14) : ces
-     * valeurs sont de la configuration, surchargeables par variables
-     * d'environnement, et destinées à venir du back-office quand il existera.
-     * Les opérateurs révisent leurs grilles sans préavis ; un taux figé dans
-     * un composant donnerait un montant faux le lendemain de la révision.
-     *
-     * `configured` à `false` signifie que la grille n'a pas été renseignée pour
-     * cette installation : l'interface annonce alors « frais de ton opérateur
-     * en plus », sans avancer de chiffre. Annoncer un montant faux est pire que
-     * de ne rien annoncer — le membre enverrait le mauvais montant.
-     *
-     * Format : `percent` en pourcentage, `min`/`max`/`fixed` en FCFA entiers.
-     */
-    fees: {
-      configured: false,
-      wave: { percent: 1, fixed: 0, min: 0, max: 0 },
-      orange: { percent: 1, fixed: 0, min: 0, max: 0 },
-      mtn: { percent: 1, fixed: 0, min: 0, max: 0 },
-      moov: { percent: 1, fixed: 0, min: 0, max: 0 },
-      cash: { percent: 0, fixed: 0, min: 0, max: 0 },
-    },
-
     public: {
       /**
        * Seuil d'alerte de plafond de portefeuille, en FCFA.
