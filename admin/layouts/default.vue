@@ -28,7 +28,7 @@ const onglets = [
               class="text-brand"
               aria-hidden="true"
             />
-            Tontine CI — administration
+            eTontine — administration
           </span>
 
           <nav class="flex items-center gap-1">

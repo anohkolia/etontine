@@ -139,14 +139,16 @@ async function demarrer() {
 }
 
 onMounted(charger)
-useHead({ title: 'Membres — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Membres',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Membres — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Membres
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -177,16 +179,25 @@ useHead({ title: 'Membres — Tontine CI' })
         <li
           v-for="membre in membres"
           :key="membre.id"
-          class="flex items-start justify-between gap-3 rounded-card border border-line bg-surface p-3"
+          class="card-surface flex items-start gap-3 p-3"
           :data-testid="`membre-${membre.id}`"
         >
-          <div class="flex flex-col gap-1">
-            <span class="font-medium text-ink">
+          <!-- Le rang dans la rotation, en pastille — repris de la liste de
+               membres du template. Il répond à la question que le membre pose
+               en premier : « je passe quand ? ». Un double part affiche ses
+               deux positions, séparées par une barre. -->
+          <span
+            class="tabular flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-surface text-xs font-bold text-brand-strong"
+            aria-hidden="true"
+          >{{ membre.positions.length > 0 ? membre.positions.join('/') : '—' }}</span>
+
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            <span class="truncate font-semibold text-ink">
               {{ membre.name ?? 'Membre inscrit' }}
             </span>
             <span
               v-if="membre.phone"
-              class="text-sm text-ink-muted"
+              class="tabular truncate text-sm text-ink-muted"
             >{{ membre.phone }}</span>
 
             <!-- Un double part occupe deux positions distinctes : on les montre
@@ -223,7 +234,7 @@ useHead({ title: 'Membres — Tontine CI' })
       <!-- Ajout d'un membre géré -->
       <section
         v-if="estPresident && tontine?.status !== 'running'"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
       >
         <h2 class="font-semibold text-ink">
           Ajouter un membre
@@ -287,7 +298,7 @@ useHead({ title: 'Membres — Tontine CI' })
       <!-- Invitation -->
       <section
         v-if="estPresident"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
       >
         <h2 class="font-semibold text-ink">
           Inviter

@@ -69,7 +69,7 @@ export default {
   },
 
   card: {
-    root: { class: 'rounded-card border border-line bg-surface' },
+    root: { class: 'card-surface' },
     header: { class: 'px-4 pt-4' },
     body: { class: 'flex flex-col gap-3 p-4' },
     caption: { class: 'flex flex-col gap-1' },
@@ -83,8 +83,8 @@ export default {
     mask: { class: 'fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center' },
     // Mobile-first : feuille ancrée en bas sur téléphone, boîte centrée au-delà.
     root: {
-      class: `flex max-h-[90dvh] w-full flex-col rounded-t-card border border-line bg-surface `
-        + `shadow-xl sm:max-w-md sm:rounded-card`,
+      class: `flex max-h-[90dvh] w-full flex-col rounded-t-tile border border-line bg-surface `
+        + `shadow-float sm:max-w-md sm:rounded-tile`,
     },
     header: { class: 'flex items-start justify-between gap-4 border-b border-line p-4' },
     title: { class: 'text-lg font-semibold text-ink' },
@@ -108,8 +108,11 @@ export default {
   },
 
   progressbar: {
-    root: { class: 'h-2 w-full overflow-hidden rounded-full bg-surface-muted' },
-    value: { class: 'h-full rounded-full bg-brand transition-[width] duration-300' },
+    // Piste en creux et remplissage en dégradé marque → accent, repris du
+    // template : sur une carte blanche, un aplat vert plat se lit mal à 360 px,
+    // le dégradé donne le sens de la progression même très court.
+    root: { class: 'h-2 w-full overflow-hidden rounded-full bg-surface-sunken' },
+    value: { class: 'gradient-pot h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none' },
     label: { class: 'sr-only' },
   },
 

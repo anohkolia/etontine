@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { TontineEmoji } from '#shared/constants/tontine'
+import { TONTINE_EMOJIS } from '#shared/constants/tontine'
+
 /**
  * Wizard de création d'une tontine.
  *
@@ -18,6 +21,9 @@ const brouillon = useBrouillonStore()
 const session = useSessionStore()
 const { format } = useMoney()
 const { phrase, potParTour } = useSimulateur()
+
+/** Les huit icônes proposées. Le serveur valide contre la même liste. */
+const EMOJIS = TONTINE_EMOJIS
 const seuilAlerte = useRuntimeConfig().public.potAlertThreshold as number
 
 const ETAPES = [
@@ -32,6 +38,7 @@ const erreur = ref<string | null>(null)
 const form = reactive({
   access: 'private' as 'private' | 'open',
   name: '',
+  emoji: null as TontineEmoji | null,
   description: '',
   locality: '',
   shareAmount: 0,
@@ -87,6 +94,7 @@ async function charger() {
         const t = await $fetch<Record<string, unknown>>(`/api/v1/tontines/${brouillon.tontineId}`)
         Object.assign(form, {
           access: t.access, name: t.name, description: t.description ?? '',
+          emoji: t.emoji ?? null,
           locality: t.locality ?? '', shareAmount: t.shareAmount, frequency: t.frequency,
           startDate: t.startDate, rotationMode: t.rotationMode, feesBearer: t.feesBearer,
           penaltyAmount: t.penaltyAmount, penaltyPeriod: t.penaltyPeriod,
@@ -125,6 +133,7 @@ async function suivant() {
         body: {
           name: form.name,
           description: form.description || undefined,
+          emoji: form.emoji ?? undefined,
           locality: form.locality || undefined,
           access: form.access,
         },
@@ -154,6 +163,7 @@ function corpsDeLEtape(): Record<string, unknown> {
       return {
         name: form.name,
         description: form.description || null,
+        emoji: form.emoji,
         locality: form.locality || null,
         access: form.access,
       }
@@ -204,25 +214,45 @@ const peutAvancer = computed(() => {
   }
 })
 
-useHead({ title: 'Créer une tontine — Tontine CI' })
+// Pas de sous-titre d'étape ici : la barre segmentée et la ligne qui la suit
+// le disent déjà, et l'écrire trois fois sur le même écran n'aide personne.
+useEnTete(() => ({
+  titre: 'Nouvelle tontine',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Créer une tontine — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
+    <!-- Barre d'étapes segmentée, reprise du wizard du template : un segment
+         par étape, celui en cours et les précédents remplis. À 360 px, six
+         segments et six libellés tiennent sur deux lignes là où un `Stepper`
+         complet déborde. Le libellé long reste sous la barre pour les
+         lecteurs d'écran et pour les tests. -->
     <header class="flex flex-col gap-2">
-      <h1 class="text-xl font-bold text-ink">
-        Créer une tontine
-      </h1>
+      <ol class="flex items-center gap-1.5">
+        <li
+          v-for="(nom, i) in ETAPES"
+          :key="nom"
+          class="min-w-0 flex-1"
+        >
+          <span
+            class="block h-1.5 rounded-full transition-colors"
+            :class="i <= brouillon.etape ? 'bg-brand' : 'bg-surface-sunken'"
+          />
+          <span
+            class="mt-1 block truncate text-[10px] font-semibold"
+            :class="i <= brouillon.etape ? 'text-brand' : 'text-ink-subtle'"
+          >{{ nom }}</span>
+        </li>
+      </ol>
       <p
         class="text-sm text-ink-muted"
         data-testid="etape-courante"
       >
         Étape {{ brouillon.etape + 1 }} sur {{ ETAPES.length }} — {{ ETAPES[brouillon.etape] }}
       </p>
-      <ProgressBar
-        :value="Math.round(((brouillon.etape + 1) / ETAPES.length) * 100)"
-        :aria-label="`Étape ${brouillon.etape + 1} sur ${ETAPES.length}`"
-      />
     </header>
 
     <LoadingSkeleton
@@ -244,7 +274,7 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
         class="flex flex-col gap-3"
         data-testid="etape-acces"
       >
-        <label class="flex min-h-touch items-start gap-3 rounded-card border border-line bg-surface p-4">
+        <label class="flex min-h-touch items-start gap-3 card-surface p-4">
           <input
             v-model="form.access"
             type="radio"
@@ -263,7 +293,7 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
         <!-- Grisée si le palier manque, jamais masquée : l'organisateur doit
            savoir que l'option existe et ce qu'il faut pour y accéder. -->
         <label
-          class="flex min-h-touch items-start gap-3 rounded-card border border-line bg-surface p-4"
+          class="flex min-h-touch items-start gap-3 card-surface p-4"
           :class="peutOuvrir ? '' : 'opacity-60'"
         >
           <input
@@ -314,6 +344,30 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
             data-testid="champ-nom-tontine"
           />
         </label>
+        <!-- Sélecteur d'icône, repris du wizard du template. Sur une liste de
+             tontines, l'image se repère avant le nom — et c'est encore plus
+             vrai pour quelqu'un qui lit lentement (§7 du cahier). Il reste
+             facultatif : aucune tontine n'est bloquée faute d'image. -->
+        <fieldset class="flex flex-col gap-2">
+          <legend class="pb-1 text-sm font-medium text-ink-muted">
+            Image (facultatif)
+          </legend>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="e in EMOJIS"
+              :key="e"
+              type="button"
+              class="card-surface flex size-touch items-center justify-center text-xl transition-shadow"
+              :class="form.emoji === e ? 'ring-2 ring-brand' : 'hover:shadow-float'"
+              :aria-pressed="form.emoji === e"
+              :data-testid="`emoji-${e}`"
+              @click="form.emoji = form.emoji === e ? null : e"
+            >
+              {{ e }}
+            </button>
+          </div>
+        </fieldset>
+
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="lieu"
@@ -428,17 +482,37 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
             Numéro de collecte
           </legend>
 
+          <!-- L'état vide portait un texte impératif sans aucune action :
+               « Ajoute le numéro… » alors qu'aucun écran ne le permettait. Le
+               parcours s'arrêtait ici pour tout nouvel organisateur. Le
+               `redirect` ramène à l'étape en cours — le brouillon vit côté
+               serveur, mais revenir au tableau de bord ferait croire l'inverse. -->
           <EmptyState
             v-if="canauxVerifies.length === 0"
             title="Aucun numéro vérifié"
-            description="Ajoute le numéro sur lequel tu recevras les cotisations, puis vérifie-le par SMS."
+            description="Il te faut un numéro de collecte vérifié pour que tes membres puissent cotiser."
             icon="lucide:smartphone"
-          />
+          >
+            <template #action>
+              <NuxtLink
+                :to="`/app/profil/canaux?redirect=${encodeURIComponent($route.fullPath)}`"
+                class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control bg-brand px-5 font-semibold text-brand-ink"
+                data-testid="lien-ajouter-canal"
+              >
+                <Icon
+                  name="lucide:plus"
+                  size="1rem"
+                  aria-hidden="true"
+                />
+                Ajouter un numéro
+              </NuxtLink>
+            </template>
+          </EmptyState>
 
           <label
             v-for="canal in canauxVerifies"
             :key="canal.id"
-            class="flex min-h-touch items-center gap-3 rounded-card border border-line bg-surface p-3"
+            class="flex min-h-touch items-center gap-3 card-surface p-3"
           >
             <input
               v-model="form.collectionChannelIds"
@@ -452,6 +526,20 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
               <span class="block text-ink-muted">{{ canal.provider }} · {{ canal.msisdn }}</span>
             </span>
           </label>
+
+          <NuxtLink
+            v-if="canauxVerifies.length > 0"
+            :to="`/app/profil/canaux?redirect=${encodeURIComponent($route.fullPath)}`"
+            class="min-h-touch inline-flex items-center gap-1.5 text-sm font-semibold text-brand"
+            data-testid="lien-ajouter-canal"
+          >
+            <Icon
+              name="lucide:plus"
+              size="1rem"
+              aria-hidden="true"
+            />
+            Ajouter un autre numéro
+          </NuxtLink>
         </fieldset>
       </section>
 
@@ -461,7 +549,7 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
         class="flex flex-col gap-3"
         data-testid="etape-ordre"
       >
-        <label class="flex min-h-touch items-start gap-3 rounded-card border border-line bg-surface p-4">
+        <label class="flex min-h-touch items-start gap-3 card-surface p-4">
           <input
             v-model="form.rotationMode"
             type="radio"
@@ -476,7 +564,7 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
             </span>
           </span>
         </label>
-        <label class="flex min-h-touch items-start gap-3 rounded-card border border-line bg-surface p-4">
+        <label class="flex min-h-touch items-start gap-3 card-surface p-4">
           <input
             v-model="form.rotationMode"
             type="radio"
@@ -581,7 +669,7 @@ useHead({ title: 'Créer une tontine — Tontine CI' })
         class="flex flex-col gap-3"
         data-testid="etape-recapitulatif"
       >
-        <div class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
+        <div class="flex flex-col gap-2 card-surface p-4">
           <p class="text-lg font-semibold text-ink">
             {{ form.name }}
           </p>

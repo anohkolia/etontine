@@ -33,7 +33,7 @@ const urlImage = computed(() =>
 )
 
 useHead(() => ({
-  title: recu.value ? `Reçu — ${recu.value.tontineName}` : 'Reçu — Tontine CI',
+  title: recu.value ? `Reçu — ${recu.value.tontineName}` : 'Reçu — eTontine',
   // Un reçu ne doit pas se retrouver indexé par un moteur de recherche.
   meta: [{ name: 'robots', content: 'noindex, nofollow' }],
 }))
@@ -72,7 +72,7 @@ useHead(() => ({
           Reçu de cotisation
         </h1>
 
-        <div class="flex flex-col gap-4 rounded-card border border-line bg-surface p-5">
+        <div class="flex flex-col gap-4 card-surface p-5">
           <AmountDisplay
             :amount="recu.amount"
             size="xl"

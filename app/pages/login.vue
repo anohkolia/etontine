@@ -123,21 +123,48 @@ function changerDeNumero() {
   clearInterval(minuterie)
 }
 
-useHead({ title: 'Connexion — Tontine CI' })
+useHead({ title: 'Connexion — eTontine' })
 </script>
 
 <template>
   <div class="flex min-h-dvh flex-col bg-surface">
     <OfflineBanner />
 
-    <main class="mx-auto flex w-full max-w-sm flex-1 flex-col gap-6 px-6 py-10">
+    <main class="mx-auto flex w-full max-w-sm flex-1 flex-col gap-6 px-6 py-8">
+      <NuxtLink
+        to="/"
+        class="min-h-touch inline-flex items-center gap-1 self-start text-xs font-semibold text-ink-muted hover:text-ink"
+        data-testid="lien-accueil"
+      >
+        <Icon
+          name="lucide:arrow-left"
+          size="0.875rem"
+          aria-hidden="true"
+        />
+        Retour à l’accueil
+      </NuxtLink>
+
+      <!-- Deux segments pour deux étapes, repris du template : le membre voit
+           où il en est sans avoir à lire. -->
+      <ol
+        class="flex items-center gap-2"
+        aria-hidden="true"
+      >
+        <li class="h-1.5 flex-1 rounded-full bg-brand" />
+        <li
+          class="h-1.5 flex-1 rounded-full transition-colors"
+          :class="etape === 'code' ? 'bg-brand' : 'bg-surface-sunken'"
+        />
+      </ol>
+
       <header class="flex flex-col gap-2">
         <h1 class="text-2xl font-bold text-ink">
-          {{ etape === 'numero' ? 'Ton numéro' : 'Ton code' }}
+          {{ etape === 'numero' ? 'Ton numéro, c’est tout' : 'Ton code' }}
         </h1>
         <p class="text-ink-muted">
           <template v-if="etape === 'numero'">
-            On t’envoie un code à six chiffres par SMS.
+            On t’envoie un code à six chiffres par SMS. Pas de mot de passe à
+            retenir.
           </template>
           <template v-else>
             Code envoyé au <span class="font-medium text-ink">{{ numeroAffiche }}</span>.
@@ -156,17 +183,24 @@ useHead({ title: 'Connexion — Tontine CI' })
           for="telephone"
         >
           Numéro de téléphone
-          <InputText
-            id="telephone"
-            :value="numeroAffiche"
-            inputmode="tel"
-            autocomplete="tel"
-            placeholder="07 07 12 34 56"
-            :aria-describedby="erreur ? 'erreur-login' : undefined"
-            class="text-lg tracking-wider tabular-nums"
-            data-testid="champ-telephone"
-            @input="onSaisieNumero"
-          />
+          <!-- L'indicatif est affiché, pas saisi : le membre tape son numéro
+               comme il le donne à l'oral, et voit que le pays est le bon. -->
+          <span class="flex items-stretch gap-2">
+            <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface-muted px-3 text-base font-semibold text-ink">
+              +225
+            </span>
+            <InputText
+              id="telephone"
+              :value="numeroAffiche"
+              inputmode="tel"
+              autocomplete="tel"
+              placeholder="07 07 12 34 56"
+              :aria-describedby="erreur ? 'erreur-login' : undefined"
+              class="text-lg tracking-wider tabular-nums"
+              data-testid="champ-telephone"
+              @input="onSaisieNumero"
+            />
+          </span>
         </label>
         <p class="text-sm text-ink-subtle">
           Un numéro ivoirien : 01, 05 ou 07.

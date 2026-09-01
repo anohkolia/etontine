@@ -11,6 +11,11 @@ export default withNuxt(
       'playwright-report/**',
       'test-results/**',
       'server/db/migrations/**',
+      // Maquette de référence déposée dans le dépôt (React/Vite, généré par
+      // Lovable). Elle sert de source d'inspiration visuelle, pas de code de
+      // production : la faire passer par la configuration ESLint de
+      // l'application ne corrigerait rien et masquerait nos propres erreurs.
+      'template/**',
     ],
   },
   {

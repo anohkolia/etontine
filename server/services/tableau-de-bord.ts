@@ -3,6 +3,7 @@ import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, paymentDeclarations, payouts, rounds, shares, tontines, users,
 } from '../db/schema.ts'
+import { etatDuTour } from './tours.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -20,6 +21,8 @@ export interface ATraiter {
 export interface TontineDuTableau {
   id: string
   name: string
+  /** Icône choisie par le président, ou `null` — la carte retombe sur l'initiale. */
+  emoji: string | null
   locality: string | null
   status: string
   myRole: string
@@ -92,21 +95,18 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
     let beneficiaryName: string | null = null
 
     if (tourCourant) {
-      const toutes = db
-        .select()
-        .from(contributions)
-        .where(eq(contributions.roundId, tourCourant.id))
-        .all()
+      // Le calcul vit dans `services/tours.ts` : l'écran de détail d'une
+      // tontine affiche les mêmes chiffres, et deux implémentations d'un même
+      // calcul d'argent finissent toujours par diverger.
+      const etat = etatDuTour(db, tourCourant.id, a.membershipId)
+      const miennes = etat.miennes
 
-      potCollected = toutes.reduce((n, c) => n + c.confirmedAmount, 0)
-
-      // Un membre à double part a plusieurs cotisations : on les additionne.
-      const miennes = toutes.filter(c => c.membershipId === a.membershipId)
-      myRemaining = miennes.reduce((n, c) => n + Math.max(0, c.expectedAmount - c.confirmedAmount), 0)
+      potCollected = etat.potCollected
+      myRemaining = etat.myRemaining
+      myContributionStatus = etat.myContributionStatus
 
       const enRetard = miennes.filter(c => c.status === 'late')
       const dues = miennes.filter(c => c.status === 'due')
-      myContributionStatus = miennes[0]?.status ?? null
 
       if (enRetard.length > 0) {
         aTraiter.push({
@@ -213,6 +213,7 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
     resume.push({
       id: a.tontine.id,
       name: a.tontine.name,
+      emoji: a.tontine.emoji,
       locality: a.tontine.locality,
       status: a.tontine.status,
       myRole: a.role,

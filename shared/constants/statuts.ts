@@ -2,6 +2,7 @@ import type { z } from 'zod'
 import type {
   contributionStatus,
   membershipStatus,
+  paymentChannel,
   payoutStatus,
   roundStatus,
   tontineStatus,
@@ -131,3 +132,34 @@ export const STATUS_ICONS: readonly string[] = [
     ),
   ),
 ].sort()
+
+/**
+ * Canaux de paiement — mot, icône, couleurs.
+ *
+ * Repris des pastilles d'opérateur du template, avec une correction : le
+ * template pose du blanc sur l'orange d'Orange Money (3.12:1) et du bleu nuit
+ * sur le jaune MTN (1.53:1). Une pastille de canal se lit à côté d'un montant,
+ * dans un registre qu'un membre relit pour vérifier un envoi — elle doit être
+ * lisible, pas décorative. D'où le couple fond pâle / encre foncée, comme
+ * pour les statuts, vérifié par `tests/unit/contraste.spec.ts`.
+ *
+ * Les couleurs d'opérateur restent reconnaissables (le bleu Wave, l'orange
+ * d'Orange, le jaune MTN) sans jamais porter l'information seules : le nom du
+ * canal est toujours écrit à côté (règle 10).
+ */
+export const PAYMENT_CHANNEL: Presentation<z.infer<typeof paymentChannel>> = {
+  wave: { label: 'Wave', icon: 'lucide:waves', surface: 'bg-wave-surface', ink: 'text-wave-ink' },
+  orange: { label: 'Orange Money', icon: 'lucide:smartphone', surface: 'bg-orange-surface', ink: 'text-orange-ink' },
+  mtn: { label: 'MTN MoMo', icon: 'lucide:smartphone', surface: 'bg-mtn-surface', ink: 'text-mtn-ink' },
+  moov: { label: 'Moov Money', icon: 'lucide:smartphone', surface: 'bg-moov-surface', ink: 'text-moov-ink' },
+  cash: { label: 'Espèces', icon: 'lucide:banknote', surface: 'bg-cash-surface', ink: 'text-cash-ink' },
+}
+
+/** Présentation d'un canal. Lève sur un canal inconnu, comme les statuts. */
+export function channelPresentation(
+  channel: z.infer<typeof paymentChannel>,
+): StatusPresentation {
+  const presentation = PAYMENT_CHANNEL[channel]
+  if (!presentation) throw new RangeError(`Canal inconnu : ${channel}`)
+  return presentation
+}

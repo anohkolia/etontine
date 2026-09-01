@@ -96,7 +96,7 @@ const { copie, copier } = useCopie()
         v-if="qrOuvert"
         :src="qrUrl"
         :alt="`QR code du lien d’invitation à ${tontineName}`"
-        class="mt-2 w-full max-w-[280px] rounded-card border border-line bg-surface p-2"
+        class="mt-2 w-full max-w-[280px] card-surface p-2"
         data-testid="image-qr"
       >
     </div>

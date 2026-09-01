@@ -100,15 +100,15 @@ async function definirPin() {
   }
 }
 
-useHead({ title: 'Mon profil — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Mon profil',
+  sousTitre: session.user?.phone ?? undefined,
+}))
+useHead({ title: 'Mon profil — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
-    <h1 class="text-xl font-bold text-ink">
-      Mon profil
-    </h1>
-
     <LoadingSkeleton
       v-if="etat === 'chargement'"
       variant="card"
@@ -136,8 +136,60 @@ useHead({ title: 'Mon profil — Tontine CI' })
         Renseigne ton nom complet pour continuer.
       </p>
 
+      <!-- Carte d'identité, reprise de l'en-tête de profil du template.
+           Le template y place un score de confiance sur 1000 et trois badges
+           (« Payeur Or », « Doyen Tontinier ») : le §6 module 11 du cahier les
+           supprime explicitement — une note chiffrée sur une personne qui
+           épargne constitue un fichier de scoring sans cadre réglementaire, et
+           les paliers « Débutant / Expert » y sont nommément écartés. La
+           vérification d'identité prend leur place : c'est un fait, pas une
+           note, et elle conditionne réellement ce que le membre peut faire. -->
+      <section class="card-surface flex items-center gap-4 p-5">
+        <AvatarInitiales
+          :prenom="session.user?.firstName"
+          :nom="session.user?.lastName"
+          size="lg"
+          solide
+        />
+        <div class="min-w-0">
+          <h2 class="truncate text-lg font-bold text-ink">
+            {{ [session.user?.firstName, session.user?.lastName].filter(Boolean).join(' ') || 'Profil à compléter' }}
+          </h2>
+          <p class="tabular truncate text-sm text-ink-muted">
+            {{ session.user?.phone }}
+          </p>
+          <p class="mt-1.5">
+            <NuxtLink
+              v-if="(session.user?.kycLevel ?? 0) < 2"
+              to="/app/profil/identite"
+              class="inline-flex items-center gap-1.5 rounded-full bg-late-surface px-2.5 py-1 text-xs font-semibold text-late-ink"
+              data-testid="etat-identite"
+            >
+              <Icon
+                name="lucide:shield-alert"
+                size="0.875rem"
+                aria-hidden="true"
+              />
+              Identité à vérifier
+            </NuxtLink>
+            <span
+              v-else
+              class="inline-flex items-center gap-1.5 rounded-full bg-confirmed-surface px-2.5 py-1 text-xs font-semibold text-confirmed-ink"
+              data-testid="etat-identite"
+            >
+              <Icon
+                name="lucide:shield-check"
+                size="0.875rem"
+                aria-hidden="true"
+              />
+              Identité vérifiée
+            </span>
+          </p>
+        </div>
+      </section>
+
       <!-- Identité -->
-      <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
           Identité
         </h2>
@@ -201,7 +253,7 @@ useHead({ title: 'Mon profil — Tontine CI' })
       </section>
 
       <!-- Consentements : deux cases séparées, jamais une seule -->
-      <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
           Mes choix
         </h2>
@@ -241,7 +293,7 @@ useHead({ title: 'Mon profil — Tontine CI' })
       </section>
 
       <!-- Verrouillage -->
-      <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
           Verrouillage
         </h2>
@@ -305,6 +357,19 @@ useHead({ title: 'Mon profil — Tontine CI' })
       </section>
 
       <NuxtLink
+        to="/app/profil/canaux"
+        class="min-h-touch flex items-center gap-2 text-sm text-brand underline underline-offset-4"
+        data-testid="lien-canaux"
+      >
+        <Icon
+          name="lucide:smartphone"
+          size="1rem"
+          aria-hidden="true"
+        />
+        Mes numéros de collecte
+      </NuxtLink>
+
+      <NuxtLink
         to="/app/profil/donnees"
         class="min-h-touch flex items-center gap-2 text-sm text-brand underline underline-offset-4"
         data-testid="lien-donnees"
@@ -319,10 +384,15 @@ useHead({ title: 'Mon profil — Tontine CI' })
 
       <button
         type="button"
-        class="min-h-touch text-left text-sm text-ink-muted underline underline-offset-4"
+        class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-surface px-5 text-sm font-semibold text-ink"
         data-testid="bouton-deconnexion"
         @click="session.deconnecter()"
       >
+        <Icon
+          name="lucide:log-out"
+          size="1rem"
+          aria-hidden="true"
+        />
         Me déconnecter
       </button>
     </template>

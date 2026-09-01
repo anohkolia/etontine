@@ -196,12 +196,12 @@ useHead({ title: 'Dossier — Administration' })
             v-if="dossier.hasDocument"
             :src="`/api/dossiers/${userId}/piece?type=document`"
             alt="Pièce d’identité déposée"
-            class="w-full rounded-card border border-line bg-surface"
+            class="w-full card-surface"
             data-testid="piece-document"
           >
           <p
             v-else
-            class="rounded-card border border-line bg-surface p-4 text-sm text-ink-subtle"
+            class="card-surface p-4 text-sm text-ink-subtle"
             data-testid="document-absent"
           >
             Aucune pièce déposée.
@@ -216,12 +216,12 @@ useHead({ title: 'Dossier — Administration' })
             v-if="dossier.hasSelfie"
             :src="`/api/dossiers/${userId}/piece?type=selfie`"
             alt="Selfie déposé"
-            class="w-full rounded-card border border-line bg-surface"
+            class="w-full card-surface"
             data-testid="piece-selfie"
           >
           <p
             v-else
-            class="rounded-card border border-line bg-surface p-4 text-sm text-ink-subtle"
+            class="card-surface p-4 text-sm text-ink-subtle"
             data-testid="selfie-absent"
           >
             Aucun selfie déposé.
@@ -241,7 +241,7 @@ useHead({ title: 'Dossier — Administration' })
       <!-- Décision -->
       <section
         v-if="enAttente"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
       >
         <h2 class="font-semibold text-ink">
           Décision
@@ -307,7 +307,7 @@ useHead({ title: 'Dossier — Administration' })
 
       <p
         v-else-if="dossier.reviewedAt"
-        class="rounded-card border border-line bg-surface p-4 text-sm text-ink-muted"
+        class="card-surface p-4 text-sm text-ink-muted"
         data-testid="deja-traite"
       >
         Ce dossier a été traité le {{ formatDate(dossier.reviewedAt) }}.

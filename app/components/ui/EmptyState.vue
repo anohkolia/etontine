@@ -19,7 +19,7 @@ withDefaults(defineProps<{
 
 <template>
   <div
-    class="flex flex-col items-center gap-3 rounded-card border border-line bg-surface px-6 py-10 text-center"
+    class="flex flex-col items-center gap-3 card-surface px-6 py-10 text-center"
     data-testid="empty-state"
   >
     <Icon

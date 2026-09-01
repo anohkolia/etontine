@@ -48,14 +48,16 @@ function marquerEnvoye(membershipId: string) {
 }
 
 onMounted(charger)
-useHead({ title: 'Relancer — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Relancer',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Relancer — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Relancer
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <!-- Dit avant tout le reste, pas en petites lettres au bas de l'écran. -->
     <p
@@ -102,7 +104,7 @@ useHead({ title: 'Relancer — Tontine CI' })
       <li
         v-for="relance in relances"
         :key="relance.membershipId"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
         :data-testid="`relance-${relance.membershipId}`"
       >
         <div class="flex items-start justify-between gap-3">

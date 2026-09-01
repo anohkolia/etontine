@@ -21,6 +21,12 @@
  * charge mentale doit être la plus basse — et si l'estimation était fausse, il
  * enverrait le mauvais montant.
  */
+import type { paymentChannel } from '#shared/schemas'
+import type { z } from 'zod'
+import { channelPresentation, PAYMENT_CHANNEL } from '#shared/constants/statuts'
+
+const CANAUX_CONNUS = new Set(Object.keys(PAYMENT_CHANNEL))
+
 interface Canal {
   id: string
   provider: string
@@ -42,11 +48,24 @@ const { copie: copieRef, copier: copierRef } = useCopie()
 const canalChoisi = ref(props.channels[0]?.id ?? '')
 const canal = computed(() => props.channels.find(c => c.id === canalChoisi.value) ?? props.channels[0])
 
-const NOM_OPERATEUR: Record<string, string> = {
-  wave: 'Wave',
-  orange: 'Orange Money',
-  mtn: 'MTN MoMo',
-  moov: 'Moov Money',
+/**
+ * Le nom de l'opérateur vient de la table partagée des canaux, et non d'une
+ * seconde liste tenue ici : `<CanalPill>`, le registre et cet écran doivent
+ * écrire « Orange Money » exactement pareil.
+ */
+function nomOperateur(provider: string): string {
+  const canal = asCanal(provider)
+  return canal ? channelPresentation(canal).label : provider
+}
+
+/**
+ * Restreint un `provider` (chaîne libre venue du serveur) au type du canal.
+ * Le transtypage vit ici plutôt que dans le gabarit : une assertion de type
+ * dans un `<template>` exige que le schéma Zod soit importé comme *valeur*,
+ * ce qui embarquerait Zod dans le lot client pour une simple étiquette.
+ */
+function asCanal(provider: string): z.infer<typeof paymentChannel> | null {
+  return CANAUX_CONNUS.has(provider) ? provider as z.infer<typeof paymentChannel> : null
 }
 
 /** Un canal changé il y a moins de 48 h est gelé : on le dit franchement. */
@@ -67,28 +86,44 @@ const gele = computed(() => {
       <legend class="pb-1 text-sm font-medium text-ink-muted">
         Par quel service envoies-tu ?
       </legend>
+      <!-- Cartes sélectionnables plutôt que boutons radio nus, repris de
+           l'écran de paiement du template : la zone cliquable fait toute la
+           carte, et le titulaire s'affiche dès le choix — c'est lui que le
+           membre doit reconnaître. Le bouton radio reste dans le balisage,
+           masqué visuellement : il porte le clavier et le lecteur d'écran. -->
       <label
         v-for="c in channels"
         :key="c.id"
-        class="flex min-h-touch items-center gap-3 rounded-card border border-line bg-surface p-3"
+        class="card-surface flex min-h-touch cursor-pointer items-center gap-3 p-3 transition-shadow"
+        :class="canalChoisi === c.id ? 'ring-2 ring-brand' : 'hover:shadow-float'"
       >
         <input
           v-model="canalChoisi"
           type="radio"
           :value="c.id"
-          class="size-5 shrink-0 accent-brand"
+          class="peer sr-only"
           :data-testid="`choix-canal-${c.provider}`"
         >
-        <span class="text-sm font-medium text-ink">
-          {{ NOM_OPERATEUR[c.provider] ?? c.provider }}
+        <CanalPill
+          v-if="asCanal(c.provider)"
+          :canal="asCanal(c.provider)!"
+          compact
+        />
+        <span class="min-w-0 flex-1 truncate text-sm text-ink-muted">
+          {{ c.holderName }}
         </span>
+        <span
+          class="size-5 shrink-0 rounded-full border-2 transition-colors"
+          :class="canalChoisi === c.id ? 'border-brand bg-brand' : 'border-line-strong'"
+          aria-hidden="true"
+        />
       </label>
     </fieldset>
 
     <template v-if="canal">
       <!-- Montant. Rien d'autre : pas d'estimation de frais, pas de total
            approximatif. C'est ce chiffre-là que le membre doit taper. -->
-      <div class="flex flex-col gap-1 rounded-card border border-line bg-surface p-4">
+      <div class="card-surface flex flex-col gap-1 p-4">
         <p class="text-sm text-ink-muted">
           Montant à envoyer
         </p>
@@ -100,7 +135,7 @@ const gele = computed(() => {
       </div>
 
       <!-- Titulaire et numéro -->
-      <div class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <div class="card-surface flex flex-col gap-3 p-4">
         <div class="flex flex-col gap-1">
           <p class="text-sm text-ink-muted">
             Au nom de
@@ -114,7 +149,7 @@ const gele = computed(() => {
             {{ canal.holderName }}
           </p>
           <p class="text-sm text-ink-subtle">
-            Vérifie que ce nom s’affiche bien dans {{ NOM_OPERATEUR[canal.provider] ?? canal.provider }}
+            Vérifie que ce nom s’affiche bien dans {{ nomOperateur(canal.provider) }}
             avant de valider ton envoi.
           </p>
         </div>
@@ -162,7 +197,7 @@ const gele = computed(() => {
       </div>
 
       <!-- Référence -->
-      <div class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
+      <div class="card-surface flex flex-col gap-2 p-4">
         <p class="text-sm text-ink-muted">
           Référence à mettre en commentaire
         </p>
@@ -203,7 +238,7 @@ const gele = computed(() => {
           size="1rem"
           aria-hidden="true"
         />
-        Ouvrir {{ NOM_OPERATEUR[canal.provider] ?? canal.provider }}
+        Ouvrir {{ nomOperateur(canal.provider) }}
       </a>
     </template>
   </div>

@@ -213,14 +213,16 @@ async function declarer() {
 }
 
 onMounted(charger)
-useHead({ title: 'Cotiser — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Cotiser',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Cotiser — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Cotiser
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -288,7 +290,7 @@ useHead({ title: 'Cotiser — Tontine CI' })
                 <li
                   v-for="cotisation in cotisations"
                   :key="cotisation.id"
-                  class="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3"
+                  class="flex items-center justify-between gap-3 card-surface p-3"
                   :data-testid="`cotisation-${cotisation.id}`"
                 >
                   <div class="flex flex-col gap-1">

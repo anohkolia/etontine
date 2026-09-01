@@ -48,15 +48,16 @@ async function envoyer() {
   }
 }
 
-useHead({ title: 'Vérifier mon identité — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Vérifier mon identité',
+  sousTitre: 'Palier 2',
+  retour: { to: '/app/profil', label: 'Mon profil' },
+}))
+useHead({ title: 'Vérifier mon identité — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Vérifier mon identité
-    </h1>
-
     <p class="text-sm text-ink-muted">
       Une pièce d’identité et un selfie. C’est ce qui permet de publier une
       tontine : les membres doivent savoir à qui ils confient leur argent.

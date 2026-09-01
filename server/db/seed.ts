@@ -129,6 +129,7 @@ function semer() {
     id: ID.tontine,
     name: 'Tontine des tantines',
     description: 'Tontine mensuelle du quartier.',
+    emoji: '🧺',
     locality: 'Abobo',
     access: 'private',
     shareAmount: MONTANT_PART,

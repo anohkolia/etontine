@@ -130,14 +130,16 @@ async function toutConfirmer() {
 }
 
 onMounted(charger)
-useHead({ title: 'À confirmer — Tontine CI' })
+useEnTete(() => ({
+  titre: 'À confirmer',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'À confirmer — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      À confirmer
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -166,7 +168,7 @@ useHead({ title: 'À confirmer — Tontine CI' })
         <li
           v-for="item in items"
           :key="item.declarationId"
-          class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+          class="flex flex-col gap-3 card-surface p-4"
           :data-testid="`declaration-${item.declarationId}`"
         >
           <div class="flex items-start justify-between gap-3">

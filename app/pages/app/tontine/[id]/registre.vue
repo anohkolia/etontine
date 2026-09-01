@@ -11,6 +11,10 @@
  * n'importe qui peut vérifier que rien n'a été retouché, sans avoir à croire
  * quiconque sur parole.
  */
+import type { paymentChannel } from '#shared/schemas'
+import type { z } from 'zod'
+import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
 
 const route = useRoute()
@@ -56,6 +60,8 @@ const ICONE: Record<string, string> = {
   cash_unconfirmed: 'lucide:triangle-alert',
 }
 
+const CANAUX_CONNUS = new Set(Object.keys(PAYMENT_CHANNEL))
+
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const ecritures = ref<Ecriture[]>([])
 const erreur = ref<string | null>(null)
@@ -74,6 +80,21 @@ const visibles = computed(() =>
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
     ?? 'Impossible de joindre le serveur.'
+}
+
+/**
+ * Le canal porté par une écriture, s'il y en a un.
+ *
+ * Le registre des écritures est volontairement générique côté serveur : le
+ * `payload` est un objet libre, propre à chaque type. On y lit le canal quand
+ * il existe, et **seulement** s'il fait partie de l'énumération partagée — une
+ * valeur inconnue ne doit pas produire une pastille sans couleur ni mot.
+ */
+function canalDe(ecriture: Ecriture): z.infer<typeof paymentChannel> | null {
+  const valeur = ecriture.payload.channel
+  return typeof valeur === 'string' && CANAUX_CONNUS.has(valeur)
+    ? valeur as z.infer<typeof paymentChannel>
+    : null
 }
 
 /** Le montant porté par une écriture, s'il y en a un. */
@@ -120,14 +141,16 @@ async function verifier() {
 }
 
 onMounted(charger)
-useHead({ title: 'Registre — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Registre',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Registre — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Registre
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -150,7 +173,7 @@ useHead({ title: 'Registre — Tontine CI' })
 
     <template v-else>
       <!-- Contrôle d'intégrité, ouvert à tous -->
-      <section class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
+      <section class="flex flex-col gap-2 card-surface p-4">
         <h2 class="font-semibold text-ink">
           Contrôle du registre
         </h2>
@@ -230,30 +253,43 @@ useHead({ title: 'Registre — Tontine CI' })
         <li
           v-for="ecriture in visibles"
           :key="ecriture.id"
-          class="flex items-start gap-3 rounded-card border border-line bg-surface p-3"
+          class="card-surface flex items-start gap-3 p-3"
           :data-testid="`ecriture-${ecriture.position}`"
         >
-          <Icon
-            :name="ICONE[ecriture.type] ?? 'lucide:circle-dashed'"
-            size="1.25rem"
-            class="mt-0.5 shrink-0 text-ink-subtle"
+          <span
+            class="flex size-9 shrink-0 items-center justify-center rounded-control bg-surface-muted text-ink-muted"
             aria-hidden="true"
-          />
+          >
+            <Icon
+              :name="ICONE[ecriture.type] ?? 'lucide:circle-dashed'"
+              size="1.25rem"
+            />
+          </span>
 
-          <div class="flex flex-1 flex-col gap-1">
-            <span class="font-medium text-ink">
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            <span class="font-semibold text-ink">
               {{ LIBELLE[ecriture.type] ?? ecriture.type }}
             </span>
-            <span class="text-sm text-ink-muted">
+            <span class="tabular text-sm text-ink-muted">
               {{ formatDate(ecriture.serverTimestamp) }} · écriture n° {{ ecriture.position }}
             </span>
           </div>
 
-          <AmountDisplay
-            v-if="montantDe(ecriture) !== null"
-            :amount="montantDe(ecriture)"
-            size="sm"
-          />
+          <!-- Montant et canal alignés à droite, comme dans le registre du
+               template : c'est la colonne que l'œil balaie pour retrouver un
+               envoi. -->
+          <div class="flex shrink-0 flex-col items-end gap-1">
+            <AmountDisplay
+              v-if="montantDe(ecriture) !== null"
+              :amount="montantDe(ecriture)"
+              size="sm"
+            />
+            <CanalPill
+              v-if="canalDe(ecriture)"
+              :canal="canalDe(ecriture)!"
+              compact
+            />
+          </div>
         </li>
       </ul>
 

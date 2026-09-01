@@ -34,6 +34,7 @@ Périmètre MVP : **tontine rotative uniquement**. Les autres modèles restent h
 |:--|:--|:--|
 | `id` | uuid | |
 | `name`, `description`, `avatar_url`, `locality` | | |
+| `emoji` | text? | Icône choisie dans une liste fermée (`shared/constants/tontine.ts`). Purement présentationnel : modifiable même tontine lancée |
 | `access` | enum `private\|open` | `open` exige `kyc_level >= 2` du créateur |
 | `share_amount` | integer | FCFA, entier |
 | `frequency` | enum `daily\|weekly\|biweekly\|monthly` | |

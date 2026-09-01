@@ -168,3 +168,43 @@ export function toursDe(db: Db, tontineId: string) {
     .orderBy(asc(rounds.index))
     .all()
 }
+
+/**
+ * Où en est un tour, pour un membre donné.
+ *
+ * Le calcul vivait en clair dans `tableau-de-bord.ts`. L'écran de détail d'une
+ * tontine a besoin des mêmes chiffres : le recopier serait deux
+ * implémentations du même calcul d'argent, et rien ne garantirait qu'elles
+ * disent la même chose au même moment. Elles vivent donc ici, une fois.
+ *
+ * `miennes` est renvoyé avec le reste parce que le tableau de bord s'en sert
+ * pour construire sa liste « à traiter » — le lui faire relire séparément
+ * doublerait la requête.
+ */
+export interface EtatDuTour {
+  /** Somme des montants **confirmés** du tour. Une déclaration ne compte pas. */
+  potCollected: number
+  /** Ce qu'il reste à verser pour ce membre, toutes ses parts additionnées. */
+  myRemaining: number
+  myContributionStatus: string | null
+  miennes: Array<typeof contributions.$inferSelect>
+}
+
+export function etatDuTour(db: Db, roundId: string, membershipId: string): EtatDuTour {
+  const toutes = db
+    .select()
+    .from(contributions)
+    .where(eq(contributions.roundId, roundId))
+    .all()
+
+  // Un membre à double part a plusieurs cotisations sur le même tour : on les
+  // additionne, on n'en prend pas une au hasard.
+  const miennes = toutes.filter(c => c.membershipId === membershipId)
+
+  return {
+    potCollected: toutes.reduce((n, c) => n + c.confirmedAmount, 0),
+    myRemaining: miennes.reduce((n, c) => n + Math.max(0, c.expectedAmount - c.confirmedAmount), 0),
+    myContributionStatus: miennes[0]?.status ?? null,
+    miennes,
+  }
+}

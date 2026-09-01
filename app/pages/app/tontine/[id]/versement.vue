@@ -129,14 +129,16 @@ onMounted(async () => {
   await charger()
 })
 
-useHead({ title: 'Verser le pot — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Verser le pot',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Verser le pot — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Verser le pot
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -159,7 +161,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
 
     <section
       v-else-if="termine && !versement"
-      class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4"
+      class="flex flex-col gap-2 card-surface p-4"
       data-testid="versement-termine"
     >
       <StatusBadge
@@ -173,7 +175,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
 
     <template v-else-if="versement">
       <!-- Pot constitué face au pot attendu -->
-      <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <section class="flex flex-col gap-3 card-surface p-4">
         <h2 class="font-semibold text-ink">
           Tour {{ versement.roundIndex }}
         </h2>
@@ -231,7 +233,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
       </section>
 
       <!-- Bénéficiaire -->
-      <section class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
+      <section class="flex flex-col gap-2 card-surface p-4">
         <h2 class="font-semibold text-ink">
           Qui prend la main
         </h2>
@@ -277,7 +279,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
       <!-- Étape 1 — préparation -->
       <section
         v-if="!versement.payout && estBureau"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-preparation"
       >
         <h2 class="font-semibold text-ink">
@@ -344,7 +346,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
       <!-- Étape 2 — contre-validation -->
       <section
         v-if="versement.payout?.status === 'prepared' && versement.counterValidationRequired"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-contre-validation"
       >
         <h2 class="font-semibold text-ink">
@@ -378,7 +380,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
         v-if="estBureau && versement.payout
           && (versement.payout.status === 'counter_validated'
             || (versement.payout.status === 'prepared' && !versement.counterValidationRequired))"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-declaration-versement"
       >
         <h2 class="font-semibold text-ink">
@@ -434,7 +436,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
       <!-- Étape 4 — accusé de réception -->
       <section
         v-if="versement.payout?.status === 'declared'"
-        class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-accuse"
       >
         <h2 class="font-semibold text-ink">
@@ -482,7 +484,7 @@ useHead({ title: 'Verser le pot — Tontine CI' })
 
       <section
         v-if="termine || versement.payout?.status === 'acknowledged'"
-        class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4"
+        class="flex flex-col gap-2 card-surface p-4"
         data-testid="versement-termine"
       >
         <StatusBadge

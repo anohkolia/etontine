@@ -1,4 +1,4 @@
-# CLAUDE.md — Règles du projet Tontine CI
+# CLAUDE.md — Règles du projet eTontine
 
 Application de gestion de tontine rotative pour la Côte d'Ivoire.
 Nuxt 4 fullstack (client + routes serveur Nitro), PWA mobile-first.

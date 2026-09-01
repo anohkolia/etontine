@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TONTINE_EMOJIS } from '../constants/tontine.ts'
 
 /* ------------------------------------------------------------------ */
 /* Primitives métier                                                   */
@@ -139,10 +140,25 @@ export const collectionChannelInput = z.object({
 /* Tontine                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Icône de tontine — **liste fermée**, pas de saisie libre.
+ *
+ * Un champ de texte libre accepterait n'importe quel caractère Unicode :
+ * caractères de contrôle bidirectionnels, séquences de combinaison sans fin,
+ * ou simplement une chaîne de trois cents octets qui casserait toutes les
+ * listes. Une énumération de huit valeurs rend la question sans objet, et
+ * l'écran de sélection devient une grille de boutons plutôt qu'un clavier.
+ *
+ * La liste elle-même vit dans `shared/constants/tontine.ts` : le wizard doit
+ * pouvoir l'afficher sans importer Zod dans le lot client.
+ */
+export const tontineEmoji = z.enum(TONTINE_EMOJIS)
+
 export const tontineDraftInput = z.object({
   name: z.string().trim().min(3).max(60),
   description: z.string().trim().max(500).optional(),
   avatarUrl: z.string().url().optional(),
+  emoji: tontineEmoji.optional(),
   locality: z.string().trim().max(80).optional(),
   access: tontineAccess.default('private'),
 })

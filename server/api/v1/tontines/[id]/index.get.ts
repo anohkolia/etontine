@@ -6,6 +6,7 @@ import { canauxDeTontine } from '../../../../services/canaux.ts'
 import {
   blocagesPublication, membresActifs, potAttendu, totalParts, tourCourant,
 } from '../../../../services/tontines.ts'
+import { etatDuTour } from '../../../../services/tours.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
 
@@ -20,6 +21,12 @@ export default defineEventHandler(async (event) => {
   const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
+  // L'écran de détail peint sa jauge et son bloc « ce que je dois » à partir
+  // de cette seule réponse : sans ces trois valeurs, il lui faudrait un second
+  // appel pour des chiffres que le serveur a déjà sous la main.
+  const tour = tourCourant(db, tontineId)
+  const etat = tour ? etatDuTour(db, tour.id, membership.id) : null
+
   return {
     ...tontine,
     myRole: membership.role,
@@ -28,7 +35,10 @@ export default defineEventHandler(async (event) => {
     // Tous les montants sont calculés côté serveur (règle 2). Le client affiche.
     expectedPot: potAttendu(db, tontineId),
     channels: canauxDeTontine(db, tontineId),
-    currentRound: tourCourant(db, tontineId),
+    currentRound: tour,
+    potCollected: etat?.potCollected ?? 0,
+    myRemaining: etat?.myRemaining ?? 0,
+    myContributionStatus: etat?.myContributionStatus ?? null,
     publicationBlockers: tontine.status === 'draft' ? blocagesPublication(db, tontineId) : [],
   }
 })

@@ -178,6 +178,6 @@ export function recuSvg(donnees: Recu): string {
 <text class="t l" x="330" y="262">Date</text>
 <text class="t v" x="330" y="288">${echapper(dateLisible(donnees.confirmedAt ?? donnees.declaredAt))}</text>
 <line x1="32" y1="316" x2="568" y2="316" stroke="#e4e4e7"/>
-<text class="t" x="32" y="344" font-size="13" fill="#6d6d76">Tontine CI — reçu vérifiable en ligne</text>
+<text class="t" x="32" y="344" font-size="13" fill="#6d6d76">eTontine — reçu vérifiable en ligne</text>
 </svg>`
 }

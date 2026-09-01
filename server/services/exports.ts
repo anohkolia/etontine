@@ -281,7 +281,7 @@ export function procesVerbalPdf(db: Db, roundId: string): Promise<Buffer> {
     doc.moveDown(4)
     doc.fontSize(8).fillColor('#6d6d76')
       .text(
-        `Document généré le ${dateLisible(new Date())} — Tontine CI`,
+        `Document généré le ${dateLisible(new Date())} — eTontine`,
         gauche,
         doc.page.height - doc.page.margins.bottom - 20,
       )
@@ -303,7 +303,7 @@ export async function registreXlsx(db: Db, tontineId: string): Promise<Buffer> {
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const classeur = new ExcelJS.Workbook()
-  classeur.creator = 'Tontine CI'
+  classeur.creator = 'eTontine'
   classeur.created = new Date()
 
   // ---- Feuille 1 : le registre ----

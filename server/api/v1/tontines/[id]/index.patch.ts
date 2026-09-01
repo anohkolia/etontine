@@ -1,7 +1,7 @@
 import { getRouterParam, readBody } from 'h3'
 import { z } from 'zod'
 import {
-  amountFcfa, frequency, feesBearer, rotationMode, tontineAccess,
+  amountFcfa, frequency, feesBearer, rotationMode, tontineAccess, tontineEmoji,
 } from '../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../db/index.ts'
 import { definirCanaux, majTontine } from '../../../../services/tontines.ts'
@@ -17,6 +17,7 @@ import { apiError, validationError } from '../../../../utils/errors.ts'
 const patchInput = z.object({
   name: z.string().trim().min(3).max(60).optional(),
   description: z.string().trim().max(500).nullish(),
+  emoji: tontineEmoji.nullish(),
   locality: z.string().trim().max(80).nullish(),
   access: tontineAccess.optional(),
   shareAmount: amountFcfa.optional(),

@@ -1,4 +1,4 @@
-# Tontine CI
+# eTontine
 
 Gestion de tontine rotative pour la Côte d'Ivoire. Nuxt 4 fullstack (client +
 routes serveur Nitro), PWA mobile-first.
@@ -68,9 +68,26 @@ pnpm exec playwright install chromium
 ## État
 
 Les 27 tickets de [`docs/backlog.md`](./docs/backlog.md) sont livrés.
-370 tests unitaires, 120 tests de bout en bout à 360 px et 1280 px, budgets de
+409 tests unitaires, 126 tests de bout en bout à 360 px et 1280 px, budgets de
 poids et Lighthouse tenus. Bilan, écarts assumés et réglages à renseigner avant
 la production : [`docs/decisions/livraison-mvp.md`](./docs/decisions/livraison-mvp.md).
+
+L'interface a été refondue à partir de la maquette de `template/` : en-tête en
+dégradé, navigation basse, jauge circulaire, cartes flottantes. Ce qui en a été
+repris, et surtout ce qui en a été écarté parce que la maquette suit la v1.0 du
+cahier des charges (score de confiance, abonnement, paiement « en 1 clic ») :
+[`docs/decisions/T-refonte-visuelle.md`](./docs/decisions/T-refonte-visuelle.md).
+
+Les trois écrans qui manquaient — ajout et vérification d'un numéro de
+collecte, détail d'une tontine, réglages du président — sont livrés :
+[`docs/decisions/T-canaux-et-reglages.md`](./docs/decisions/T-canaux-et-reglages.md).
+Ce dernier écran est le seul endroit d'où l'on peut déclencher la règle 22
+(changement de numéro : notification à tous, gel de 48 h).
+
+**Reste ouvert** : `@nuxtjs/i18n` et Vee-Validate sont absents alors que
+`CLAUDE.md` les impose ; l'historique factuel du membre (§6 module 11) n'a ni
+API ni écran ; les seuils de la grille d'abonnement ne sont pas tranchés
+([`docs/decisions/monetisation.md`](./docs/decisions/monetisation.md)).
 
 ## Choix du socle
 

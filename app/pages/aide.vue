@@ -9,10 +9,10 @@
 definePageMeta({ layout: false })
 
 useHead({
-  title: 'Aide — Tontine CI',
+  title: 'Aide — eTontine',
   meta: [{
     name: 'description',
-    content: 'Comment fonctionne Tontine CI : cotiser, confirmer, verser le pot.',
+    content: 'Comment fonctionne eTontine : cotiser, confirmer, verser le pot.',
   }],
 })
 
@@ -62,22 +62,38 @@ const questions = [
 </script>
 
 <template>
-  <div class="min-h-dvh bg-surface">
-    <main class="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-10">
-      <header class="flex flex-col gap-2">
-        <h1 class="text-2xl font-bold text-ink">
+  <div class="min-h-dvh">
+    <!-- Même bandeau en dégradé que la landing et que l'application : une page
+         d'aide qui ne ressemble pas au produit donne l'impression d'avoir
+         quitté le produit. -->
+    <header class="gradient-trust rounded-b-tile px-6 pt-6 pb-10 text-night-ink">
+      <div class="mx-auto max-w-2xl">
+        <NuxtLink
+          to="/"
+          class="min-h-touch inline-flex items-center gap-1 text-xs font-semibold text-night-ink/75 hover:text-night-ink"
+        >
+          <Icon
+            name="lucide:arrow-left"
+            size="0.875rem"
+            aria-hidden="true"
+          />
+          Retour à l’accueil
+        </NuxtLink>
+        <h1 class="mt-2 text-2xl font-bold">
           Aide
         </h1>
-        <p class="text-ink-muted">
+        <p class="mt-1 text-night-ink/75">
           Les questions qui reviennent le plus souvent.
         </p>
-      </header>
+      </div>
+    </header>
 
+    <main class="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-8">
       <dl class="flex flex-col gap-4">
         <div
           v-for="(item, i) in questions"
           :key="i"
-          class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4"
+          class="card-surface flex flex-col gap-2 p-5"
         >
           <dt class="font-semibold text-ink">
             {{ item.q }}

@@ -125,6 +125,8 @@ export const tontines = sqliteTable('tontines', {
   name: text('name').notNull(),
   description: text('description'),
   avatarUrl: text('avatar_url'),
+  /** Icône choisie dans une liste fermée (`tontineEmoji`). Facultative. */
+  emoji: text('emoji'),
   locality: text('locality'),
   access: text('access', { enum: tontineAccess.options }).notNull().default('private'),
   /** Montant d'une part, en FCFA entiers. */

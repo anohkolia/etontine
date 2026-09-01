@@ -115,7 +115,11 @@ test('InputOtp : six cases carrées, saisie numérique', async ({ page }) => {
 
 test('Card : titre, sous-titre et pied de carte', async ({ page }) => {
   const card = page.locator('[data-pc-name="card"]')
-  await expect(card).toHaveClass(/rounded-card/)
+  // `card-surface` porte à lui seul la surface, le trait, le rayon et l'ombre :
+  // c'est l'utilitaire repris de la maquette, et le préréglage pass-through le
+  // pose sur toutes les cartes. Ce qui est vérifié ici reste le même — que le
+  // préréglage habille bien le composant PrimeVue.
+  await expect(card).toHaveClass(/card-surface/)
   await expect(card).toContainText('Tontine des tantines')
   await expect(card).toContainText('Tour 3 sur 12')
   await expect(card.getByRole('button', { name: 'Voir le registre' })).toBeVisible()

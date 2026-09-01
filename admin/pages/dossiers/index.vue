@@ -119,7 +119,7 @@ useHead({ title: 'Dossiers — Administration' })
       >
         <NuxtLink
           :to="`/dossiers/${dossier.userId}`"
-          class="flex min-h-touch items-center justify-between gap-4 rounded-card border border-line bg-surface p-4 hover:border-line-strong"
+          class="flex min-h-touch items-center justify-between gap-4 card-surface p-4 hover:border-line-strong"
           :data-testid="`dossier-${dossier.userId}`"
         >
           <span class="flex flex-col gap-0.5">

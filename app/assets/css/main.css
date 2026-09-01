@@ -36,10 +36,25 @@
 
 /* ------------------------------------------------------------------ *
  * Tokens de thème — configuration en CSS, pas de tailwind.config.js.
- * Palette sémantique complète, contraste AA vérifié par test (T03).
+ *
+ * La palette suit le langage visuel de `template/src/styles.css` : bleu nuit
+ * de confiance, vert émeraude de marque, orange d'accent, surfaces froides et
+ * cartes flottantes. Les valeurs du template sont en oklch ; elles sont ici
+ * converties une fois pour toutes en hexadécimal, parce que le contrôle de
+ * contraste de `tests/unit/contraste.spec.ts` lit ces valeurs telles quelles
+ * et calcule le rapport WCAG dessus. Une conversion faite à la lecture ferait
+ * reposer la conformité AA sur l'exactitude de cette conversion.
+ *
+ * Deux teintes du template ont été assombries pour tenir le AA sur le fond de
+ * page : le vert de marque (`0.53 0.12 162` → #007a51) et l'encre tertiaire.
+ * Chaque paire texte/fond est vérifiée par test : ne change pas une valeur ici
+ * sans le relancer.
  * ------------------------------------------------------------------ */
 @theme {
-  /* Règle 16 : police système uniquement, aucune police téléchargée. */
+  /* Règle 16 : police système uniquement, aucune police téléchargée.
+     Le template appelle Sora et Plus Jakarta Sans par le réseau — écarté.
+     Le caractère « titre » est obtenu par le poids et le crénage (voir plus
+     bas, `h1`–`h4`), pas par un fichier de police à télécharger. */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
@@ -49,34 +64,53 @@
   --spacing-touch: 2.75rem;
 
   /* --- Surfaces et traits ------------------------------------------ *
-     Toute la palette est en hexadécimal, et non en oklch : le contrôle de
-     contraste de `tests/unit/contraste.spec.ts` lit ces valeurs telles
-     quelles et calcule le rapport WCAG dessus. Une conversion intermédiaire
-     ferait reposer la conformité AA sur l'exactitude de la conversion.
-     Chaque paire texte/fond est vérifiée par ce test : ne change pas une
-     valeur ici sans le relancer. */
+     Trois niveaux : la carte (blanc pur), le fond de page (bleuté très
+     clair) et un creux pour les zones en retrait — jauges, pistes de
+     progression, aplats de rang. */
   --color-surface: #ffffff;
-  --color-surface-muted: #f4f4f5;
+  --color-surface-muted: #f0f4f7;
+  --color-surface-sunken: #e6ecf2;
 
   /* Deux traits, et la distinction n'est pas cosmétique : un séparateur
      décoratif n'a aucune exigence de contraste, la bordure d'un champ de
      saisie doit atteindre 3:1 (WCAG 1.4.11) — sans elle, on ne voit pas
      où commence la zone de saisie. */
-  --color-line: #d4d4d8;
-  --color-line-strong: #8b8b96;
+  --color-line: #dde3ea;
+  --color-line-strong: #78889b;
 
-  /* --- Encre --------------------------------------------------------- */
-  --color-ink: #18181b;
-  --color-ink-muted: #52525b;
-  --color-ink-subtle: #6d6d76;
+  /* --- Encre --------------------------------------------------------- *
+     Bleu nuit plutôt que noir : c'est ce qui donne au template son aspect
+     « bancaire » sans recourir à une police achetée. */
+  --color-ink: #0d2339;
+  --color-ink-muted: #5b6b7d;
+  --color-ink-subtle: #626f83;
 
   /* --- Marque -------------------------------------------------------- */
-  --color-brand: #0f6e5c;
-  --color-brand-strong: #0a4f42;
+  --color-brand: #007a51;
+  --color-brand-strong: #005d3c;
   --color-brand-ink: #ffffff;
+  --color-brand-surface: #e6f2ec;
+
+  /* --- Accent -------------------------------------------------------- *
+     L'orange du template ne passe pas le AA en texte sur blanc (2.89:1). Il
+     reste donc un aplat — jauges, dégradé du pot, pastilles — et le texte
+     orange utilise `accent-ink`, qui passe. C'est la même discipline que la
+     v1.0 du cahier avait ratée sur `#FF6B00` (§9). */
+  --color-accent: #fe6a00;
+  --color-accent-ink: #8a3a00;
+  --color-accent-surface: #fff0e4;
+
+  /* --- Nuit ---------------------------------------------------------- *
+     Les trois arrêts du dégradé d'en-tête (`gradient-trust`). Le blanc
+     dessus est vérifié sur les trois, pas seulement sur le plus foncé : un
+     titre posé sur la fin du dégradé doit rester lisible. */
+  --color-night: #0d2339;
+  --color-night-mid: #003c46;
+  --color-night-deep: #006846;
+  --color-night-ink: #ffffff;
 
   /* Anneau de focus : visible sur fond blanc comme sur fond grisé. */
-  --color-ring: #0f6e5c;
+  --color-ring: #007a51;
 
   /* --- Statuts ------------------------------------------------------- *
      Un fond pâle et une encre foncée par statut. La couleur ne porte
@@ -87,21 +121,48 @@
      Le bleu de « Déclaré » n'est pas un choix esthétique : un paiement
      déclaré n'est pas un paiement confirmé, et le vert dirait le contraire
      au premier coup d'œil (T15). */
-  --color-due-surface: #f4f4f5;
-  --color-due-ink: #3f3f46;
-  --color-late-surface: #fef3c7;
-  --color-late-ink: #78350f;
-  --color-declared-surface: #dbeafe;
-  --color-declared-ink: #1e3a8a;
-  --color-confirmed-surface: #d1fae5;
-  --color-confirmed-ink: #065f46;
-  --color-disputed-surface: #fee2e2;
-  --color-disputed-ink: #991b1b;
+  --color-due-surface: #eef2f6;
+  --color-due-ink: #44536a;
+  --color-late-surface: #fdefd7;
+  --color-late-ink: #7a4506;
+  --color-declared-surface: #deeafb;
+  --color-declared-ink: #12437f;
+  --color-confirmed-surface: #d7f2e2;
+  --color-confirmed-ink: #05613f;
+  --color-disputed-surface: #fde2e4;
+  --color-disputed-ink: #97101f;
+
+  /* --- Canaux de paiement -------------------------------------------- *
+     Reprises du template, mais en version pastille : fond teinté, encre
+     foncée. Le template pose du texte blanc sur l'orange d'Orange Money et
+     du bleu nuit sur le jaune MTN — deux paires sous 4.5:1. Une pastille de
+     canal se lit à côté d'un montant : elle doit être lisible, pas
+     décorative. Les cinq canaux de `paymentChannel` sont couverts. */
+  --color-wave-surface: #d8f4fc;
+  --color-wave-ink: #0b5a70;
+  --color-orange-surface: #ffe7d6;
+  --color-orange-ink: #8f3a00;
+  --color-mtn-surface: #fdf3cd;
+  --color-mtn-ink: #6f5300;
+  --color-moov-surface: #dfe9f7;
+  --color-moov-ink: #0554a0;
+  --color-cash-surface: #e8ecf1;
+  --color-cash-ink: #3d4b5f;
 
   /* --- Rayons ------------------------------------------------------- *
-     Deux rayons seulement : un pour les contrôles, un pour les blocs. */
-  --radius-control: 0.5rem;
-  --radius-card: 0.75rem;
+     Le template pose `--radius: 1rem` et décline. Deux rayons suffisent
+     ici — un pour les contrôles, un pour les blocs — plus un rayon d'aplat
+     pour les avatars et les pastilles. */
+  --radius-control: 0.75rem;
+  --radius-card: 1rem;
+  --radius-tile: 1.25rem;
+
+  /* --- Ombres -------------------------------------------------------- *
+     Deux seulement : la carte posée et l'élément flottant (en-tête collant,
+     barre de navigation, carte survolée). Teintées de bleu nuit plutôt que
+     de noir, sinon la carte paraît sale sur le fond froid. */
+  --shadow-card: 0 1px 2px rgb(13 35 57 / 0.06), 0 8px 24px rgb(13 35 57 / 0.06);
+  --shadow-float: 0 12px 32px rgb(13 35 57 / 0.16);
 }
 
 @layer base {
@@ -113,7 +174,18 @@
 
   body {
     font-family: var(--font-sans);
-    @apply bg-surface text-ink antialiased;
+    @apply bg-surface-muted text-ink antialiased;
+  }
+
+  /* Le template obtient son allure de titre avec Sora. Sans police
+     téléchargée, ce sont le poids et le crénage resserré qui la donnent :
+     `system-ui` à 700 avec -0.02em d'interlettrage se tient très près, pour
+     zéro octet de réseau. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.02em;
   }
 
   /* Un montant ne doit jamais être coupé en fin de ligne : « 25 000 FCFA »
@@ -127,7 +199,7 @@
      que quelque chose arrive ; il s'arrête si l'utilisateur a demandé moins
      d'animation, auquel cas le bloc reste simplement grisé. */
   .skeleton {
-    background-color: var(--color-surface-muted);
+    background-color: var(--color-surface-sunken);
     background-image: linear-gradient(
       90deg,
       transparent 0%,
@@ -153,4 +225,66 @@
       animation: none;
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Utilitaires de composition — repris du template.
+ *
+ * Trois motifs reviennent sur tous les écrans ; les écrire en utilitaire
+ * évite de recopier la même pile de classes vingt fois, et surtout évite
+ * qu'elle diverge d'un écran à l'autre.
+ * ------------------------------------------------------------------ */
+
+/** Dégradé de l'en-tête : nuit → sarcelle → émeraude. */
+@utility gradient-trust {
+  background-image: linear-gradient(
+    145deg,
+    var(--color-night) 0%,
+    var(--color-night-mid) 55%,
+    var(--color-night-deep) 100%
+  );
+}
+
+/**
+ * Dégradé du pot : marque → accent. **Aplats seuls, jamais de texte dessus.**
+ *
+ * Le template pose du blanc sur ce dégradé (avatar de profil, bouton d'appel à
+ * l'action). Son extrémité orange donne 2.89:1 avec du blanc — sous le seuil
+ * AA, et invisible en plein soleil, ce qui est le cas d'usage. Il ne sert donc
+ * qu'aux barres de progression et aux surfaces sans texte.
+ */
+@utility gradient-pot {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-brand) 0%,
+    var(--color-accent) 130%
+  );
+}
+
+/**
+ * Dégradé de marque : émeraude → émeraude foncée. Celui-ci **porte du texte**.
+ *
+ * Ses deux arrêts sont les tokens `brand` et `brand-strong`, dont le contraste
+ * avec `brand-ink` est vérifié par test. Tout point du dégradé est donc au
+ * moins aussi foncé que le plus clair des deux.
+ */
+@utility gradient-brand {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-brand) 0%,
+    var(--color-brand-strong) 100%
+  );
+}
+
+/** La carte, partout la même : blanc, trait fin, rayon large, ombre douce. */
+@utility card-surface {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+/** Chiffres alignés en colonne — montants, compteurs, pourcentages. */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
 }

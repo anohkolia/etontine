@@ -41,14 +41,27 @@ function contrast(a: string, b: string): number {
 const paires: ReadonlyArray<readonly [string, string, number, string]> = [
   ['ink', 'surface', 4.5, 'texte courant'],
   ['ink', 'surface-muted', 4.5, 'texte sur fond grisé'],
+  ['ink', 'surface-sunken', 4.5, 'texte sur fond en creux'],
   ['ink-muted', 'surface', 4.5, 'texte secondaire'],
   ['ink-muted', 'surface-muted', 4.5, 'texte secondaire sur fond grisé'],
+  ['ink-muted', 'surface-sunken', 4.5, 'texte secondaire sur fond en creux'],
   ['ink-subtle', 'surface', 4.5, 'texte tertiaire'],
   ['ink-subtle', 'surface-muted', 4.5, 'texte tertiaire sur fond grisé'],
 
   ['brand', 'surface', 4.5, 'lien et texte de marque'],
+  ['brand', 'surface-muted', 4.5, 'lien de marque sur fond grisé'],
   ['brand-ink', 'brand', 4.5, 'texte sur aplat de marque'],
   ['brand-ink', 'brand-strong', 4.5, 'texte sur aplat de marque foncé'],
+  ['brand-strong', 'brand-surface', 4.5, 'texte sur pastille de marque'],
+
+  // L'accent n'est jamais du texte : `accent-ink` l'est, et doit passer.
+  ['accent-ink', 'surface', 4.5, 'texte d’accent'],
+  ['accent-ink', 'accent-surface', 4.5, 'texte sur pastille d’accent'],
+
+  // Les trois arrêts du dégradé d'en-tête portent tous du texte blanc.
+  ['night-ink', 'night', 4.5, 'titre sur le début du dégradé'],
+  ['night-ink', 'night-mid', 4.5, 'titre sur le milieu du dégradé'],
+  ['night-ink', 'night-deep', 4.5, 'titre sur la fin du dégradé'],
 
   // Chaque statut, sur son propre fond de badge…
   ['due-ink', 'due-surface', 4.5, 'badge « À cotiser »'],
@@ -64,10 +77,23 @@ const paires: ReadonlyArray<readonly [string, string, number, string]> = [
   ['confirmed-ink', 'surface', 4.5, 'texte de statut « Confirmé »'],
   ['disputed-ink', 'surface', 4.5, 'texte de statut « Contesté »'],
 
+  // Pastilles de canal : sur leur fond, et sur la carte blanche.
+  ['wave-ink', 'wave-surface', 4.5, 'pastille Wave'],
+  ['wave-ink', 'surface', 4.5, 'texte Wave'],
+  ['orange-ink', 'orange-surface', 4.5, 'pastille Orange Money'],
+  ['orange-ink', 'surface', 4.5, 'texte Orange Money'],
+  ['mtn-ink', 'mtn-surface', 4.5, 'pastille MTN MoMo'],
+  ['mtn-ink', 'surface', 4.5, 'texte MTN MoMo'],
+  ['moov-ink', 'moov-surface', 4.5, 'pastille Moov Money'],
+  ['moov-ink', 'surface', 4.5, 'texte Moov Money'],
+  ['cash-ink', 'cash-surface', 4.5, 'pastille espèces'],
+  ['cash-ink', 'surface', 4.5, 'texte espèces'],
+
   // Éléments d'interface : 3:1 suffit, mais il est obligatoire.
   ['ring', 'surface', 3, 'anneau de focus'],
   ['ring', 'surface-muted', 3, 'anneau de focus sur fond grisé'],
   ['line-strong', 'surface', 3, 'bordure de champ de saisie'],
+  ['line-strong', 'surface-muted', 3, 'bordure de champ sur fond grisé'],
 ]
 
 describe('palette — contraste AA', () => {

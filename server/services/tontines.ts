@@ -26,6 +26,7 @@ export function creerBrouillon(db: Db, userId: string, input: {
   name: string
   description?: string
   avatarUrl?: string
+  emoji?: string
   locality?: string
   access: 'private' | 'open'
 }) {
@@ -36,6 +37,7 @@ export function creerBrouillon(db: Db, userId: string, input: {
     name: input.name,
     description: input.description ?? null,
     avatarUrl: input.avatarUrl ?? null,
+    emoji: input.emoji ?? null,
     locality: input.locality ?? null,
     access: input.access,
     // Valeurs de départ neutres : l'étape « Argent » les remplacera. Un montant
@@ -75,7 +77,9 @@ export function majTontine(db: Db, tontineId: string, modifications: Record<stri
   if (tontine.status === 'running') {
     // Une fois la tontine lancée, seuls les champs de présentation bougent :
     // changer un montant en cours de route réécrirait des dus déjà calculés.
-    const autorises = new Set(['description', 'avatarUrl', 'locality'])
+    // L'icône est de la présentation pure : la changer sur une tontine en
+    // cours ne touche aucun montant ni aucun statut.
+    const autorises = new Set(['description', 'avatarUrl', 'emoji', 'locality'])
     const interdits = Object.keys(modifications).filter(k => !autorises.has(k))
 
     if (interdits.length > 0) {
@@ -175,6 +179,7 @@ export function mesTontines(db: Db, userId: string) {
     .select({
       id: tontines.id,
       name: tontines.name,
+      emoji: tontines.emoji,
       locality: tontines.locality,
       status: tontines.status,
       shareAmount: tontines.shareAmount,

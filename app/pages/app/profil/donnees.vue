@@ -49,16 +49,17 @@ async function supprimer() {
   }
 }
 
-useHead({ title: 'Mes données — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Mes données personnelles',
+  sousTitre: 'Export et suppression',
+  retour: { to: '/app/profil', label: 'Mon profil' },
+}))
+useHead({ title: 'Mes données — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
-    <h1 class="text-xl font-bold text-ink">
-      Mes données personnelles
-    </h1>
-
-    <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+    <section class="flex flex-col gap-3 card-surface p-4">
       <h2 class="font-semibold text-ink">
         Exporter
       </h2>
@@ -74,7 +75,7 @@ useHead({ title: 'Mes données — Tontine CI' })
       />
     </section>
 
-    <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+    <section class="flex flex-col gap-3 card-surface p-4">
       <h2 class="font-semibold text-ink">
         Supprimer mon compte
       </h2>

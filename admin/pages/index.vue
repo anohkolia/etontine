@@ -76,7 +76,7 @@ onMounted(async () => {
   if (admin.connecte.value) await navigateTo('/dossiers')
 })
 
-useHead({ title: 'Administration — Tontine CI' })
+useHead({ title: 'Administration — eTontine' })
 </script>
 
 <template>
@@ -98,7 +98,7 @@ useHead({ title: 'Administration — Tontine CI' })
 
     <form
       v-if="etape === 'numero'"
-      class="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      class="flex flex-col gap-4 card-surface p-5"
       @submit.prevent="demanderCode"
     >
       <label
@@ -138,7 +138,7 @@ useHead({ title: 'Administration — Tontine CI' })
 
     <form
       v-else
-      class="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      class="flex flex-col gap-4 card-surface p-5"
       @submit.prevent="verifier"
     >
       <p class="text-sm text-ink-muted">

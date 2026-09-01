@@ -88,7 +88,7 @@ useHead({ title: 'Journal — Administration' })
       <li
         v-for="entree in entrees"
         :key="entree.id"
-        class="flex items-start gap-3 rounded-card border border-line bg-surface p-3"
+        class="flex items-start gap-3 card-surface p-3"
         :data-testid="`journal-${entree.action}`"
       >
         <Icon

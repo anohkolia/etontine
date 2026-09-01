@@ -5,6 +5,8 @@ import {
   blocagesPublication, creerBrouillon, majTontine, definirCanaux, potAttendu, publier, totalParts,
 } from '../../server/services/tontines.ts'
 import { memberships, shares, tontines } from '../../server/db/schema.ts'
+import { tontineEmoji } from '../../shared/schemas/index.ts'
+import { TONTINE_EMOJIS } from '../../shared/constants/tontine.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -124,6 +126,38 @@ describe('réglages figés une fois la tontine lancée', () => {
     db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, id)).run()
 
     expect(() => majTontine(db, id, { description: 'Nouvelle description' })).not.toThrow()
+    // L'icône en fait partie : elle ne touche aucun montant ni aucun statut.
+    expect(() => majTontine(db, id, { emoji: '🚕' })).not.toThrow()
+  })
+})
+
+describe('icône de tontine', () => {
+  it('est facultative — une tontine sans icône reste valide', () => {
+    const [t] = db.select().from(tontines).where(eq(tontines.id, brouillon())).all()
+    expect(t!.emoji).toBeNull()
+  })
+
+  it('est enregistrée quand le président en choisit une', () => {
+    const id = creerBrouillon(db, U, { name: 'Tontine du marché', access: 'private', emoji: '🧺' })
+
+    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    expect(t!.emoji).toBe('🧺')
+  })
+
+  it('n’accepte que les valeurs de la liste fermée', () => {
+    // Le champ n'est pas du texte libre : un caractère de contrôle
+    // bidirectionnel ou une chaîne de trois cents octets casserait toutes les
+    // listes qui l'affichent. Le schéma le refuse avant la base.
+    expect(tontineEmoji.safeParse('🧺').success).toBe(true)
+    expect(tontineEmoji.safeParse('💣').success).toBe(false)
+    expect(tontineEmoji.safeParse('🧺🧺').success).toBe(false)
+    expect(tontineEmoji.safeParse('\u202E').success).toBe(false)
+  })
+
+  it('propose exactement ce que le serveur accepte', () => {
+    // Deux listes qui divergent donneraient un wizard capable de proposer une
+    // icône que l'API refuse — panne silencieuse, au dernier écran du wizard.
+    expect([...tontineEmoji.options]).toEqual([...TONTINE_EMOJIS])
   })
 })
 

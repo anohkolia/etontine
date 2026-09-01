@@ -204,8 +204,8 @@ export default defineNuxtConfig({
   pwa: {
     registerType: 'autoUpdate',
     manifest: {
-      name: 'Tontine CI',
-      short_name: 'Tontine',
+      name: 'eTontine',
+      short_name: 'eTontine',
       description: 'La tontine de votre groupe, tenue au clair.',
       lang: 'fr',
       // `standalone` et non `fullscreen` : la barre d'état du système reste

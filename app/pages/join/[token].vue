@@ -76,7 +76,7 @@ async function rejoindre() {
 onMounted(() => session.charger())
 
 useHead(() => ({
-  title: apercu.value ? `Rejoindre ${apercu.value.name} — Tontine CI` : 'Invitation — Tontine CI',
+  title: apercu.value ? `Rejoindre ${apercu.value.name} — eTontine` : 'Invitation — eTontine',
 }))
 </script>
 
@@ -128,7 +128,7 @@ useHead(() => ({
 
         <!-- Ce que voit un visiteur non connecté : de quoi juger, rien de plus.
              Pas la liste des membres, pas leurs numéros. -->
-        <dl class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+        <dl class="flex flex-col gap-3 card-surface p-4">
           <div class="flex items-baseline justify-between gap-3">
             <dt class="text-sm text-ink-muted">
               Le président
@@ -191,7 +191,7 @@ useHead(() => ({
         </p>
         <p
           v-else
-          class="rounded-card border border-line bg-surface p-4 text-sm text-ink-muted"
+          class="card-surface p-4 text-sm text-ink-muted"
           data-testid="engagement-indisponible"
         >
           Les parts ne sont pas encore attribuées : le montant total de

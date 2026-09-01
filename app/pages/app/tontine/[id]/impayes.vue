@@ -107,14 +107,16 @@ async function annuler(penaltyId: string) {
 }
 
 onMounted(charger)
-useHead({ title: 'Retards et amendes — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Retards et amendes',
+  retour: { to: '/app', label: 'Mes tontines' },
+}))
+useHead({ title: 'Retards et amendes — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Retards et amendes
-    </h1>
+    <TontineTabs :tontine-id="tontineId" />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -159,7 +161,7 @@ useHead({ title: 'Retards et amendes — Tontine CI' })
           <li
             v-for="retard in donnees.retards"
             :key="retard.contributionId"
-            class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4"
+            class="flex flex-col gap-3 card-surface p-4"
             :data-testid="`retard-${retard.contributionId}`"
           >
             <div class="flex items-start justify-between gap-3">
@@ -240,7 +242,7 @@ useHead({ title: 'Retards et amendes — Tontine CI' })
           <li
             v-for="amende in donnees.amendes"
             :key="amende.penalty.id"
-            class="flex flex-col gap-2 rounded-card border border-line bg-surface p-4"
+            class="flex flex-col gap-2 card-surface p-4"
             :data-testid="`amende-${amende.penalty.id}`"
           >
             <div class="flex items-start justify-between gap-3">
@@ -314,7 +316,7 @@ useHead({ title: 'Retards et amendes — Tontine CI' })
           <li
             v-for="avance in donnees.avances"
             :key="avance.advance.id"
-            class="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3"
+            class="flex items-center justify-between gap-3 card-surface p-3"
           >
             <span class="text-sm text-ink-muted">
               Tour {{ avance.roundIndex }}

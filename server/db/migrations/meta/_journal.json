@@ -36,6 +36,13 @@
       "when": 1788030215979,
       "tag": "0004_equal_catseye",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788294565319,
+      "tag": "0005_simple_wraith",
+      "breakpoints": true
     }
   ]
 }

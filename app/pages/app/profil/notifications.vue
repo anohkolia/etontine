@@ -66,15 +66,16 @@ async function enregistrer(tontineId: string | null, modifications: Partial<Regl
 }
 
 onMounted(charger)
-useHead({ title: 'Notifications — Tontine CI' })
+useEnTete(() => ({
+  titre: 'Notifications',
+  sousTitre: 'Ce que tu reçois, et quand',
+  retour: { to: '/app/profil', label: 'Mon profil' },
+}))
+useHead({ title: 'Notifications — eTontine' })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <h1 class="text-xl font-bold text-ink">
-      Notifications
-    </h1>
-
     <LoadingSkeleton
       v-if="etat === 'chargement'"
       variant="card"
@@ -89,7 +90,7 @@ useHead({ title: 'Notifications — Tontine CI' })
 
     <template v-else-if="donnees">
       <!-- Réglages généraux -->
-      <section class="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
+      <section class="flex flex-col gap-3 card-surface p-4">
         <h2 class="font-semibold text-ink">
           Pour toutes mes tontines
         </h2>
@@ -167,7 +168,7 @@ useHead({ title: 'Notifications — Tontine CI' })
           <li
             v-for="entree in donnees.parTontine"
             :key="entree.tontineId"
-            class="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3"
+            class="flex items-center justify-between gap-3 card-surface p-3"
             :data-testid="`prefs-${entree.tontineId}`"
           >
             <span class="font-medium text-ink">{{ entree.tontineName }}</span>
