@@ -55,10 +55,10 @@ describe('assertTransition — acceptation T05', () => {
   })
 })
 
-describe('les cinq machines à états sont couvertes', () => {
-  it('expose contribution, payout, round, tontine et membership', () => {
+describe('les six machines à états sont couvertes', () => {
+  it('expose contribution, payout, round, tontine, membership et l’abonnement', () => {
     expect(Object.keys(TRANSITIONS).sort()).toEqual(
-      ['contribution', 'membership', 'payout', 'round', 'tontine'],
+      ['contribution', 'membership', 'payout', 'round', 'subscriptionRequest', 'tontine'],
     )
   })
 
@@ -69,6 +69,10 @@ describe('les cinq machines à états sont couvertes', () => {
     expect(nextStates('round', 'closed')).toEqual([])
     expect(nextStates('tontine', 'archived')).toEqual([])
     expect(nextStates('membership', 'left')).toEqual([])
+    // Une demande d'abonnement décidée est définitive : on la refait, on ne la
+    // rouvre pas. Le back-office garde ainsi qui a décidé quoi, et quand.
+    expect(nextStates('subscriptionRequest', 'approved')).toEqual([])
+    expect(nextStates('subscriptionRequest', 'rejected')).toEqual([])
   })
 
   it('ne désigne jamais un état de destination inconnu de sa propre machine', () => {

@@ -9,6 +9,7 @@ const admin = useAdminSession()
 
 const onglets = [
   { to: '/dossiers', libelle: 'Dossiers', icone: 'lucide:folder-check' },
+  { to: '/abonnements', libelle: 'Abonnements', icone: 'lucide:receipt-text' },
   { to: '/journal', libelle: 'Journal', icone: 'lucide:scroll-text' },
 ]
 </script>

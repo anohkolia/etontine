@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PAID_TIERS, PLAN_PERIODICITIES, PLAN_TIERS } from '../constants/abonnement.ts'
 import { TONTINE_EMOJIS } from '../constants/tontine.ts'
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +54,16 @@ export const payoutStatus = z.enum([
   'prepared', 'counter_validated', 'declared', 'acknowledged', 'disputed',
 ])
 
+/**
+ * Abonnement. Les valeurs viennent de `shared/constants/abonnement.ts` : la
+ * grille est affichée par une page publique pré-rendue, qui ne doit pas
+ * importer Zod pour trois prix.
+ */
+export const planTier = z.enum(PLAN_TIERS)
+export const paidTier = z.enum(PAID_TIERS)
+export const planPeriodicity = z.enum(PLAN_PERIODICITIES)
+export const subscriptionRequestStatus = z.enum(['pending', 'approved', 'rejected'])
+
 /* ------------------------------------------------------------------ */
 /* Transitions autorisées — le serveur valide contre ces tables        */
 /* Toute transition absente d'ici doit renvoyer INVALID_TRANSITION.    */
@@ -102,6 +113,19 @@ export const MEMBERSHIP_TRANSITIONS = {
   left: [],
   defaulted: [],
 } as const satisfies Record<z.infer<typeof membershipStatus>, readonly string[]>
+
+/**
+ * Demandes de passage à un palier payant.
+ *
+ * Une demande décidée est **définitive** : revenir sur une approbation se fait
+ * par une nouvelle demande, jamais en rouvrant l'ancienne. Le back-office
+ * garde ainsi une trace de qui a décidé quoi, et quand.
+ */
+export const SUBSCRIPTION_REQUEST_TRANSITIONS = {
+  pending: ['approved', 'rejected'],
+  approved: [],
+  rejected: [],
+} as const satisfies Record<z.infer<typeof subscriptionRequestStatus>, readonly string[]>
 
 export const ROUND_TRANSITIONS = {
   pending: ['collecting'],
@@ -281,12 +305,29 @@ export const disputeInput = z.object({
 })
 
 /* ------------------------------------------------------------------ */
+/* Abonnement                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Demande de passage à un palier supérieur.
+ *
+ * Aucun montant n'est accepté du client : le prix est celui de la grille, lu
+ * côté serveur à partir du palier et de la périodicité (règle 2). Un client qui
+ * enverrait un prix le verrait ignoré, pas honoré.
+ */
+export const subscriptionRequestInput = z.object({
+  tier: paidTier,
+  periodicity: planPeriodicity,
+})
+
+/* ------------------------------------------------------------------ */
 /* Erreur d'API — format unique                                        */
 /* ------------------------------------------------------------------ */
 
 export const apiErrorCode = z.enum([
   'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'VALIDATION_ERROR',
   'INVALID_TRANSITION', 'IDEMPOTENCY_CONFLICT', 'KYC_REQUIRED', 'RATE_LIMITED',
+  'PLAN_LIMIT',
 ])
 
 export const apiError = z.object({
@@ -302,6 +343,7 @@ export type ApiError = z.infer<typeof apiError>
 export type PaymentChannel = z.infer<typeof paymentChannel>
 export type ContributionStatus = z.infer<typeof contributionStatus>
 export type MembershipRole = z.infer<typeof membershipRole>
+export type SubscriptionRequestStatus = z.infer<typeof subscriptionRequestStatus>
 
 /**
  * Toutes les machines à états, indexées par nom. `assertTransition()` lit
@@ -314,6 +356,7 @@ export const TRANSITIONS = {
   round: ROUND_TRANSITIONS,
   tontine: TONTINE_TRANSITIONS,
   membership: MEMBERSHIP_TRANSITIONS,
+  subscriptionRequest: SUBSCRIPTION_REQUEST_TRANSITIONS,
 } as const
 
 export type StateMachine = keyof typeof TRANSITIONS

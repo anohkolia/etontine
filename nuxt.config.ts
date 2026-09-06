@@ -63,6 +63,13 @@ export default defineNuxtConfig({
   // Aucune page personnalisée ne doit être rendue côté serveur.
   routeRules: {
     '/': { prerender: true },
+    // La grille tarifaire est éditoriale et publique : pré-rendue comme la
+    // landing, elle est servie sans exécuter une ligne de JavaScript.
+    '/tarifs': { prerender: true },
+    // `docs/api-contract.md` fixe `/tarifs`. Le singulier circule pourtant
+    // — c'est ce qu'on tape — et une redirection permanente coûte moins qu'une
+    // page morte.
+    '/tarif': { redirect: { to: '/tarifs', statusCode: 301 } },
     '/app/**': { ssr: false },
   },
 

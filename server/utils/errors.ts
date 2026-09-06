@@ -19,6 +19,9 @@ export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   IDEMPOTENCY_CONFLICT: 409,
   KYC_REQUIRED: 403,
   RATE_LIMITED: 429,
+  // 403 et non 402 : rien n'est dû à l'application, et le quota se lève aussi
+  // en fermant une tontine, pas seulement en payant.
+  PLAN_LIMIT: 403,
 }
 
 export interface ApiErrorDetails {

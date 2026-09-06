@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { invites, memberships, shares, tontines, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
+import { placeDisponible, verifierQuotaMembres } from './abonnement.ts'
 import { appendLedger } from './ledger.ts'
 
 type Db = ReturnType<typeof useDb>
@@ -39,6 +40,13 @@ export interface ApercuInvitation {
   memberCount: number
   totalShares: number
   status: string
+  /**
+   * `true` quand la tontine a atteint le nombre de membres du palier de son
+   * président. L'écran de jonction dit alors que **le groupe est complet** — il
+   * ne dit jamais que le président n'a pas payé : l'arrivant n'a pas à
+   * connaître l'abonnement de quelqu'un d'autre, et ce n'est pas son affaire.
+   */
+  complet: boolean
 }
 
 /**
@@ -103,6 +111,7 @@ export function apercuInvitation(db: Db, token: string): ApercuInvitation {
     memberCount: membres.length,
     totalShares: parts.length,
     status: tontine.status,
+    complet: !placeDisponible(db, tontine.id),
   }
 }
 
@@ -189,6 +198,12 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
 
     return { membershipId: gere.id, rattache: true, status: gere.status === 'active' ? 'active' : 'pending_approval' }
   }
+
+  // Nouvel arrivant : il occupe une place de plus, donc le quota du président
+  // s'applique. Le contrôle est **ici** et pas seulement à la création du lien :
+  // un lien créé quand il restait deux places peut être ouvert par cinq
+  // personnes à la fois, et c'est ce dernier filet qui départage.
+  verifierQuotaMembres(db, apercu.tontineId)
 
   // Nouvel arrivant : en attente de l'accord du président.
   const membershipId = randomUUID()

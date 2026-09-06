@@ -21,9 +21,10 @@ const route = useRoute()
 
 /**
  * Quatre onglets. Le template en propose un cinquième, « Abonnement » : il
- * dépend du modèle de monétisation, que `CLAUDE.md` interdit de trancher seul.
- * « Aide » prend la place — le module 14 du cahier la veut consultable hors
- * connexion, ce qui en fait une destination de premier niveau.
+ * existe désormais (`/app/abonnement`) mais reste hors de la barre. On y passe
+ * une fois par an, et « Aide » garde la place — le module 14 du cahier la veut
+ * consultable hors connexion, ce qui en fait une destination de premier niveau.
+ * Le chemin vers l'abonnement part du profil, où l'on va pour ce genre de chose.
  */
 const onglets = [
   { to: '/app', label: 'Accueil', icon: 'lucide:layout-dashboard' },

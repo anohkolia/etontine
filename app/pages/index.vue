@@ -54,13 +54,22 @@ const FAITS = [
     <header class="gradient-trust rounded-b-[2.5rem] px-5 pt-6 pb-14 text-night-ink">
       <nav class="mx-auto flex max-w-5xl items-center justify-between gap-3">
         <span class="text-base font-bold">eTontine</span>
-        <NuxtLink
-          to="/login"
-          class="min-h-touch inline-flex items-center rounded-full bg-night-ink/15 px-4 text-sm font-semibold transition-colors hover:bg-night-ink/25"
-          data-testid="lien-connexion"
-        >
-          Se connecter
-        </NuxtLink>
+        <div class="flex items-center gap-2">
+          <NuxtLink
+            to="/tarifs"
+            class="min-h-touch inline-flex items-center px-3 text-sm font-semibold text-night-ink/85 hover:text-night-ink"
+            data-testid="lien-tarifs"
+          >
+            Tarifs
+          </NuxtLink>
+          <NuxtLink
+            to="/login"
+            class="min-h-touch inline-flex items-center rounded-full bg-night-ink/15 px-4 text-sm font-semibold transition-colors hover:bg-night-ink/25"
+            data-testid="lien-connexion"
+          >
+            Se connecter
+          </NuxtLink>
+        </div>
       </nav>
 
       <div class="mx-auto mt-12 max-w-5xl md:grid md:grid-cols-2 md:items-center md:gap-10">
@@ -273,9 +282,25 @@ const FAITS = [
       </section>
     </main>
 
-    <footer class="border-t border-line px-5 py-8 text-center text-xs text-ink-muted">
-      eTontine — Abidjan, Côte d’Ivoire. L’application ne détient jamais les
-      fonds : elle enregistre ce que le groupe déclare et confirme.
+    <footer class="flex flex-col items-center gap-3 border-t border-line px-5 py-8 text-center text-xs text-ink-muted">
+      <nav class="flex flex-wrap items-center justify-center gap-4">
+        <NuxtLink
+          to="/tarifs"
+          class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
+        >
+          Tarifs
+        </NuxtLink>
+        <NuxtLink
+          to="/aide"
+          class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
+        >
+          Aide
+        </NuxtLink>
+      </nav>
+      <p>
+        eTontine — Abidjan, Côte d’Ivoire. L’application ne détient jamais les
+        fonds : elle enregistre ce que le groupe déclare et confirme.
+      </p>
     </footer>
   </div>
 </template>

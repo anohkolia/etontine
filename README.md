@@ -84,10 +84,22 @@ collecte, détail d'une tontine, réglages du président — sont livrés :
 Ce dernier écran est le seul endroit d'où l'on peut déclencher la règle 22
 (changement de numéro : notification à tous, gel de 48 h).
 
+La monétisation est livrée : trois paliers forfaitaires — Gratuit, Standard
+(7 500 F), Plus (10 000 F) —, la grille publique `/tarifs`, l'écran
+`/app/abonnement` et la file de décision du back-office. La grille vit dans
+`shared/constants/abonnement.ts`, seule source des prix et des quotas. Deux
+choses n'ont pas bougé : l'application **n'encaisse rien** (le règlement se
+constate hors application, un administrateur pose le palier), et **aucune
+fonction de sécurité n'est derrière le paywall** — registre, preuves, reçus,
+contrôle d'intégrité et procès-verbal PDF restent gratuits partout. Les quotas
+se vérifient au franchissement, jamais rétroactivement : une tontine en cours
+va au bout de son cycle même si son président repasse sous un palier plus
+étroit.
+
 **Reste ouvert** : `@nuxtjs/i18n` et Vee-Validate sont absents alors que
 `CLAUDE.md` les impose ; l'historique factuel du membre (§6 module 11) n'a ni
-API ni écran ; les seuils de la grille d'abonnement ne sont pas tranchés
-([`docs/decisions/monetisation.md`](./docs/decisions/monetisation.md)).
+API ni écran ; le rail de paiement de l'abonnement n'est pas choisi — le
+prélèvement récurrent n'étant pas garanti ici, le règlement reste manuel.
 
 ## Choix du socle
 

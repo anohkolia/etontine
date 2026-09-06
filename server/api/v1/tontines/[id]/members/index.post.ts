@@ -1,6 +1,7 @@
 import { getRouterParam, readBody } from 'h3'
 import { managedMemberInput } from '../../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../../db/index.ts'
+import { verifierQuotaMembres } from '../../../../../services/abonnement.ts'
 import { ajouterMembreGere } from '../../../../../services/membres.ts'
 import { requireMembership } from '../../../../../utils/auth.ts'
 import { apiError, validationError } from '../../../../../utils/errors.ts'
@@ -15,6 +16,9 @@ export default defineEventHandler(async (event) => {
   const parsed = managedMemberInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  const id = ajouterMembreGere(useDb(), tontineId, parsed.data)
+  const db = useDb()
+  verifierQuotaMembres(db, tontineId)
+
+  const id = ajouterMembreGere(db, tontineId, parsed.data)
   return { id, shares: parsed.data.shares }
 })

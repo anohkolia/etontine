@@ -370,6 +370,19 @@ useHead({ title: 'Mon profil — eTontine' })
       </NuxtLink>
 
       <NuxtLink
+        to="/app/abonnement"
+        class="min-h-touch flex items-center gap-2 text-sm text-brand underline underline-offset-4"
+        data-testid="lien-abonnement"
+      >
+        <Icon
+          name="lucide:receipt-text"
+          size="1rem"
+          aria-hidden="true"
+        />
+        Mon abonnement
+      </NuxtLink>
+
+      <NuxtLink
         to="/app/profil/donnees"
         class="min-h-touch flex items-center gap-2 text-sm text-brand underline underline-offset-4"
         data-testid="lien-donnees"

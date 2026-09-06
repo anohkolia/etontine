@@ -16,6 +16,8 @@ Périmètre MVP : **tontine rotative uniquement**. Les autres modèles restent h
 | `kyc_level` | int 0–3 | voir §4 |
 | `pin_hash` | text? | verrouillage app |
 | `phone_changed_at` | timestamp? | déclenche le gel de 48 h sur les versements |
+| `plan_tier` | `free\|standard\|plus` | palier d'abonnement, défaut `free`. Porte sur la **personne**, jamais sur la tontine |
+| `plan_until` | timestamp? | fin des droits. Périmé, le palier retombe au gratuit **au calcul** — aucune tâche planifiée à faire tourner |
 | `created_at` | timestamp | |
 
 ### `collection_channels` — canaux de collecte d'un organisateur
@@ -145,6 +147,7 @@ Périmètre MVP : **tontine rotative uniquement**. Les autres modèles restent h
 - `disputes` : `ledger_entry_id`, `opened_by`, `status` `open|resolved`, fil de messages.
 - `invites` : `token`, `tontine_id`, `expires_at`, `max_uses`, `used_count`.
 - `notification_preferences` : par utilisateur et par tontine, avec `quiet_hours_start/end`.
+- `subscription_requests` : `user_id`, `tier`, `periodicity` `monthly|yearly`, `price_fcfa` (figé à la création — la grille peut bouger avant la décision), `status` `pending|approved|rejected`, `reviewed_by/at`, `review_note`. L'application n'encaisse rien : une demande est une intention, tranchée à la main depuis le back-office.
 
 ---
 
@@ -201,6 +204,16 @@ prepared ──> counter_validated ──> declared ──> acknowledged
 ```
 - `counter_validated` : requis si `amount > seuil` (configurable par tontine, défaut 100 000 FCFA). Acteur : président ou censeur, **différent** de celui qui a préparé.
 - `declared → acknowledged` : **seul le bénéficiaire** peut poser cet état.
+
+### 2.6 `subscription_requests.status`
+```
+pending ──> approved
+   │
+   └──> rejected
+```
+- Les deux états décidés sont **finaux** : on refait une demande, on ne rouvre pas l'ancienne. Le back-office garde ainsi qui a décidé quoi, et quand.
+- Acteur : administrateur du back-office uniquement, et la décision est écrite dans `admin_audit`.
+- `approved` pose `plan_tier` et `plan_until` sur le président. Renouveler le **même** palier prolonge les droits en cours ; changer de palier repart de la date de décision.
 
 ---
 

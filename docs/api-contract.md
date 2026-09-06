@@ -13,7 +13,9 @@ Base : `/api/v1`. Toutes les entrées et sorties sont validées par les schémas
 { "error": { "code": "INVALID_TRANSITION", "message": "…", "field": "status" } }
 ```
 
-Codes : `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INVALID_TRANSITION` (409), `IDEMPOTENCY_CONFLICT` (409), `KYC_REQUIRED` (403, avec `requiredLevel`), `RATE_LIMITED` (429).
+Codes : `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INVALID_TRANSITION` (409), `IDEMPOTENCY_CONFLICT` (409), `KYC_REQUIRED` (403, avec `requiredLevel`), `RATE_LIMITED` (429), `PLAN_LIMIT` (403).
+
+`PLAN_LIMIT` est renvoyé quand une action ferait franchir un quota d'abonnement. **403 et non 402** : rien n'est dû à l'application, et le quota se lève aussi en closant une tontine, pas seulement en payant.
 
 **Idempotence** : header `Idempotency-Key` **obligatoire** sur toutes les créations liées à l'argent (`declare`, `confirm`, `payout`). Rejeu de la même clé sous 24 h → renvoie la réponse d'origine, ne crée rien. Clé absente → `422`.
 
@@ -48,6 +50,32 @@ Codes : `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATI
 | `DELETE` | `/me` | Demande de suppression. **Refusée si l'utilisateur a des tours en cours** — renvoyer la liste des blocages, pas un refus opaque |
 | `GET` | `/me/channels` · `POST` · `DELETE /:id` | Canaux de collecte |
 | `POST` | `/me/channels/:id/verify` | OTP sur le numéro de collecte. **Tant que `verified_at` est null, le canal n'est pas utilisable** |
+
+---
+
+## Abonnement
+
+Le palier porte sur le **président**, jamais sur la tontine : le forfait est payé de sa poche, la caisse du groupe n'est jamais touchée (règle 5). Trois paliers forfaitaires — Gratuit, Standard, Plus — définis dans `shared/constants/abonnement.ts`, qui est la seule source de la grille.
+
+| Méthode | Route | Description |
+|:--|:--|:--|
+| `GET` | `/me/subscription` | Palier en vigueur, quotas, consommation réelle, demande en cours, dernière décision. **Tout est calculé côté serveur** : le client n'additionne rien |
+| `POST` | `/me/subscription/request` | `{ tier, periodicity }` → demande de passage. `Idempotency-Key` obligatoire. Le prix vient de la grille, **jamais du corps de la requête**. Une seule demande en attente à la fois (sinon `409`) |
+
+**L'application n'encaisse rien.** Une demande est une intention ; le règlement se fait hors application, et un administrateur pose le palier depuis le back-office. Le prélèvement récurrent n'est pas garanti sur les rails ivoiriens : aucune route ne doit laisser croire le contraire.
+
+**Où les quotas s'appliquent** — au franchissement, jamais rétroactivement :
+
+| Point d'entrée | Quota vérifié |
+|:--|:--|
+| `POST /tontines/:id/publish` | Tontines actives (`open` + `running`). Un brouillon n'occupe aucune place |
+| `POST /tontines/:id/members` | Membres de la tontine |
+| `POST /tontines/:id/invites` | Membres — **le lien cesse d'être partageable dès la limite atteinte** |
+| `POST /invites/:token/accept` | Membres — dernier filet, entre la création d'un lien et son usage des places se remplissent. Le rattachement d'un membre géré n'est **jamais** refusé : son siège est déjà compté |
+
+Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de son cycle même si le président repasse sous un palier plus étroit. Le registre, les preuves, les reçus, le contrôle d'intégrité et le procès-verbal PDF restent gratuits à tous les paliers.
+
+**Back-office** (application distincte, port 3001) : `GET /api/abonnements`, `POST /api/abonnements/:id/approve`, `POST /api/abonnements/:id/reject` (motif obligatoire). Toute décision est écrite dans `admin_audit`.
 
 ---
 
@@ -148,7 +176,8 @@ Codes : `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATI
 | Route | Accès | Écrans |
 |:--|:--|:--|
 | `/` | Public | Landing, pré-rendue |
-| `/tarifs`, `/aide`, `/legal/*` | Public | |
+| `/tarifs`, `/aide`, `/legal/*` | Public | Grille tarifaire pré-rendue ; `/tarif` y redirige en 301 |
+| `/app/abonnement` | Auth | Palier, quotas consommés, demande de passage |
 | `/login` | Public | Numéro + OTP |
 | `/join/[token]` | Public → auth | Aperçu de l'invitation **avant** connexion |
 | `/app` | Auth | Tableau de bord |

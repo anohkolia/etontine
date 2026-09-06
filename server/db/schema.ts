@@ -9,8 +9,11 @@ import {
   membershipStatus,
   paymentChannel,
   payoutStatus,
+  planPeriodicity,
+  planTier,
   rotationMode,
   roundStatus,
+  subscriptionRequestStatus,
   tontineAccess,
   tontineStatus,
 } from '../../shared/schemas/index.ts'
@@ -65,6 +68,17 @@ export const users = sqliteTable('users', {
   kycReviewedBy: text('kyc_reviewed_by'),
   kycReviewedAt: integer('kyc_reviewed_at', { mode: 'timestamp' }),
   kycRejectionReason: text('kyc_rejection_reason'),
+  /**
+   * Abonnement du président. Il porte sur la **personne**, pas sur la tontine :
+   * le forfait est payé de sa poche, la caisse du groupe n'est jamais débitée.
+   *
+   * `planUntil` est la date de fin de droits. Passée cette date, le palier
+   * retombe au gratuit **au calcul**, sans écriture ni tâche planifiée : un
+   * champ qui se périme tout seul ne peut pas se désynchroniser. Nul = palier
+   * gratuit, sans échéance.
+   */
+  planTier: text('plan_tier', { enum: planTier.options }).notNull().default('free'),
+  planUntil: integer('plan_until', { mode: 'timestamp' }),
   /** Consentements granulaires — deux cases distinctes (T08). */
   consentDataAt: integer('consent_data_at', { mode: 'timestamp' }),
   consentNotificationsAt: integer('consent_notifications_at', { mode: 'timestamp' }),
@@ -459,6 +473,41 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 }, t => [index('push_user_idx').on(t.userId)])
 
 /* ------------------------------------------------------------------ *
+ * Abonnement
+ * ------------------------------------------------------------------ */
+
+/**
+ * Demande de passage à un palier payant.
+ *
+ * L'application **n'encaisse rien** : elle ne sait pas prélever, et le
+ * prélèvement récurrent n'est de toute façon pas garanti sur les rails
+ * ivoiriens. Une demande est donc une intention, traitée hors application, puis
+ * approuvée à la main depuis le back-office — qui pose alors `plan_tier` et
+ * `plan_until` sur l'utilisateur.
+ *
+ * `priceFcfa` est figé à la création, en entiers de FCFA : la grille peut
+ * changer entre la demande et la décision, le président doit être facturé ce
+ * qu'on lui a affiché.
+ */
+export const subscriptionRequests = sqliteTable('subscription_requests', {
+  id: id(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tier: text('tier', { enum: planTier.options }).notNull(),
+  periodicity: text('periodicity', { enum: planPeriodicity.options }).notNull(),
+  /** Prix affiché au moment de la demande, en FCFA entiers. */
+  priceFcfa: integer('price_fcfa').notNull(),
+  status: text('status', { enum: subscriptionRequestStatus.options }).notNull().default('pending'),
+  /** L'administrateur qui a statué, quand, et pourquoi en cas de refus. */
+  reviewedBy: text('reviewed_by').references(() => users.id),
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
+  reviewNote: text('review_note'),
+  createdAt: createdAt(),
+}, t => [
+  index('subscription_requests_user_idx').on(t.userId),
+  index('subscription_requests_status_idx').on(t.status),
+])
+
+/* ------------------------------------------------------------------ *
  * Idempotence
  * ------------------------------------------------------------------ */
 
@@ -496,6 +545,7 @@ export type PaymentDeclaration = typeof paymentDeclarations.$inferSelect
 export type Payout = typeof payouts.$inferSelect
 export type LedgerEntry = typeof ledgerEntries.$inferSelect
 export type LedgerType = (typeof LEDGER_TYPES)[number]
+export type SubscriptionRequest = typeof subscriptionRequests.$inferSelect
 
 /* ------------------------------------------------------------------ *
  * Journal d'administration
