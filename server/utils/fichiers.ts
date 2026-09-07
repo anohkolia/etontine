@@ -10,17 +10,22 @@ const EXTENSIONS: Record<string, string> = {
   jpg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  pdf: 'application/pdf',
 }
 
 /**
  * Un nom de fichier accepté : un UUID, un point, une extension connue.
+ *
+ * Le `pdf` n'est déposé que par le dossier d'identité (`POST /me/kyc/piece`) :
+ * une pièce officielle circule souvent sous cette forme, alors qu'une capture
+ * de paiement reste une image.
  *
  * Volontairement strict et non « nettoyant ». Filtrer les `..` d'un chemin
  * fourni par l'appelant est un jeu qu'on perd tôt ou tard — encodages,
  * séparateurs alternatifs, normalisation Unicode. Un motif fermé ne laisse
  * passer que ce qu'on a soi-même écrit.
  */
-const NOM_VALIDE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/
+const NOM_VALIDE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|pdf)$/
 
 const ID_VALIDE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -95,4 +100,17 @@ export function decomposerUrlPiece(adresse: string): { userId: string, nom: stri
 
   const [, userId, nom] = correspondance
   return ID_VALIDE.test(userId!) && NOM_VALIDE.test(nom!) ? { userId: userId!, nom: nom! } : null
+}
+
+/**
+ * La nature d'une pièce, déduite de son extension : une image, ou un PDF.
+ *
+ * Le back-office en a besoin **avant** de demander le fichier : un PDF rendu
+ * dans une balise `img` ne donne pas un message d'erreur, il donne une image
+ * cassée, et l'administrateur conclut que la personne n'a rien déposé.
+ */
+export function natureDePiece(adresse: string): 'image' | 'pdf' | null {
+  const emplacement = decomposerUrlPiece(adresse)
+  if (!emplacement) return null
+  return emplacement.nom.endsWith('.pdf') ? 'pdf' : 'image'
 }

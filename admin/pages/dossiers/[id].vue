@@ -26,6 +26,8 @@ interface Dossier {
   rejectionReason: string | null
   hasDocument: boolean
   hasSelfie: boolean
+  documentNature: 'image' | 'pdf' | null
+  selfieNature: 'image' | 'pdf' | null
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -192,8 +194,26 @@ useHead({ title: 'Dossier — Administration' })
           <figcaption class="text-sm font-medium text-ink-muted">
             Pièce d’identité
           </figcaption>
+          <!-- Un PDF ne se rend pas dans une balise `img` : il donnerait une
+             image cassée, et l'on conclurait à tort qu'il manque une pièce. -->
+          <object
+            v-if="dossier.hasDocument && dossier.documentNature === 'pdf'"
+            :data="`/api/dossiers/${userId}/piece?type=document`"
+            type="application/pdf"
+            class="h-[32rem] w-full card-surface"
+            data-testid="piece-document"
+          >
+            <a
+              :href="`/api/dossiers/${userId}/piece?type=document`"
+              target="_blank"
+              rel="noopener"
+              class="block p-4 text-sm underline"
+            >
+              Ouvrir la pièce d’identité (PDF)
+            </a>
+          </object>
           <img
-            v-if="dossier.hasDocument"
+            v-else-if="dossier.hasDocument"
             :src="`/api/dossiers/${userId}/piece?type=document`"
             alt="Pièce d’identité déposée"
             class="w-full card-surface"
@@ -212,8 +232,26 @@ useHead({ title: 'Dossier — Administration' })
           <figcaption class="text-sm font-medium text-ink-muted">
             Selfie
           </figcaption>
+          <!-- Le selfie est pris à la caméra : toujours une image. Le cas PDF
+             ne subsiste que pour les dossiers déposés avant ce changement. -->
+          <object
+            v-if="dossier.hasSelfie && dossier.selfieNature === 'pdf'"
+            :data="`/api/dossiers/${userId}/piece?type=selfie`"
+            type="application/pdf"
+            class="h-[32rem] w-full card-surface"
+            data-testid="piece-selfie"
+          >
+            <a
+              :href="`/api/dossiers/${userId}/piece?type=selfie`"
+              target="_blank"
+              rel="noopener"
+              class="block p-4 text-sm underline"
+            >
+              Ouvrir le selfie (PDF)
+            </a>
+          </object>
           <img
-            v-if="dossier.hasSelfie"
+            v-else-if="dossier.hasSelfie"
             :src="`/api/dossiers/${userId}/piece?type=selfie`"
             alt="Selfie déposé"
             class="w-full card-surface"

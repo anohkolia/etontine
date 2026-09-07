@@ -35,11 +35,22 @@ export async function renseignerNom(page: Page, prenom = 'Aya', nom = 'Koné'): 
  */
 export async function verifierIdentite(page: Page): Promise<void> {
   await renseignerNom(page)
+
+  // Les pièces sont réellement déposées : `POST /me/kyc` refuse une adresse qui
+  // ne désigne pas un fichier déposé par l'appelant.
+  const image = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46])
+  const adresses: string[] = []
+
+  for (const nom of ['piece.jpg', 'selfie.jpg']) {
+    const depot = await page.request.post('/api/v1/me/kyc/piece', {
+      multipart: { file: { name: nom, mimeType: 'image/jpeg', buffer: image } },
+    })
+    if (!depot.ok()) throw new Error(`dépôt refusé : ${depot.status()} ${await depot.text()}`)
+    adresses.push((await depot.json() as { url: string }).url)
+  }
+
   const reponse = await page.request.post('/api/v1/me/kyc', {
-    data: {
-      documentUrl: 'https://exemple.test/piece.jpg',
-      selfieUrl: 'https://exemple.test/selfie.jpg',
-    },
+    data: { documentUrl: adresses[0], selfieUrl: adresses[1] },
   })
   if (!reponse.ok()) throw new Error(`KYC refusé : ${reponse.status()} ${await reponse.text()}`)
 }

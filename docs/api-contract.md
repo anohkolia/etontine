@@ -45,7 +45,8 @@ Codes : `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATI
 | Méthode | Route | Description |
 |:--|:--|:--|
 | `PATCH` | `/me` | Prénom, nom, avatar |
-| `POST` | `/me/kyc` | Upload pièce + selfie → palier 2, statut `pending_review` |
+| `POST` | `/me/kyc/piece` | Dépôt d'une pièce du dossier (multipart) → `{ url }`. PDF/JPG/JPEG/PNG ; **2 Mo max pour un PDF, 200 Ko pour une image** (le client compresse avant) |
+| `POST` | `/me/kyc` | `{ documentUrl, selfieUrl }` → palier 2, statut `pending_review`. Les deux adresses doivent désigner des pièces **déposées par l'appelant** via `/me/kyc/piece` |
 | `GET` | `/me/export` | Export des données personnelles (loi n°2013-450) |
 | `DELETE` | `/me` | Demande de suppression. **Refusée si l'utilisateur a des tours en cours** — renvoyer la liste des blocages, pas un refus opaque |
 | `GET` | `/me/channels` · `POST` · `DELETE /:id` | Canaux de collecte |
@@ -115,7 +116,7 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `POST` | `/declarations/bulk-confirm` | `{ ids: [] }` — le « tout confirmer » du trésorier |
 | `GET` | `/tontines/:id/pending-confirmations` | La file du trésorier |
 
-**Upload de preuve** : `POST /uploads/proof` (multipart) → `{ url }`. Le serveur **rejette au-delà de 200 Ko** ; le client compresse avant.
+**Upload de preuve** : `POST /uploads/proof` (multipart) → `{ url }`. Images seulement (JPEG/PNG/WebP). Le serveur **rejette au-delà de 200 Ko** ; le client compresse avant. Le PDF passe par `/me/kyc/piece`, réservé au dossier d'identité : une preuve de cotisation reste une image.
 
 ---
 

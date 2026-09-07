@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNotNull } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { adminAudit, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
+import { natureDePiece } from '../utils/fichiers.ts'
 import { journaliser } from './journal-admin.ts'
 import type { Administrateur } from './journal-admin.ts'
 import { notifier } from './notifications.ts'
@@ -25,6 +26,9 @@ export interface Dossier {
   rejectionReason: string | null
   hasDocument: boolean
   hasSelfie: boolean
+  /** Ce qu'il faut pour l'afficher : une image, ou un PDF. */
+  documentNature: 'image' | 'pdf' | null
+  selfieNature: 'image' | 'pdf' | null
 }
 
 function versDossier(u: typeof users.$inferSelect): Dossier {
@@ -42,6 +46,11 @@ function versDossier(u: typeof users.$inferSelect): Dossier {
     // n'a pas à circuler, elle se demande par la route dédiée.
     hasDocument: Boolean(u.kycDocumentUrl),
     hasSelfie: Boolean(u.kycSelfieUrl),
+    // La nature, en revanche, doit circuler : un PDF rendu dans une balise
+    // `img` ne signale rien, il donne une image cassée, et l'administrateur en
+    // conclut que la personne n'a rien déposé.
+    documentNature: u.kycDocumentUrl ? natureDePiece(u.kycDocumentUrl) : null,
+    selfieNature: u.kycSelfieUrl ? natureDePiece(u.kycSelfieUrl) : null,
   }
 }
 

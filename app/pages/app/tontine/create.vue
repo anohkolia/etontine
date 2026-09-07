@@ -33,6 +33,10 @@ const ETAPES = [
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const enregistrement = ref(false)
 const erreur = ref<string | null>(null)
+const erreurCode = ref<string | null>(null)
+
+/** L'adresse de la vérification d'identité, avec retour sur le wizard. */
+const versIdentite = '/app/profil/identite?redirect=/app/tontine/create'
 
 /** Les réglages en cours de saisie. Le serveur en garde la version qui fait foi. */
 const form = reactive({
@@ -77,9 +81,22 @@ const alertePlafond = computed(() => potEstime.value > seuilAlerte)
 
 const canauxVerifies = computed(() => canaux.value.filter(c => c.verifiedAt !== null))
 
+type ErreurApi = { data?: { error?: { code?: string, message?: string } } }
+
 function message(e: unknown): string {
-  return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+  return (e as ErreurApi)?.data?.error?.message ?? 'Impossible de joindre le serveur.'
+}
+
+/**
+ * Le code d'erreur, retenu à côté du message.
+ *
+ * Un refus pour palier manquant est le seul que l'organisateur ne peut pas
+ * lever depuis cet écran : lui répéter qu'il faut une pièce vérifiée sans lui
+ * donner le chemin est un cul-de-sac, d'autant qu'il est arrivé jusqu'au
+ * récapitulatif. Le bandeau porte donc la sortie.
+ */
+function code(e: unknown): string | null {
+  return (e as ErreurApi)?.data?.error?.code ?? null
 }
 
 async function charger() {
@@ -120,6 +137,7 @@ onMounted(charger)
 /** Enregistre l'étape courante, puis avance. */
 async function suivant() {
   erreur.value = null
+  erreurCode.value = null
   enregistrement.value = true
   try {
     if (brouillon.etape === 0) {
@@ -151,6 +169,7 @@ async function suivant() {
   }
   catch (e) {
     erreur.value = message(e)
+    erreurCode.value = code(e)
   }
   finally {
     enregistrement.value = false
@@ -191,6 +210,7 @@ function corpsDeLEtape(): Record<string, unknown> {
 
 async function publier() {
   erreur.value = null
+  erreurCode.value = null
   enregistrement.value = true
   try {
     await $fetch(`/api/v1/tontines/${brouillon.tontineId}/publish`, { method: 'POST' })
@@ -200,6 +220,7 @@ async function publier() {
   }
   catch (e) {
     erreur.value = message(e)
+    erreurCode.value = code(e)
   }
   finally {
     enregistrement.value = false
@@ -704,14 +725,37 @@ useHead({ title: 'Créer une tontine — eTontine' })
         </p>
       </section>
 
-      <p
+      <!-- Couleur + icône + mot (règle 10), et une sortie quand il en existe une. -->
+      <div
         v-if="erreur"
         role="alert"
-        class="rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+        class="flex flex-col gap-3 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
         data-testid="erreur-wizard"
       >
-        {{ erreur }}
-      </p>
+        <p class="flex items-start gap-1.5">
+          <Icon
+            name="lucide:triangle-alert"
+            size="0.875rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ erreur }}
+        </p>
+        <NuxtLink
+          v-if="erreurCode === 'KYC_REQUIRED'"
+          :to="versIdentite"
+          class="inline-flex min-h-touch items-center justify-center gap-1.5 rounded-control
+                 bg-brand px-4 font-medium text-brand-ink hover:bg-brand-strong"
+          data-testid="lien-verifier-identite"
+        >
+          <Icon
+            name="lucide:id-card"
+            size="1rem"
+            aria-hidden="true"
+          />
+          Vérifier mon identité
+        </NuxtLink>
+      </div>
 
       <!-- Règle 13 : les actions primaires en bas d'écran. -->
       <div class="mt-auto flex flex-col gap-2 pt-2 sm:flex-row-reverse">

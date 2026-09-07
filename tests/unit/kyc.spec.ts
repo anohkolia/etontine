@@ -8,7 +8,7 @@ import {
   journalAdministration, journaliserConsultation, rejeterDossier, urlPiece,
 } from '../../server/services/kyc.ts'
 import { estAdministrateur, numerosAdministrateurs } from '../../server/utils/admin.ts'
-import { decomposerUrlPiece, lirePiece } from '../../server/utils/fichiers.ts'
+import { decomposerUrlPiece, lirePiece, natureDePiece } from '../../server/utils/fichiers.ts'
 import { adminAudit, notifications, users } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
@@ -234,6 +234,10 @@ describe('lecture des pièces — traversée de chemin', () => {
       join(racine, 'data', 'preuves', DEMANDEUR, 'bbbb0000-0000-4000-8000-000000000001.jpg'),
       Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]),
     )
+    writeFileSync(
+      join(racine, 'data', 'preuves', DEMANDEUR, 'bbbb0000-0000-4000-8000-000000000003.pdf'),
+      Buffer.from('%PDF-1.4'),
+    )
     writeFileSync(join(racine, 'secret.txt'), 'ne doit jamais sortir')
     process.chdir(racine)
   })
@@ -248,6 +252,15 @@ describe('lecture des pièces — traversée de chemin', () => {
 
     expect(piece).not.toBeNull()
     expect(piece!.type).toBe('image/jpeg')
+  })
+
+  it('lit une pièce d’identité en PDF', async () => {
+    // Une CNI arrive souvent scannée en PDF. Sans cette extension, le dépôt
+    // aboutissait mais l'administrateur ne pouvait plus rien lire.
+    const piece = await lirePiece(DEMANDEUR, 'bbbb0000-0000-4000-8000-000000000003.pdf')
+
+    expect(piece).not.toBeNull()
+    expect(piece!.type).toBe('application/pdf')
   })
 
   it('refuse tout ce qui n’est pas un nom attendu', async () => {
@@ -283,6 +296,16 @@ describe('lecture des pièces — traversée de chemin', () => {
     expect(decomposerUrlPiece(chemin)).toEqual(attendu)
     expect(decomposerUrlPiece(`http://localhost:3000${chemin}`)).toEqual(attendu)
     expect(decomposerUrlPiece(`https://tontine.ci${chemin}`)).toEqual(attendu)
+  })
+
+  it('distingue une image d’un PDF sans lire le fichier', () => {
+    // Le back-office a besoin de la nature **avant** de demander le fichier :
+    // un PDF rendu dans une balise `img` ne signale rien, il casse en silence.
+    const base = `/api/v1/uploads/proof/${DEMANDEUR}`
+
+    expect(natureDePiece(`${base}/bbbb0000-0000-4000-8000-000000000001.jpg`)).toBe('image')
+    expect(natureDePiece(`${base}/bbbb0000-0000-4000-8000-000000000003.pdf`)).toBe('pdf')
+    expect(natureDePiece('https://ailleurs.test/piece.pdf')).toBeNull()
   })
 
   it('ne décompose que les adresses de pièces qu’on a fabriquées', () => {

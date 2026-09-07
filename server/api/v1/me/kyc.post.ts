@@ -6,6 +6,7 @@ import { users } from '../../../db/schema.ts'
 import { requireUser } from '../../../utils/auth.ts'
 import { apiError, validationError } from '../../../utils/errors.ts'
 import { isProduction } from '../../../utils/env.ts'
+import { decomposerUrlPiece } from '../../../utils/fichiers.ts'
 
 /**
  * Vérification d'identité — palier KYC 2.
@@ -22,10 +23,15 @@ import { isProduction } from '../../../utils/env.ts'
  *
  * Le parcours d'examen reste couvert : les tests du back-office placent
  * eux-mêmes un dossier en attente pour l'éprouver.
+ *
+ * Les deux adresses doivent désigner une pièce **déposée ici par l'appelant**,
+ * via `POST /me/kyc/piece`. Accepter une URL quelconque laissait passer un lien
+ * externe — l'administrateur ouvrait alors une adresse choisie par la personne
+ * qu'il examine — et laissait désigner la pièce de quelqu'un d'autre.
  */
 const kycInput = z.object({
-  documentUrl: z.string().url(),
-  selfieUrl: z.string().url(),
+  documentUrl: z.string(),
+  selfieUrl: z.string(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -41,6 +47,19 @@ export default defineEventHandler(async (event) => {
 
   const parsed = kycInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
+
+  for (const [champ, adresse] of [
+    ['documentUrl', parsed.data.documentUrl],
+    ['selfieUrl', parsed.data.selfieUrl],
+  ] as const) {
+    if (decomposerUrlPiece(adresse)?.userId !== user.id) {
+      throw apiError(
+        'VALIDATION_ERROR',
+        'Dépose la pièce depuis cet écran avant de l’envoyer.',
+        { field: champ },
+      )
+    }
+  }
 
   const approbationImmediate = !isProduction()
 
