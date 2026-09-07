@@ -5,8 +5,29 @@
  * C'est délibéré : quelqu'un qui ne comprend pas ce qui se passe est souvent
  * quelqu'un qui n'a pas de réseau. Une aide inaccessible au moment où elle
  * servirait n'est pas une aide.
+ *
+ * **Sans mise en page** : la page est publique, liée depuis la landing, et la
+ * coquille authentifiée n'aurait pas de sens pour un visiteur sans compte.
+ * Elle porte donc elle-même la barre d'onglets — mais seulement pour qui a une
+ * session : c'est un onglet de cette barre qui mène ici, et le membre qui le
+ * touche ne doit pas se retrouver dans un écran sans retour.
+ *
+ * La barre est rendue côté client uniquement. La page est mise en cache pour
+ * le hors-ligne, et un HTML figé porterait la barre à un visiteur déconnecté.
  */
 definePageMeta({ layout: false })
+
+const session = useSessionStore()
+onMounted(() => session.charger())
+
+/**
+ * Où ramène le lien de retour. Il bascule après l'hydratation, quand la session
+ * est connue : avant, on ne sait rien, et l'accueil public est la bonne réponse
+ * par défaut — c'est ce que voit un visiteur, et c'est ce qui est mis en cache.
+ */
+const retour = computed(() => session.connecte
+  ? { to: '/app', label: 'Mes tontines' }
+  : { to: '/', label: 'Retour à l’accueil' })
 
 useHead({
   title: 'Aide — eTontine',
@@ -68,16 +89,21 @@ const questions = [
          quitté le produit. -->
     <header class="gradient-trust rounded-b-tile px-6 pt-6 pb-10 text-night-ink">
       <div class="mx-auto max-w-2xl">
+        <!-- L'accueil d'un membre n'est pas celui d'un visiteur : renvoyer un
+             membre sur la page de présentation du produit, alors que la barre
+             juste en dessous porte un onglet « Accueil » vers son tableau de
+             bord, donne deux accueils contradictoires sur le même écran. -->
         <NuxtLink
-          to="/"
+          :to="retour.to"
           class="min-h-touch inline-flex items-center gap-1 text-xs font-semibold text-night-ink/75 hover:text-night-ink"
+          data-testid="aide-retour"
         >
           <Icon
             name="lucide:arrow-left"
             size="0.875rem"
             aria-hidden="true"
           />
-          Retour à l’accueil
+          {{ retour.label }}
         </NuxtLink>
         <h1 class="mt-2 text-2xl font-bold">
           Aide
@@ -88,7 +114,12 @@ const questions = [
       </div>
     </header>
 
-    <main class="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-8">
+    <!-- La marge basse laisse passer la barre d'onglets quand elle est là :
+         sans elle, le dernier lien se retrouve dessous, inatteignable. -->
+    <main
+      class="mx-auto flex max-w-2xl flex-col gap-6 px-6 pt-8"
+      :class="session.connecte ? 'pb-28' : 'pb-8'"
+    >
       <dl class="flex flex-col gap-4">
         <div
           v-for="(item, i) in questions"
@@ -105,12 +136,16 @@ const questions = [
       </dl>
 
       <NuxtLink
-        to="/"
+        :to="retour.to"
         class="min-h-touch inline-flex items-center gap-2 text-sm text-brand underline underline-offset-4"
       >
-        Retour à l’accueil
+        {{ retour.label }}
       </NuxtLink>
     </main>
+
+    <ClientOnly>
+      <BarreOnglets v-if="session.connecte" />
+    </ClientOnly>
   </div>
 </template>
 
