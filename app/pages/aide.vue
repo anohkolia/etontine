@@ -86,10 +86,12 @@ const questions = [
   <div class="min-h-dvh">
     <!-- Le bandeau hors-ligne, comme dans la mise en page de l'application.
          C'est ici qu'il manque le plus : cette page est justement celle qu'on
-         atteint sans réseau, et une saisie enfilée ailleurs continue de partir
-         toute seule pendant qu'on la lit. Il ne dépend pas de la session — une
-         coupure réseau n'a rien à voir avec le fait d'avoir un compte. -->
-    <OfflineBanner />
+         atteint sans réseau. Il ne dépend pas de la session — une coupure
+         réseau n'a rien à voir avec le fait d'avoir un compte.
+
+         En `lecture` : rien ne se saisit ici, mais une saisie enfilée ailleurs
+         continue de partir toute seule pendant qu'on lit. -->
+    <OfflineBanner nature="lecture" />
 
     <!-- Même bandeau en dégradé que la landing et que l'application : une page
          d'aide qui ne ressemble pas au produit donne l'impression d'avoir

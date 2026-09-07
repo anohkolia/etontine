@@ -105,3 +105,15 @@ test('un code valide ouvre la session et mène à l’application', async ({ pag
   expect(session?.httpOnly).toBe(true)
   expect(session?.sameSite).toBe('Lax')
 })
+
+test('hors ligne, la connexion ne promet pas de garder la saisie', async ({ page, context }) => {
+  await context.setOffline(true)
+
+  // Rien n'est mis en file ici : un code par SMS ne se demande pas sans
+  // réseau. Le bandeau générique annonçait pourtant que la saisie partirait
+  // toute seule — le membre attendait un SMS qui n'avait jamais été demandé.
+  const bandeau = page.getByTestId('offline-banner')
+  await expect(bandeau).toBeVisible()
+  await expect(bandeau).toContainText('a besoin du réseau')
+  await expect(bandeau).not.toContainText('Ce que tu saisis')
+})

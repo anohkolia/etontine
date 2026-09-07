@@ -57,7 +57,13 @@ test('la page d’aide annonce la coupure réseau', async ({ page, context }) =>
   // C'est la page qu'on atteint sans réseau — elle est mise en cache pour ça.
   // Elle doit donc dire pourquoi le reste ne répond pas.
   await context.setOffline(true)
-  await expect(page.getByTestId('offline-banner')).toBeVisible()
+  const bandeau = page.getByTestId('offline-banner')
+  await expect(bandeau).toBeVisible()
+
+  // Et le dire juste : il n'y a rien à saisir sur cette page, donc rien à
+  // garder. Promettre le contraire fait attendre un envoi qui n'existe pas.
+  await expect(bandeau).toContainText('Cette page reste lisible')
+  await expect(bandeau).not.toContainText('Ce que tu saisis')
 
   await context.setOffline(false)
   await expect(page.getByTestId('offline-banner')).toBeHidden()

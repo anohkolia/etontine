@@ -41,7 +41,8 @@ useHead(() => ({
 
 <template>
   <div class="flex min-h-dvh flex-col bg-surface-muted">
-    <OfflineBanner />
+    <!-- un reçu se lit, rien ne s'y saisit. -->
+    <OfflineBanner nature="lecture" />
 
     <main class="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 px-5 py-8">
       <LoadingSkeleton

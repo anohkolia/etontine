@@ -128,7 +128,10 @@ useHead({ title: 'Connexion — eTontine' })
 
 <template>
   <div class="flex min-h-dvh flex-col bg-surface">
-    <OfflineBanner />
+    <!-- un code par SMS ne se demande pas hors réseau : rien n'est mis en file
+         ici, et promettre le contraire ferait attendre un envoi qui n'a pas eu
+         lieu. -->
+    <OfflineBanner nature="reseau-requis" />
 
     <main class="mx-auto flex w-full max-w-sm flex-1 flex-col gap-6 px-6 py-8">
       <NuxtLink

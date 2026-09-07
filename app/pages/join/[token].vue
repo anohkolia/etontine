@@ -82,7 +82,8 @@ useHead(() => ({
 
 <template>
   <div class="flex min-h-dvh flex-col bg-surface-muted">
-    <OfflineBanner />
+    <!-- rejoindre une tontine passe par un appel direct, jamais par la file. -->
+    <OfflineBanner nature="reseau-requis" />
 
     <main class="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 px-5 py-8">
       <LoadingSkeleton

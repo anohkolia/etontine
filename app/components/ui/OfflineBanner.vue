@@ -3,12 +3,33 @@
  * L'état hors-ligne des cinq états obligatoires (règle 14).
  *
  * Le bandeau ne se contente pas de signaler la coupure : il dit ce qui se
- * passe pour le membre. Une déclaration saisie sans réseau n'est pas perdue,
- * elle part à la reconnexion (file de mutations, T24). Sans cette phrase, le
- * membre renvoie son paiement une seconde fois.
+ * passe pour le membre. Sans cette phrase, le membre renvoie son paiement une
+ * seconde fois.
+ *
+ * Encore faut-il qu'elle soit vraie sur l'écran où on la lit. Trois cas :
+ *
+ * - `saisie` — la file de mutations couvre l'écran (T24) : une déclaration
+ *   faite sans réseau part toute seule au retour. C'est la promesse forte, et
+ *   elle n'engage que les écrans qui passent par `envoyerOuEnfiler` ;
+ * - `lecture` — il n'y a rien à saisir. Promettre de garder une saisie sur une
+ *   page d'aide ou un reçu ne veut rien dire ;
+ * - `reseau-requis` — il y a un formulaire, mais rien n'est mis en file. Un
+ *   code par SMS ne se demande pas hors réseau, et une invitation ne s'accepte
+ *   pas non plus. Annoncer le contraire est pire que se taire : le membre
+ *   attend un envoi qui n'a jamais eu lieu.
  *
  * Ni couleur seule (règle 10), ni montant (règle 21).
  */
+const { nature = 'saisie' } = defineProps<{
+  nature?: 'saisie' | 'lecture' | 'reseau-requis'
+}>()
+
+const consigne = computed(() => ({
+  'saisie': 'Ce que tu saisis est gardé et partira au retour du réseau.',
+  'lecture': 'Cette page reste lisible. Le reste attend le retour du réseau.',
+  'reseau-requis': 'Cette étape a besoin du réseau. Reprends dès qu’il revient.',
+}[nature]))
+
 const online = useOnline()
 const { enAttente, vider, rafraichir } = useFileHorsLigne()
 
@@ -51,7 +72,7 @@ onMounted(async () => {
         />
         <p>
           <strong class="font-semibold">Hors ligne.</strong>
-          Ce que tu saisis est gardé et partira au retour du réseau.
+          {{ consigne }}
           <span
             v-if="enAttente.length > 0"
             data-testid="file-en-attente"
