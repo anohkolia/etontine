@@ -48,3 +48,17 @@ test('sans session, la page d’aide reste une page publique', async ({ page }) 
   await expect(page.getByTestId('barre-onglets')).toBeHidden()
   await expect(page.getByTestId('aide-retour')).toHaveAttribute('href', '/')
 })
+
+test('la page d’aide annonce la coupure réseau', async ({ page, context }) => {
+  await page.goto('/aide')
+  await waitForHydration(page)
+  await expect(page.getByTestId('offline-banner')).toBeHidden()
+
+  // C'est la page qu'on atteint sans réseau — elle est mise en cache pour ça.
+  // Elle doit donc dire pourquoi le reste ne répond pas.
+  await context.setOffline(true)
+  await expect(page.getByTestId('offline-banner')).toBeVisible()
+
+  await context.setOffline(false)
+  await expect(page.getByTestId('offline-banner')).toBeHidden()
+})

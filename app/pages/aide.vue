@@ -84,6 +84,13 @@ const questions = [
 
 <template>
   <div class="min-h-dvh">
+    <!-- Le bandeau hors-ligne, comme dans la mise en page de l'application.
+         C'est ici qu'il manque le plus : cette page est justement celle qu'on
+         atteint sans réseau, et une saisie enfilée ailleurs continue de partir
+         toute seule pendant qu'on la lit. Il ne dépend pas de la session — une
+         coupure réseau n'a rien à voir avec le fait d'avoir un compte. -->
+    <OfflineBanner />
+
     <!-- Même bandeau en dégradé que la landing et que l'application : une page
          d'aide qui ne ressemble pas au produit donne l'impression d'avoir
          quitté le produit. -->
@@ -154,6 +161,7 @@ const questions = [
   · chargement — sans objet : contenu statique, mis en cache pour le hors-ligne
   · vide       — sans objet : la liste de questions est fixe
   · erreur     — sans objet : aucun appel réseau
-  · hors-ligne — la page est justement mise en cache pour être lue sans réseau
+  · hors-ligne — la page est mise en cache pour être lue sans réseau, et le
+                 bandeau `OfflineBanner` annonce la coupure
   · contenu    — les questions fréquentes
 -->
