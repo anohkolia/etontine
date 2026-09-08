@@ -15,6 +15,19 @@ export default defineEventHandler(async (event) => {
   const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1).all()
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
-  await requireMembership(event, tour.tontineId, ['treasurer', 'president', 'auditor'])
-  return etatVersement(db, roundId)
+  const { user, membership } = await requireMembership(event, tour.tontineId)
+  const etat = etatVersement(db, roundId, user.id)
+
+  // Le bureau, et le bénéficiaire du tour — il a désormais un geste à faire
+  // ici, et cet écran porte le numéro vers lequel le pot va partir : on ne
+  // l'ouvre pas à toute la tontine pour autant.
+  const duBureau = ['treasurer', 'president', 'auditor'].includes(membership.role)
+  if (!duBureau && membership.id !== etat.beneficiary.membershipId) {
+    throw apiError(
+      'FORBIDDEN',
+      'Cet écran est réservé au bureau et au bénéficiaire du tour.',
+    )
+  }
+
+  return etat
 })

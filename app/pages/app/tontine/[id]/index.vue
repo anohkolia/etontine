@@ -47,6 +47,8 @@ interface Detail {
   potCollected: number
   myRemaining: number
   myContributionStatus: 'due' | 'late' | 'declared' | 'confirmed' | 'disputed' | null
+  /** Une contre-validation de versement attend l'utilisateur sur le tour courant. */
+  awaitingMyCounterValidation: boolean
   channels: Canal[]
   currentRound: { id: string, index: number, dueDate: string, status: string } | null
   publicationBlockers: Array<{ champ: string, message: string }>
@@ -346,6 +348,24 @@ useHead({ title: 'Ma tontine — eTontine' })
           </div>
         </dl>
       </section>
+
+      <!-- Le bénéficiaire du tour a une contre-validation à donner, et l'onglet
+           « Verser » ne lui est pas montré : sans ce lien, il n'aurait aucun
+           chemin vers l'écran où le versement l'attend. -->
+      <NuxtLink
+        v-if="tontine.awaitingMyCounterValidation && !estBureau"
+        :to="`/app/tontine/${tontineId}/versement`"
+        class="min-h-touch flex items-center gap-2 rounded-control border border-declared-ink/20 bg-declared-surface px-4 text-sm font-semibold text-declared-ink"
+        data-testid="lien-contre-validation"
+      >
+        <Icon
+          name="lucide:package"
+          size="1rem"
+          class="shrink-0"
+          aria-hidden="true"
+        />
+        Le pot de ce tour te revient : vérifie le montant avant l’envoi
+      </NuxtLink>
 
       <!-- Actions du bureau, groupées : elles ne concernent pas tout le monde. -->
       <div

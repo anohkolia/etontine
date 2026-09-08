@@ -30,6 +30,10 @@ interface EtatVersement {
   }
   counterValidationRequired: boolean
   counterValidationThreshold: number
+  /** Faux quand personne ne peut contre-valider — bureau réduit au préparateur. */
+  counterValidationPossible: boolean
+  /** Calculé côté serveur pour l'appelant : le client n'en décide pas. */
+  canCounterValidate: boolean
   payout: {
     id: string
     status: 'prepared' | 'counter_validated' | 'declared' | 'acknowledged' | 'disputed'
@@ -63,10 +67,17 @@ const montantRecu = ref(0)
 
 const estBureau = computed(() => monRole.value === 'president' || monRole.value === 'treasurer')
 const estPresident = computed(() => monRole.value === 'president')
-const peutContreValider = computed(() =>
-  (monRole.value === 'president' || monRole.value === 'auditor')
-  && versement.value?.payout?.status === 'prepared'
-  && versement.value.payout.preparedBy !== session.user?.id,
+/**
+ * Le droit de contre-valider est **résolu par le serveur** et lu ici tel quel.
+ * Il ne se déduit plus du seul rôle : le bénéficiaire du tour l'a aussi, et le
+ * client ne sait pas qui c'est avant de l'avoir demandé.
+ */
+const peutContreValider = computed(() => versement.value?.canCounterValidate === true)
+
+/** Personne ne peut contre-valider : le versement passe outre, et c'est écrit. */
+const contreValidationImpossible = computed(() =>
+  versement.value?.counterValidationRequired === true
+  && versement.value.counterValidationPossible === false,
 )
 
 /** Seul le bénéficiaire peut accuser réception — le serveur refuse les autres. */
@@ -345,7 +356,8 @@ useHead({ title: 'Verser le pot — eTontine' })
 
       <!-- Étape 2 — contre-validation -->
       <section
-        v-if="versement.payout?.status === 'prepared' && versement.counterValidationRequired"
+        v-if="versement.payout?.status === 'prepared' && versement.counterValidationRequired
+          && !contreValidationImpossible"
         class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-contre-validation"
       >
@@ -353,8 +365,9 @@ useHead({ title: 'Verser le pot — eTontine' })
           Contre-validation
         </h2>
         <p class="text-sm text-ink-muted">
-          Ce montant dépasse le seuil de la tontine. Une seconde personne du
-          bureau doit valider avant l’envoi.
+          Ce montant dépasse le seuil de la tontine. Une seconde personne doit
+          valider avant l’envoi : le président, le censeur, ou celui qui prend
+          la main ce tour-ci.
         </p>
 
         <Button
@@ -370,8 +383,8 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="rounded-control bg-surface-muted p-3 text-sm text-ink-muted"
           data-testid="attente-contre-validation"
         >
-          En attente d’un autre membre du bureau. Celui qui a préparé le
-          versement ne peut pas le contre-valider lui-même.
+          En attente d’une autre personne. Celui qui a préparé le versement ne
+          peut pas le contre-valider lui-même.
         </p>
       </section>
 
@@ -379,7 +392,8 @@ useHead({ title: 'Verser le pot — eTontine' })
       <section
         v-if="estBureau && versement.payout
           && (versement.payout.status === 'counter_validated'
-            || (versement.payout.status === 'prepared' && !versement.counterValidationRequired))"
+            || (versement.payout.status === 'prepared'
+              && (!versement.counterValidationRequired || contreValidationImpossible)))"
         class="flex flex-col gap-3 card-surface p-4"
         data-testid="etape-declaration-versement"
       >
@@ -388,6 +402,26 @@ useHead({ title: 'Verser le pot — eTontine' })
         </h2>
         <p class="text-sm text-ink-muted">
           Envoie le pot depuis ton application de paiement, puis déclare-le ici.
+        </p>
+
+        <!-- Dit franchement ce qui n'aura pas lieu, plutôt que de laisser
+             croire que le contrôle a été fait. Règle 10 : mot + icône. -->
+        <p
+          v-if="contreValidationImpossible"
+          class="flex items-start gap-2 rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+          data-testid="avertissement-sans-contre-validation"
+        >
+          <Icon
+            name="lucide:flag"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          <span>
+            Ce montant demanderait une contre-validation, mais tu es la seule
+            personne en mesure de la donner sur ce tour. Le versement peut
+            partir, et le registre gardera qu’il n’a été vu que par toi.
+          </span>
         </p>
 
         <label

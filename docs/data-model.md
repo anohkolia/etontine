@@ -208,7 +208,11 @@ prepared ──> counter_validated ──> declared ──> acknowledged
                                        │
                                        └──> disputed ──> declared
 ```
-- `counter_validated` : requis si `amount > seuil` (configurable par tontine, défaut 100 000 FCFA). Acteur : président ou censeur, **différent** de celui qui a préparé.
+- `counter_validated` : requis si `amount > seuil` (configurable par tontine, défaut 100 000 FCFA). Acteur : président, censeur **ou bénéficiaire du tour**, et toujours **différent** de celui qui a préparé.
+
+  Le bénéficiaire y a sa place pour une raison de fond, pas de commodité : c'est la personne qui peut réellement vérifier quelque chose. Elle lit le montant annoncé et les quatre derniers chiffres de son propre numéro avant que l'argent parte, et c'est elle qui perd si l'un des deux est faux. Sans elle, une tontine dont le bureau tient en une personne n'aurait aucun second acteur, et tout pot dépassant le seuil resterait bloqué pour de bon.
+
+  **Quand il n'existe aucun acteur possible** — le tour où l'organisateur est à la fois le seul membre du bureau et le bénéficiaire —, la contre-validation ne bloque pas le versement : elle est sautée, et l'écriture `payout_declared` porte `contreValidationImpossible: true`. Un pot gelé fait plus de dégâts qu'un versement vu par une seule personne ; ce qu'on doit au groupe, c'est de l'écrire au registre plutôt que de laisser croire que le contrôle a eu lieu.
 - `declared → acknowledged` : **seul le bénéficiaire** peut poser cet état.
 
 ### 2.6 `subscription_requests.status`
@@ -233,7 +237,7 @@ pending ──> approved
 | Confirmer une déclaration | ❌ | ✅ | ✅ | ❌ |
 | Appliquer / annuler une amende | ❌ | ❌ | ✅ | ❌ |
 | Préparer un versement | ❌ | ✅ | ✅ | ❌ |
-| Contre-valider un versement | ❌ | ❌ | ✅ | ✅ |
+| Contre-valider un versement | ✅ (bénéficiaire du tour) | ❌ | ✅ | ✅ |
 | Accuser réception du pot | ✅ (bénéficiaire seul) | — | — | — |
 | Modifier l'ordre de rotation | ❌ | ❌ | ✅ + contre-validation | ✅ (contre-valide) |
 | Inviter / exclure un membre | ❌ | ❌ | ✅ | ❌ |

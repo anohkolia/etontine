@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  accuserReception, contreValiderVersement, declarerVersement, etatVersement, preparerVersement,
+  accuserReception, contreValidateursPossibles, contreValiderVersement, declarerVersement,
+  etatVersement, preparerVersement,
 } from '../../server/services/versements.ts'
 import { declarerPaiement } from '../../server/services/declarations.ts'
 import { confirmerDeclaration } from '../../server/services/confirmations.ts'
@@ -9,7 +10,7 @@ import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
-import { contributions, ledgerEntries, memberships, rounds, tontines, users } from '../../server/db/schema.ts'
+import { contributions, ledgerEntries, memberships, rounds, shares, tontines, users } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -267,5 +268,97 @@ describe('accusé de réception — acceptation T19', () => {
     expect(() => accuserReception(db, tour1, PRESIDENT, 100_000)).toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
+  })
+})
+
+describe('contre-validation ouverte au bénéficiaire — docs/data-model.md §2.5', () => {
+  /** Fait du porteur de ce compte le bénéficiaire du tour 1. */
+  function beneficiaireEst(userId: string) {
+    const ms = db.select().from(memberships).all().find(m => m.userId === userId)!
+    const part = db.select().from(shares).all().find(s => s.membershipId === ms.id)!
+    db.update(rounds).set({ beneficiaryShareId: part.id }).where(eq(rounds.id, tour1)).run()
+  }
+
+  /** Retire sa casquette à quelqu'un : le bureau se réduit d'autant. */
+  function simpleMembre(userId: string) {
+    db.update(memberships).set({ role: 'member' }).where(eq(memberships.userId, userId)).run()
+  }
+
+  beforeEach(() => {
+    potComplet()
+    db.update(tontines).set({ counterValidationThreshold: 50_000 }).where(eq(tontines.id, T)).run()
+  })
+
+  it('compte le bénéficiaire du tour parmi les contre-validateurs', () => {
+    beneficiaireEst(TRESORIER)
+    simpleMembre(CENSEUR)
+
+    const possibles = contreValidateursPossibles(db, tour1, PRESIDENT)
+
+    // Le trésorier n'est pas du bureau au sens du §2.5 ; il est ici parce que
+    // c'est lui qui prend la main, donc lui qui perd si le montant est faux.
+    expect(possibles).toContain(TRESORIER)
+    expect(possibles).not.toContain(PRESIDENT)
+  })
+
+  it('laisse le bénéficiaire contre-valider ce qu’il va recevoir', () => {
+    beneficiaireEst(TRESORIER)
+    simpleMembre(CENSEUR)
+
+    // '2222' : les quatre derniers chiffres du numéro de Koffi, le bénéficiaire.
+    preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: '2222', acceptIncompletePot: false })
+    const resultat = contreValiderVersement(db, tour1, TRESORIER)
+
+    expect(resultat.status).toBe('counter_validated')
+    expect(() => declarerVersement(db, tour1, PRESIDENT, { channel: 'wave' })).not.toThrow()
+  })
+
+  it('refuse la contre-validation par le trésorier, qui n’est ni du bureau ni bénéficiaire', () => {
+    // Le §2.5 réserve la contre-validation au président et au censeur. Le
+    // trésorier prépare, il ne se relit pas.
+    preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+
+    expect(() => contreValiderVersement(db, tour1, TRESORIER)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('exige toujours la contre-validation tant qu’un second acteur existe', () => {
+    preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+
+    // Le censeur est là : le seuil garde toute sa force.
+    expect(contreValidateursPossibles(db, tour1, PRESIDENT)).toContain(CENSEUR)
+    expect(() => declarerVersement(db, tour1, PRESIDENT, { channel: 'wave' })).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('passe outre quand personne ne peut contre-valider, et l’inscrit au registre', () => {
+    // Le tour où le président est lui-même bénéficiaire d'une tontine qu'il
+    // tient seul : plus aucun second acteur. Bloquer là gèlerait le pot.
+    simpleMembre(TRESORIER)
+    simpleMembre(CENSEUR)
+    preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+
+    expect(contreValidateursPossibles(db, tour1, PRESIDENT)).toHaveLength(0)
+    expect(() => declarerVersement(db, tour1, PRESIDENT, { channel: 'wave' })).not.toThrow()
+
+    const [ecriture] = db.select().from(ledgerEntries).all()
+      .filter(e => e.type === 'payout_declared')
+    const payload = ecriture!.payload as { contreValidationImpossible?: boolean }
+
+    // Le groupe doit pouvoir lire que ce versement n'a été vu que par une
+    // personne. C'est tout ce qu'on peut lui offrir à la place du contrôle.
+    expect(payload.contreValidationImpossible).toBe(true)
+  })
+
+  it('ne marque rien quand la contre-validation a bien eu lieu', () => {
+    preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+    contreValiderVersement(db, tour1, CENSEUR)
+    declarerVersement(db, tour1, PRESIDENT, { channel: 'wave' })
+
+    const [ecriture] = db.select().from(ledgerEntries).all()
+      .filter(e => e.type === 'payout_declared')
+    expect(ecriture!.payload).not.toHaveProperty('contreValidationImpossible')
   })
 })

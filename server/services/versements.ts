@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, payouts, rounds, shares, tontines, users,
@@ -35,6 +35,15 @@ export interface EtatVersement {
   }
   counterValidationRequired: boolean
   counterValidationThreshold: number
+  /**
+   * Y a-t-il seulement quelqu'un pour contre-valider ? Faux quand le bureau se
+   * réduit à celui qui a préparé — le tour où le président est lui-même le
+   * bénéficiaire d'une tontine qu'il tient seul. L'écran doit le dire, sinon
+   * il affiche un bouton que personne ne peut presser.
+   */
+  counterValidationPossible: boolean
+  /** L'appelant peut-il contre-valider maintenant ? */
+  canCounterValidate: boolean
   payout: typeof payouts.$inferSelect | null
 }
 
@@ -57,13 +66,59 @@ function contexteTour(db: Db, roundId: string) {
 }
 
 /**
+ * Qui peut contre-valider le versement d'un tour.
+ *
+ * Le bureau — président et censeur — **et le bénéficiaire du tour**, dès lors
+ * qu'il a un compte. L'ouvrir au bénéficiaire n'est pas un assouplissement :
+ * c'est la personne qui peut réellement vérifier quelque chose. Elle lit le
+ * montant annoncé et les quatre derniers chiffres de son propre numéro avant
+ * que l'argent parte, et c'est elle qui perd si l'un des deux est faux. Sans
+ * elle, une tontine dont le bureau tient en une personne n'aurait aucun
+ * second acteur, et tout pot dépassant le seuil resterait bloqué.
+ *
+ * Le préparateur en est toujours exclu : deux paires d'yeux, jamais deux fois
+ * les mêmes (docs/data-model.md §2.5).
+ */
+export function contreValidateursPossibles(
+  db: Db,
+  roundId: string,
+  preparateurId?: string | null,
+): string[] {
+  const { round, beneficiaryMembershipId } = contexteTour(db, roundId)
+
+  const bureau = db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(
+      eq(memberships.tontineId, round.tontineId),
+      eq(memberships.status, 'active'),
+      inArray(memberships.role, ['president', 'auditor']),
+    ))
+    .all()
+    .map(m => m.userId)
+
+  const [beneficiaire] = db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(eq(memberships.id, beneficiaryMembershipId))
+    .limit(1)
+    .all()
+
+  const candidats = new Set([...bureau, beneficiaire?.userId ?? null])
+  candidats.delete(null)
+  if (preparateurId) candidats.delete(preparateurId)
+
+  return [...candidats] as string[]
+}
+
+/**
  * État du pot, prêt pour l'écran de préparation.
  *
  * Le pot **constitué** n'est pas le pot attendu : c'est la somme de ce qui a
  * été réellement confirmé. Afficher l'attendu comme s'il était acquis ferait
  * verser au bénéficiaire un montant que la tontine n'a pas.
  */
-export function etatVersement(db: Db, roundId: string): EtatVersement {
+export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatVersement {
   const { round, tontine, beneficiaryMembershipId } = contexteTour(db, roundId)
 
   const lignes = db
@@ -113,6 +168,7 @@ export function etatVersement(db: Db, roundId: string): EtatVersement {
   )
 
   const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+  const possibles = contreValidateursPossibles(db, roundId, versement?.preparedBy)
 
   return {
     roundId,
@@ -132,6 +188,13 @@ export function etatVersement(db: Db, roundId: string): EtatVersement {
     },
     counterValidationRequired: collected > tontine.counterValidationThreshold,
     counterValidationThreshold: tontine.counterValidationThreshold,
+    counterValidationPossible: possibles.length > 0,
+    canCounterValidate: Boolean(
+      acteurId
+      && versement?.status === 'prepared'
+      && collected > tontine.counterValidationThreshold
+      && possibles.includes(acteurId),
+    ),
     payout: versement ?? null,
   }
 }
@@ -246,6 +309,11 @@ export function preparerVersement(
  * L'acteur doit être **différent** de celui qui a préparé (docs/data-model.md
  * §2.5). Deux paires d'yeux sur un gros versement, c'est ce qui distingue une
  * erreur rattrapable d'un détournement.
+ *
+ * Qui a le droit est décidé par `contreValidateursPossibles` : le bureau, et
+ * le bénéficiaire du tour — celui qui a le plus à perdre si le montant ou le
+ * numéro est faux, et le seul second acteur disponible quand l'organisateur
+ * tient la tontine seul.
  */
 export function contreValiderVersement(db: Db, roundId: string, acteurId: string) {
   const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
@@ -257,6 +325,13 @@ export function contreValiderVersement(db: Db, roundId: string, acteurId: string
     throw apiError(
       'FORBIDDEN',
       'La contre-validation doit venir de quelqu’un d’autre que celui qui a préparé le versement.',
+    )
+  }
+
+  if (!contreValidateursPossibles(db, roundId, versement.preparedBy).includes(acteurId)) {
+    throw apiError(
+      'FORBIDDEN',
+      'Cette contre-validation est réservée au président, au censeur ou au bénéficiaire du tour.',
     )
   }
 
@@ -282,7 +357,15 @@ export function declarerVersement(
 
   // Au-delà du seuil, la contre-validation est un passage obligé : on ne peut
   // pas déclarer directement depuis `prepared`.
-  if (etat.counterValidationRequired && versement.status === 'prepared') {
+  //
+  // Sauf s'il n'existe personne pour la donner — le tour où le président est
+  // lui-même le bénéficiaire d'une tontine qu'il tient seul. Bloquer là
+  // gèlerait le pot pour de bon, et un pot gelé fait plus de dégâts qu'un
+  // versement vu par une seule personne. On laisse donc passer, et le registre
+  // porte que le contrôle n'a pas eu lieu : le groupe doit pouvoir le lire.
+  const contreValidationImpossible = contreValidateursPossibles(db, roundId, versement.preparedBy).length === 0
+
+  if (etat.counterValidationRequired && versement.status === 'prepared' && !contreValidationImpossible) {
     throw apiError(
       'FORBIDDEN',
       'Ce montant demande une contre-validation avant d’être versé.',
@@ -314,6 +397,11 @@ export function declarerVersement(
       shortfall: versement.shortfallAmount,
       channel: input.channel,
       beneficiaryMembershipId: versement.beneficiaryMembershipId,
+      // Écrit seulement là où il veut dire quelque chose : un versement au-delà
+      // du seuil que personne n'a pu contre-valider.
+      ...(etat.counterValidationRequired && contreValidationImpossible
+        ? { contreValidationImpossible: true }
+        : {}),
     },
   })
 

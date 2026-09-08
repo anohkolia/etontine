@@ -7,6 +7,7 @@ import {
   blocagesPublication, membresActifs, potAttendu, totalParts, tourCourant,
 } from '../../../../services/tontines.ts'
 import { etatDuTour } from '../../../../services/tours.ts'
+import { etatVersement } from '../../../../services/versements.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
 
@@ -27,6 +28,11 @@ export default defineEventHandler(async (event) => {
   const tour = tourCourant(db, tontineId)
   const etat = tour ? etatDuTour(db, tour.id, membership.id) : null
 
+  // Le bénéficiaire d'un tour peut avoir une contre-validation à donner, et
+  // l'onglet « Verser » ne lui est pas montré — il n'est pas du bureau. Sans
+  // ce drapeau, il n'aurait aucun chemin vers l'écran où on l'attend.
+  const versement = tour ? etatVersement(db, tour.id, membership.userId ?? undefined) : null
+
   return {
     ...tontine,
     myRole: membership.role,
@@ -39,6 +45,7 @@ export default defineEventHandler(async (event) => {
     potCollected: etat?.potCollected ?? 0,
     myRemaining: etat?.myRemaining ?? 0,
     myContributionStatus: etat?.myContributionStatus ?? null,
+    awaitingMyCounterValidation: versement?.canCounterValidate ?? false,
     publicationBlockers: tontine.status === 'draft' ? blocagesPublication(db, tontineId) : [],
   }
 })
