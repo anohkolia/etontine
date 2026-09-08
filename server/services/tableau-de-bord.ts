@@ -38,9 +38,18 @@ export interface TontineDuTableau {
   beneficiaryName: string | null
 }
 
+/** Une adhésion demandée, en attente de l'accord du président. */
+export interface DemandeEnAttente {
+  tontineId: string
+  name: string
+  emoji: string | null
+  locality: string | null
+}
+
 export interface TableauDeBord {
   aTraiter: ATraiter[]
   tontines: TontineDuTableau[]
+  demandes: DemandeEnAttente[]
 }
 
 function nomDe(l: { firstName: string | null, lastName: string | null, managedName: string | null }): string {
@@ -239,7 +248,34 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
   }
   aTraiter.sort((a, b) => priorite[a.type] - priorite[b.type])
 
-  return { aTraiter, tontines: resume }
+  /**
+   * Les demandes d'adhésion en attente.
+   *
+   * Elles n'apparaissaient nulle part : la requête ci-dessus ne lit que les
+   * adhésions **actives**. Quelqu'un qui rejoignait par lien lisait « ta demande
+   * est envoyée », puis retrouvait un tableau de bord vide — aucune trace que
+   * sa demande existe, ni qu'elle attend quelqu'un.
+   *
+   * Rien de financier n'en sort : tant que le président n'a pas donné son
+   * accord, cette personne n'est pas du groupe, et le montant des cotisations
+   * ne la regarde pas encore.
+   */
+  const demandes = db
+    .select({
+      tontineId: tontines.id,
+      name: tontines.name,
+      emoji: tontines.emoji,
+      locality: tontines.locality,
+    })
+    .from(memberships)
+    .innerJoin(tontines, eq(tontines.id, memberships.tontineId))
+    .where(and(
+      eq(memberships.userId, userId),
+      eq(memberships.status, 'pending_approval'),
+    ))
+    .all()
+
+  return { aTraiter, tontines: resume, demandes }
 }
 
 /** Les tours à venir, pour la vue « prochaine main ». */

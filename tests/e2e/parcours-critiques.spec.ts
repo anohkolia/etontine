@@ -148,6 +148,28 @@ test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser
   expect(membres.members).toHaveLength(3)
   expect(membres.members.find(m => m.name === 'Koffi N’Guessan')?.userId).not.toBeNull()
 
+  // Un arrivant que le bureau n'avait pas saisi : il attend l'accord du
+  // président, et son tableau de bord le lui dit. Sans cela, il lisait « ta
+  // demande est envoyée » puis retrouvait un écran vide, sans trace d'elle.
+  const contexteArrivant = await browser.newContext()
+  const arrivant = await contexteArrivant.newPage()
+  await inscriptionOtp(arrivant, numeroDeTest())
+  await arrivant.request.fetch('/api/v1/me', {
+    method: 'PATCH',
+    data: { firstName: 'Mariam', lastName: 'Touré' },
+  })
+  await arrivant.goto(url)
+  await waitForHydration(arrivant)
+  await arrivant.getByTestId('bouton-rejoindre').click()
+  await expect(arrivant.getByTestId('message-adhesion')).toContainText('président')
+
+  await arrivant.goto('/app')
+  await waitForHydration(arrivant)
+  await expect(arrivant.getByTestId('demandes-en-attente')).toBeVisible()
+  await expect(arrivant.getByTestId('demandes-en-attente')).toContainText('accepter')
+
+  await contexteArrivant.close()
+
   await contexte.close()
 })
 

@@ -47,6 +47,16 @@ interface TontineDuTableau {
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const aTraiter = ref<ATraiter[]>([])
 const tontines = ref<TontineDuTableau[]>([])
+
+/**
+ * Les demandes d'adhésion en attente de l'accord du président.
+ *
+ * Elles n'apparaissaient nulle part : le tableau de bord ne lit que les
+ * adhésions actives. Après avoir rejoint par lien, on lisait « ta demande est
+ * envoyée » — puis, au retour dans l'application, un écran vide. Rien ne disait
+ * que la demande existait, ni qu'elle attendait quelqu'un.
+ */
+const demandes = ref<Array<{ tontineId: string, name: string, emoji: string | null, locality: string | null }>>([])
 const erreur = ref<string | null>(null)
 
 /**
@@ -89,11 +99,16 @@ const enVedette = computed(() => tontines.value.find(t => t.roundIndex !== null)
 async function charger() {
   etat.value = 'chargement'
   try {
-    const reponse = await $fetch<{ aTraiter: ATraiter[], tontines: TontineDuTableau[] }>(
+    const reponse = await $fetch<{
+      aTraiter: ATraiter[]
+      tontines: TontineDuTableau[]
+      demandes: typeof demandes.value
+    }>(
       '/api/v1/dashboard',
     )
     aTraiter.value = reponse.aTraiter
     tontines.value = reponse.tontines
+    demandes.value = reponse.demandes ?? []
     etat.value = 'contenu'
   }
   catch (e) {
@@ -225,8 +240,46 @@ useHead({ title: 'Mes tontines — eTontine' })
         </p>
       </section>
 
+      <!-- Une demande en attente. Aucun montant : tant que le président n'a pas
+           donné son accord, cette personne n'est pas du groupe. La carte ne
+           mène nulle part non plus — le détail lui serait refusé. -->
+      <section
+        v-if="demandes.length > 0"
+        class="flex flex-col gap-2"
+        data-testid="demandes-en-attente"
+      >
+        <SectionTitle>En attente d’accord</SectionTitle>
+        <ul class="flex flex-col gap-2">
+          <li
+            v-for="demande in demandes"
+            :key="demande.tontineId"
+            class="card-surface flex items-start gap-3 p-4"
+            :data-testid="`demande-${demande.tontineId}`"
+          >
+            <span
+              class="flex size-9 shrink-0 items-center justify-center rounded-control bg-declared-surface text-declared-ink"
+              aria-hidden="true"
+            >
+              <Icon
+                name="lucide:clock"
+                size="1.125rem"
+              />
+            </span>
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <span class="truncate font-semibold text-ink">
+                {{ demande.emoji ? `${demande.emoji} ` : '' }}{{ demande.name }}
+              </span>
+              <span class="text-sm text-ink-muted">
+                Ta demande est partie. Le président doit l’accepter avant que tu
+                puisses cotiser.
+              </span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
       <EmptyState
-        v-if="tontines.length === 0"
+        v-if="tontines.length === 0 && demandes.length === 0"
         title="Tu n’as pas encore de tontine"
         description="Crée la tienne, ou rejoins celle d’un proche avec le lien qu’il t’a envoyé."
         icon="lucide:hand-coins"
@@ -242,7 +295,10 @@ useHead({ title: 'Mes tontines — eTontine' })
         </template>
       </EmptyState>
 
-      <template v-else>
+      <!-- `v-else-if` et non `v-else` : sans tontine mais avec une demande en
+           attente, l'état vide ne s'affiche pas — et un simple `v-else` ferait
+           alors rendre « Mes tontines » au-dessus d'une liste vide. -->
+      <template v-else-if="tontines.length > 0">
         <SectionTitle>
           Mes tontines
           <template #action>
