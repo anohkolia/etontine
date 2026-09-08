@@ -11,7 +11,9 @@ import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
 import { ouvrirTourSuivant } from '../../server/services/echeances.ts'
-import { contributions, ledgerEntries, memberships, payouts, rounds, shares, tontines, users } from '../../server/db/schema.ts'
+import {
+  contributions, ledgerEntries, memberships, notifications, payouts, rounds, shares, tontines, users,
+} from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -441,5 +443,75 @@ describe('clôture d’un tour sans accusé — la tontine ne se fige plus', () 
     expect(() => cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Encore')).toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
+  })
+})
+
+describe('fin du cycle — une tontine finissait par ne jamais finir', () => {
+  /** Clôt tous les tours de la tontine, du premier au dernier. */
+  function clotureTousLesTours() {
+    const tours = db.select().from(rounds).where(eq(rounds.tontineId, T)).all()
+      .sort((a, b) => a.index - b.index)
+
+    for (const tour of tours) {
+      db.update(rounds).set({ status: 'collecting' }).where(eq(rounds.id, tour.id)).run()
+
+      for (const c of db.select().from(contributions).all().filter(x => x.roundId === tour.id)) {
+        const { declarationId } = declarerPaiement(db, c.id, TRESORIER, { amount: 25_000, channel: 'wave' })
+        confirmerDeclaration(db, declarationId, PRESIDENT)
+      }
+
+      const beneficiaire = db.select().from(memberships).all()
+        .find(m => m.id === db.select().from(shares).all()
+          .find(p => p.id === tour.beneficiaryShareId)!.membershipId)!
+
+      const msisdn = db.select().from(users).all().find(u => u.id === beneficiaire.userId)?.phone
+        ?? beneficiaire.managedPhone!
+
+      preparerVersement(db, tour.id, TRESORIER, {
+        beneficiaryPhoneLast4: msisdn.slice(-4), acceptIncompletePot: false,
+      })
+      declarerVersement(db, tour.id, TRESORIER, { channel: 'wave' })
+      cloturerTourSansAccuse(db, tour.id, PRESIDENT, 'Reçu de la main à la main')
+    }
+  }
+
+  beforeEach(() => {
+    db.update(tontines).set({ counterValidationThreshold: 500_000 }).where(eq(tontines.id, T)).run()
+  })
+
+  it('laisse la tontine en cours tant qu’un tour reste ouvert', () => {
+    potComplet()
+    preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+    declarerVersement(db, tour1, TRESORIER, { channel: 'wave' })
+    cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Reçu de la main à la main')
+
+    const [t] = db.select().from(tontines).where(eq(tontines.id, T)).all()
+    expect(t!.status).toBe('running')
+  })
+
+  it('clôt la tontine quand son dernier tour se ferme', () => {
+    clotureTousLesTours()
+
+    // Rien n'empruntait `running → closed` : une tontine allait au bout de ses
+    // tours et restait « en cours » pour toujours, sa place toujours comptée au
+    // quota d'abonnement du président.
+    const [t] = db.select().from(tontines).where(eq(tontines.id, T)).all()
+    expect(t!.status).toBe('closed')
+  })
+
+  it('inscrit la fin du cycle au registre', () => {
+    clotureTousLesTours()
+
+    const ecritures = db.select().from(ledgerEntries).all()
+      .filter(e => (e.payload as { changement?: string }).changement === 'cloture_tontine')
+    expect(ecritures).toHaveLength(1)
+  })
+
+  it('prévient le groupe sans citer un seul montant (règle 21)', () => {
+    clotureTousLesTours()
+
+    const envoyees = db.select().from(notifications).all().filter(n => n.type === 'tontine_terminee')
+    expect(envoyees.length).toBeGreaterThan(0)
+    expect(envoyees.every(n => !/FCFA|\d{4}/.test(n.body))).toBe(true)
   })
 })

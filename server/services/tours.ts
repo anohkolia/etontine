@@ -7,6 +7,7 @@ import type { z } from 'zod'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
 import { appendLedger } from './ledger.ts'
+import { notifierTontine } from './notifications.ts'
 import { comptesActifs } from './membres.ts'
 
 type Db = ReturnType<typeof useDb>
@@ -207,4 +208,52 @@ export function etatDuTour(db: Db, roundId: string, membershipId: string): EtatD
     myContributionStatus: miennes[0]?.status ?? null,
     miennes,
   }
+}
+
+/**
+ * Clôt la tontine si son dernier tour vient de se fermer.
+ *
+ * Rien ne le faisait. `running → closed` figurait dans la table des
+ * transitions, et aucun service, aucune route, aucune tâche ne l'empruntait :
+ * une tontine allait au bout de ses douze tours et restait « en cours » pour
+ * toujours. Deux conséquences, l'une visible et l'autre non — l'écran
+ * annonçait un cycle qui continue alors qu'il n'y a plus rien à cotiser, et la
+ * place restait comptée au quota d'abonnement du président, alors que le
+ * contrat promet qu'elle se libère en closant une tontine.
+ *
+ * C'est **déduit**, pas décidé : quand tous les tours sont clos, il n'y a plus
+ * rien à faire, et demander un geste de plus à l'organisateur pour constater
+ * une évidence n'ajouterait qu'un oubli possible.
+ */
+export function cloturerSiDernierTour(db: Db, tontineId: string, acteurId: string): boolean {
+  const tous = db
+    .select({ status: rounds.status })
+    .from(rounds)
+    .where(eq(rounds.tontineId, tontineId))
+    .all()
+
+  if (tous.length === 0 || tous.some(r => r.status !== 'closed')) return false
+
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  if (!tontine || tontine.status !== 'running') return false
+
+  assertTransition('tontine', tontine.status, 'closed')
+  db.update(tontines).set({ status: 'closed' }).where(eq(tontines.id, tontineId)).run()
+
+  appendLedger(db, {
+    tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'cloture_tontine', tours: tous.length },
+  })
+
+  // Aucun montant : écran de verrouillage, téléphone partagé (règle 21).
+  notifierTontine(db, tontineId, {
+    type: 'tontine_terminee',
+    title: 'Ta tontine est arrivée à son terme',
+    body: 'Tous les tours sont clos. Le registre reste consultable.',
+    url: `/app/tontine/${tontineId}/registre`,
+  })
+
+  return true
 }

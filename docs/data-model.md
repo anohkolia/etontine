@@ -183,6 +183,8 @@ pending ──> collecting ──> payout_pending ──> closed
 
   La sortie ne ment pas : le versement **reste** `declared`, aucun accusé n'est fabriqué, et l'écriture `settings_changed` porte `changement: 'cloture_sans_accuse'`, le motif — obligatoire —, l'auteur, et `beneficiairePouvaitAccuser`, qui distingue celui qui *ne pouvait pas* confirmer de celui qui *ne l'a pas fait*. Le pot doit avoir été déclaré envoyé : clore avant serait une perte sèche pour le bénéficiaire, pas une exception.
 
+**Fin du cycle.** `running → closed` est **déduit, jamais décidé** : quand le dernier tour d'une tontine se ferme — par accusé de réception ou par clôture forcée —, la tontine se clôt avec lui, l'écriture `settings_changed` porte `changement: 'cloture_tontine'`, et le groupe est prévenu sans qu'aucun montant figure dans la notification (règle 21). Il n'y a plus rien à cotiser : demander un geste de plus à l'organisateur pour constater une évidence n'ajouterait qu'un oubli possible — et la place resterait comptée à son quota d'abonnement, alors que le contrat promet qu'elle se libère en closant une tontine.
+
 ### 2.4 `contributions.status`
 ```
 due ──(déclaration)──> declared ──(confirmation)──> confirmed

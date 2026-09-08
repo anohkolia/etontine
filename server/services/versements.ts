@@ -9,6 +9,7 @@ import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
 import { appendLedger } from './ledger.ts'
 import { notifier, notifierTontine } from './notifications.ts'
+import { cloturerSiDernierTour } from './tours.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -496,10 +497,16 @@ export function accuserReception(
     })
   }
 
+  // Dernier tour du cycle : la tontine s'achève avec lui. Après l'écriture du
+  // tour, jamais avant — le registre se lit dans l'ordre où les choses se sont
+  // produites, et la fin du cycle vient après la fin du dernier tour.
+  const tontineClose = cloturerSiDernierTour(db, round.tontineId, acteurId)
+
   return {
     payoutId: versement.id,
     status: 'acknowledged' as const,
     roundClosed: true,
+    tontineClosed: tontineClose,
     ecart: receivedAmount - versement.amount,
   }
 }
@@ -587,5 +594,13 @@ export function cloturerTourSansAccuse(
     url: `/app/tontine/${round.tontineId}/registre`,
   })
 
-  return { roundId, status: 'closed' as const, payoutStatus: versement.status }
+  // Un tour forcé reste un tour clos : si c'était le dernier, le cycle est fini.
+  const tontineClose = cloturerSiDernierTour(db, round.tontineId, acteurId)
+
+  return {
+    roundId,
+    status: 'closed' as const,
+    payoutStatus: versement.status,
+    tontineClosed: tontineClose,
+  }
 }
