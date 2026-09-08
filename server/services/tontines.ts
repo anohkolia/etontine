@@ -94,11 +94,43 @@ export function majTontine(db: Db, tontineId: string, modifications: Record<stri
   db.update(tontines).set(modifications).where(eq(tontines.id, tontineId)).run()
 }
 
-/** Remplace les canaux de collecte rattachés au brouillon. */
+/**
+ * Remplace les canaux de collecte rattachés à une tontine.
+ *
+ * **On rattache avant de retirer, et l'ordre est la règle 22 elle-même.**
+ * `rattacherCanal` reconnaît un changement de numéro en regardant ce qui est
+ * déjà rattaché : c'est ce constat qui déclenche le gel de 48 h, l'écriture au
+ * registre et la notification à tous les membres. Vider la table d'abord lui
+ * faisait voir un premier rattachement sur une tontine en cours — et les trois
+ * sautaient en silence. La règle était écrite, testée sur `rattacherCanal`, et
+ * inatteignable par le seul chemin qui existe : l'écran de réglages.
+ */
 export function definirCanaux(db: Db, tontineId: string, channelIds: string[], acteurId: string) {
-  db.delete(tontineChannels).where(eq(tontineChannels.tontineId, tontineId)).run()
+  const actuels = db
+    .select()
+    .from(tontineChannels)
+    .where(eq(tontineChannels.tontineId, tontineId))
+    .all()
+
+  const dejaLa = new Set(actuels.map(c => c.channelId))
+
   for (const channelId of channelIds) {
-    rattacherCanal(db, tontineId, channelId, acteurId)
+    // Re-poser un canal déjà rattaché heurterait la clé primaire, et surtout
+    // remettrait un gel de 48 h sur un numéro qui n'a pas bougé.
+    if (!dejaLa.has(channelId)) rattacherCanal(db, tontineId, channelId, acteurId)
+  }
+
+  const aRetirer = actuels
+    .filter(c => !channelIds.includes(c.channelId))
+    .map(c => c.channelId)
+
+  if (aRetirer.length > 0) {
+    db.delete(tontineChannels)
+      .where(and(
+        eq(tontineChannels.tontineId, tontineId),
+        inArray(tontineChannels.channelId, aRetirer),
+      ))
+      .run()
   }
 }
 

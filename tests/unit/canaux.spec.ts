@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { GEL_HEURES, canauxDeTontine, creerCanal, marquerVerifie, rattacherCanal } from '../../server/services/canaux.ts'
+import { definirCanaux } from '../../server/services/tontines.ts'
 import { notifierTontine, NotificationAvecMontantError } from '../../server/services/notifications.ts'
 import { ledgerEntries, memberships, notifications, tontineChannels, tontines } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
@@ -162,5 +163,72 @@ describe('règle 21 — aucune notification ne porte de montant', () => {
       type: 'test', title: 'x', body: '250 000 FCFA',
     })).toThrow()
     expect(db.select().from(notifications).all()).toHaveLength(0)
+  })
+})
+
+describe('règle 22 par le chemin de l’écran de réglages', () => {
+  /**
+   * `definirCanaux` est le **seul** point d'entrée qui existe pour changer de
+   * numéro de collecte : `PATCH /tontines/:id` y mène, et l'écran de réglages
+   * y mène. Éprouver `rattacherCanal` en direct ne dit donc rien de ce qui se
+   * passe vraiment — c'est exactement ainsi que la règle 22 a pu rester au
+   * vert tout en ne se déclenchant jamais.
+   */
+  function canalVerifie(numero: string) {
+    const id = canal('Aya Koné', numero)
+    marquerVerifie(db, id)
+    return id
+  }
+
+  beforeEach(() => {
+    db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T)).run()
+  })
+
+  it('gèle 48 h, écrit au registre et prévient tout le monde', () => {
+    const initial = canalVerifie('+2250707000001')
+    const nouveau = canalVerifie('+2250505000009')
+
+    definirCanaux(db, T, [initial], PRESIDENT)
+    definirCanaux(db, T, [nouveau], PRESIDENT)
+
+    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    expect(liens).toHaveLength(1)
+    expect(liens[0]!.channelId).toBe(nouveau)
+    expect(liens[0]!.frozenUntil).not.toBeNull()
+
+    const ecritures = db.select().from(ledgerEntries).all()
+      .filter(e => (e.payload as { changement?: string }).changement === 'canal_de_collecte')
+    expect(ecritures).toHaveLength(1)
+
+    // Tous les membres, pas seulement celui qui a changé le numéro.
+    const envoyees = db.select().from(notifications).all().filter(n => n.type === 'canal_modifie')
+    expect(envoyees.length).toBeGreaterThan(0)
+  })
+
+  it('ne gèle rien quand on renvoie la même sélection', () => {
+    const initial = canalVerifie('+2250707000001')
+
+    definirCanaux(db, T, [initial], PRESIDENT)
+    definirCanaux(db, T, [initial], PRESIDENT)
+
+    // Enregistrer les réglages sans toucher au numéro ne doit ni geler la
+    // collecte, ni alerter le groupe pour rien : la deuxième alerte userait
+    // la première.
+    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    expect(liens).toHaveLength(1)
+    expect(liens[0]!.frozenUntil).toBeNull()
+    expect(db.select().from(notifications).all().filter(n => n.type === 'canal_modifie')).toHaveLength(0)
+  })
+
+  it('ne gèle pas sur un brouillon : rien n’est encore promis à personne', () => {
+    db.update(tontines).set({ status: 'draft' }).where(eq(tontines.id, T)).run()
+    const initial = canalVerifie('+2250707000001')
+    const nouveau = canalVerifie('+2250505000009')
+
+    definirCanaux(db, T, [initial], PRESIDENT)
+    definirCanaux(db, T, [nouveau], PRESIDENT)
+
+    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    expect(liens[0]!.frozenUntil).toBeNull()
   })
 })
