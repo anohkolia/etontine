@@ -6,7 +6,7 @@ import { canauxDeTontine } from '../../../../services/canaux.ts'
 import {
   blocagesPublication, membresActifs, potAttendu, totalParts, tourCourant,
 } from '../../../../services/tontines.ts'
-import { etatDuTour } from '../../../../services/tours.ts'
+import { etatDuTour, toursDe } from '../../../../services/tours.ts'
 import { etatVersement } from '../../../../services/versements.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
@@ -46,6 +46,13 @@ export default defineEventHandler(async (event) => {
     myRemaining: etat?.myRemaining ?? 0,
     myContributionStatus: etat?.myContributionStatus ?? null,
     awaitingMyCounterValidation: versement?.canCounterValidate ?? false,
+    // Le calendrier complet voyage avec le reste. « Je passe quand ? » est la
+    // première question qu'on se pose en ouvrant une tontine, et elle n'avait
+    // pas de réponse : `GET /tontines/:id/rounds` existait sans appelant, et
+    // l'écran ne montrait que le tour courant. Le mettre dans un second appel
+    // aurait coûté un aller-retour de plus sur un forfait à la donnée, pour
+    // une douzaine de lignes que le serveur a déjà sous la main.
+    rounds: toursDe(db, tontineId),
     publicationBlockers: tontine.status === 'draft' ? blocagesPublication(db, tontineId) : [],
   }
 })

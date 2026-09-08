@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
-import { contributions, memberships, rounds, shares, tontines } from '../db/schema.ts'
+import { contributions, memberships, rounds, shares, tontines, users } from '../db/schema.ts'
 import type { frequency } from '../../shared/schemas/index.ts'
 import type { z } from 'zod'
 import { apiError } from '../utils/errors.ts'
@@ -148,7 +148,14 @@ export function demarrerTontine(db: Db, tontineId: string, acteurId: string): Re
   return { rounds: parts.length, contributions: nbCotisations, expectedAmount: potAttendu }
 }
 
-/** Les tours d'une tontine, du premier au dernier. */
+/**
+ * Les tours d'une tontine, du premier au dernier.
+ *
+ * Le nom du bénéficiaire vient du compte quand il y en a un. Ne lire que
+ * `managed_name` laissait sans nom tous ceux qui sont arrivés par lien — et sur
+ * un calendrier de passage, une ligne sans nom ne répond pas à la question
+ * qu'on vient y poser.
+ */
 export function toursDe(db: Db, tontineId: string) {
   return db
     .select({
@@ -159,15 +166,22 @@ export function toursDe(db: Db, tontineId: string) {
       expectedAmount: rounds.expectedAmount,
       beneficiaryShareId: rounds.beneficiaryShareId,
       beneficiaryMembershipId: shares.membershipId,
-      beneficiaryName: memberships.managedName,
+      managedName: memberships.managedName,
+      firstName: users.firstName,
+      lastName: users.lastName,
       beneficiaryUserId: memberships.userId,
     })
     .from(rounds)
     .innerJoin(shares, eq(shares.id, rounds.beneficiaryShareId))
     .innerJoin(memberships, eq(memberships.id, shares.membershipId))
+    .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(rounds.tontineId, tontineId))
     .orderBy(asc(rounds.index))
     .all()
+    .map(t => ({
+      ...t,
+      beneficiaryName: [t.firstName, t.lastName].filter(Boolean).join(' ') || t.managedName || 'Membre',
+    }))
 }
 
 /**

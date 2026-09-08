@@ -82,13 +82,36 @@ test('le détail montre le tour en cours et ce que je dois', async ({ page }) =>
   await expect(page.getByTestId('bloc-reglages')).toContainText('75 000 FCFA')
 })
 
+test('le calendrier de passage dit quand chacun prend la main', async ({ page }) => {
+  const { id } = await tontineLancee(page)
+
+  await page.goto(`/app/tontine/${id}`)
+  await waitForHydration(page)
+
+  // « Je passe quand ? » est la première question qu'on se pose, et l'écran n'y
+  // répondait pas : il ne montrait que le tour courant, et la liste des membres
+  // donnait une position sans jamais une date.
+  const calendrier = page.getByTestId('calendrier-tours')
+  await expect(calendrier).toBeVisible()
+  await expect(calendrier.locator('li')).toHaveCount(3)
+
+  // Le tour du président est le premier, et il est signalé par le **mot**,
+  // jamais par la seule teinte de la carte.
+  await expect(page.getByTestId('tour-1')).toContainText('c’est toi')
+})
+
 test('un seul appel de données peint le détail', async ({ page }) => {
   const { id } = await tontineLancee(page)
 
   const appels: string[] = []
   page.on('request', (requete) => {
     const chemin = new URL(requete.url()).pathname
-    if (chemin.startsWith('/api/v1/') && chemin !== '/api/v1/auth/me') appels.push(chemin)
+    // `/auth/me` et le compteur de notifications appartiennent à la coquille
+    // authentifiée, pas à cet écran : la cloche de l'en-tête s'affiche sur
+    // toutes les pages. Ce que l'acceptation interdit, c'est un appel par
+    // bloc de contenu — tour courant, membres, calendrier.
+    const coquille = ['/api/v1/auth/me', '/api/v1/me/notifications']
+    if (chemin.startsWith('/api/v1/') && !coquille.includes(chemin)) appels.push(chemin)
   })
 
   await page.goto(`/app/tontine/${id}`)

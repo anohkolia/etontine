@@ -277,25 +277,3 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
 
   return { aTraiter, tontines: resume, demandes }
 }
-
-/** Les tours à venir, pour la vue « prochaine main ». */
-export function prochaineMain(db: Db, tontineId: string) {
-  const [suivant] = db
-    .select({
-      index: rounds.index,
-      dueDate: rounds.dueDate,
-      managedName: memberships.managedName,
-      firstName: users.firstName,
-      lastName: users.lastName,
-    })
-    .from(rounds)
-    .innerJoin(shares, eq(shares.id, rounds.beneficiaryShareId))
-    .innerJoin(memberships, eq(memberships.id, shares.membershipId))
-    .leftJoin(users, eq(users.id, memberships.userId))
-    .where(and(eq(rounds.tontineId, tontineId), eq(rounds.status, 'pending')))
-    .orderBy(asc(rounds.index))
-    .limit(1)
-    .all()
-
-  return suivant ? { ...suivant, nom: nomDe(suivant) } : null
-}

@@ -49,9 +49,26 @@ interface Detail {
   myContributionStatus: 'due' | 'late' | 'declared' | 'confirmed' | 'disputed' | null
   /** Une contre-validation de versement attend l'utilisateur sur le tour courant. */
   awaitingMyCounterValidation: boolean
+  rounds: Tour[]
   channels: Canal[]
   currentRound: { id: string, index: number, dueDate: string, status: string } | null
   publicationBlockers: Array<{ champ: string, message: string }>
+}
+
+/**
+ * Un tour du cycle.
+ *
+ * « Je passe quand ? » est la première question qu'on se pose en ouvrant une
+ * tontine, et l'écran n'y répondait pas : il ne montrait que le tour courant,
+ * et la liste des membres donnait une position — « 5 » — sans jamais une date.
+ */
+interface Tour {
+  id: string
+  index: number
+  dueDate: string
+  status: 'pending' | 'collecting' | 'payout_pending' | 'closed'
+  beneficiaryMembershipId: string
+  beneficiaryName: string
 }
 
 const FREQUENCE: Record<Detail['frequency'], string> = {
@@ -64,6 +81,14 @@ const FREQUENCE: Record<Detail['frequency'], string> = {
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const tontine = ref<Detail | null>(null)
 const erreur = ref<string | null>(null)
+
+/** Mes adhésions servent à repérer mes tours dans le calendrier. */
+const session = useSessionStore()
+const mesAdhesions = computed(() => new Set(session.memberships.map(m => m.id)))
+
+function estMonTour(tour: Tour): boolean {
+  return mesAdhesions.value.has(tour.beneficiaryMembershipId)
+}
 
 const estPresident = computed(() => tontine.value?.myRole === 'president')
 const estBureau = computed(() =>
@@ -347,6 +372,53 @@ useHead({ title: 'Ma tontine — eTontine' })
             </dd>
           </div>
         </dl>
+      </section>
+
+      <!-- Le calendrier de passage. La question qu'on vient poser en premier. -->
+      <section
+        v-if="tontine.rounds.length > 0"
+        class="flex flex-col gap-3"
+        data-testid="calendrier-tours"
+      >
+        <SectionTitle>Ordre de passage</SectionTitle>
+
+        <ul class="flex flex-col gap-2">
+          <li
+            v-for="tour in tontine.rounds"
+            :key="tour.id"
+            class="flex items-center gap-3 rounded-control border p-3"
+            :class="estMonTour(tour)
+              ? 'border-brand bg-brand-surface'
+              : 'border-line bg-surface'"
+            :data-testid="`tour-${tour.index}`"
+          >
+            <span
+              class="tabular flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+              :class="estMonTour(tour) ? 'bg-brand text-brand-ink' : 'bg-surface-muted text-ink-muted'"
+              aria-hidden="true"
+            >{{ tour.index }}</span>
+
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="truncate text-sm font-semibold text-ink">
+                {{ tour.beneficiaryName }}
+                <!-- Le mot, pas seulement la teinte de la carte (règle 10). -->
+                <span
+                  v-if="estMonTour(tour)"
+                  class="font-bold text-brand-strong"
+                >· c’est toi</span>
+              </span>
+              <span class="tabular text-sm text-ink-muted">
+                {{ formatDate(tour.dueDate) }}
+              </span>
+            </div>
+
+            <StatusBadge
+              kind="round"
+              :status="tour.status"
+              compact
+            />
+          </li>
+        </ul>
       </section>
 
       <!-- Le bénéficiaire du tour a une contre-validation à donner, et l'onglet

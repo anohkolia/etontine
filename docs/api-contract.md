@@ -86,7 +86,7 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 |:--|:--|:--|
 | `GET` | `/tontines` | Mes tontines, avec `myRole`, `nextDueDate`, `myContributionStatus` — assez pour peindre le tableau de bord **en un appel** |
 | `POST` | `/tontines` | Création (brouillon). Exige KYC ≥ 2 |
-| `GET` | `/tontines/:id` | Détail + tour courant + progression du pot |
+| `GET` | `/tontines/:id` | Détail, tour courant, progression du pot **et calendrier complet des tours**. Un seul appel peint l'écran : « je passe quand ? » ne vaut pas un aller-retour de plus sur un forfait à la donnée |
 | `PATCH` | `/tontines/:id` | Réglages. Refusé si `status = running` sauf champs autorisés (description, avatar) |
 | `POST` | `/tontines/:id/publish` | `draft → open`. Vérifie canal de collecte vérifié |
 | `POST` | `/tontines/:id/start` | `open → running`. Fige la rotation, génère tous les `rounds` et `contributions` |
