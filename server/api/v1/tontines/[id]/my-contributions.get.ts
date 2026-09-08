@@ -1,7 +1,7 @@
 import { getRouterParam } from 'h3'
 import { and, eq, inArray } from 'drizzle-orm'
 import { useDb } from '../../../../db/index.ts'
-import { contributions, memberships, rounds, shares } from '../../../../db/schema.ts'
+import { contributions, memberships, paymentDeclarations, rounds, shares } from '../../../../db/schema.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
 
@@ -51,5 +51,33 @@ export default defineEventHandler(async (event) => {
     ))
     .all()
 
-  return { round: tours[0], contributions: miennes }
+  // Les déclarations encore en attente sur mes cotisations.
+  //
+  // L'écran en a besoin pour un cas qu'il ignorait complètement : le trésorier
+  // a enregistré des espèces **à ma place**. Je n'ai rien déclaré, ma cotisation
+  // passe en « déclarée », et je n'avais aucun moyen de dire si je reconnais ce
+  // versement. C'est pourtant la contrepartie exacte de cette dissymétrie —
+  // sans elle, le bureau peut porter au registre des versements qui n'ont
+  // jamais eu lieu.
+  const declarations = miennes.length === 0
+    ? []
+    : db
+        .select({
+          id: paymentDeclarations.id,
+          contributionId: paymentDeclarations.contributionId,
+          amount: paymentDeclarations.amount,
+          channel: paymentDeclarations.channel,
+          source: paymentDeclarations.source,
+          declaredAt: paymentDeclarations.declaredAt,
+          declaredBy: paymentDeclarations.declaredBy,
+          memberAcknowledgedAt: paymentDeclarations.memberAcknowledgedAt,
+        })
+        .from(paymentDeclarations)
+        .where(and(
+          inArray(paymentDeclarations.contributionId, miennes.map(c => c.id)),
+          eq(paymentDeclarations.decision, 'pending'),
+        ))
+        .all()
+
+  return { round: tours[0], contributions: miennes, declarations }
 })

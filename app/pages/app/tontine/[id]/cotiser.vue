@@ -87,6 +87,69 @@ function demarrerVerrou() {
 
 onBeforeUnmount(() => clearInterval(minuterie))
 
+/**
+ * Un versement enregistré **pour moi** par le bureau, que je n'ai pas déclaré.
+ *
+ * C'est le pendant de la déclaration d'espèces, et il manquait entièrement : le
+ * trésorier pouvait porter un versement à mon nom, ma cotisation passait en
+ * « déclarée », et je n'avais aucun moyen de dire si je le reconnais. Le
+ * contrôle qui rend cette dissymétrie acceptable ne servait à rien tant que
+ * personne ne pouvait l'exercer.
+ */
+interface DeclarationEnAttente {
+  id: string
+  contributionId: string
+  amount: number
+  channel: string
+  source: 'member' | 'treasurer' | 'system'
+  declaredAt: string
+  memberAcknowledgedAt: string | null
+}
+
+const declarations = ref<DeclarationEnAttente[]>([])
+const motifContestation = ref<Record<string, string>>({})
+const contestationOuverte = ref<string | null>(null)
+const decisionEnCours = ref<string | null>(null)
+
+/** Celles que je n'ai ni faites ni encore reconnues. */
+const aReconnaitre = computed(() =>
+  declarations.value.filter(d => d.source === 'treasurer' && !d.memberAcknowledgedAt),
+)
+
+async function reconnaitre(declarationId: string) {
+  erreur.value = null
+  decisionEnCours.value = declarationId
+  try {
+    await $fetch(`/api/v1/declarations/${declarationId}/acknowledge`, { method: 'POST' })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
+
+async function contester(declarationId: string) {
+  erreur.value = null
+  decisionEnCours.value = declarationId
+  try {
+    await $fetch(`/api/v1/declarations/${declarationId}/reject`, {
+      method: 'POST',
+      body: { reason: motifContestation.value[declarationId] },
+    })
+    contestationOuverte.value = null
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
+
 const cotisationChoisie = computed(() => cotisations.value.find(c => c.id === choisie.value) ?? null)
 const restantTotal = computed(() =>
   cotisations.value.reduce((n, c) => n + Math.max(0, c.expectedAmount - c.confirmedAmount), 0),
@@ -100,11 +163,16 @@ function message(e: unknown): string {
 async function charger() {
   etat.value = 'chargement'
   try {
-    const reponse = await $fetch<{ round: { index: number, dueDate: string } | null, contributions: Cotisation[] }>(
+    const reponse = await $fetch<{
+      round: { index: number, dueDate: string } | null
+      contributions: Cotisation[]
+      declarations: DeclarationEnAttente[]
+    }>(
       `/api/v1/tontines/${tontineId}/my-contributions`,
     )
     tour.value = reponse.round
     cotisations.value = reponse.contributions
+    declarations.value = reponse.declarations ?? []
     etat.value = reponse.round ? 'contenu' : 'vide'
   }
   catch (e) {
@@ -295,6 +363,76 @@ useHead({ title: 'Cotiser — eTontine' })
                 Tu as {{ cotisations.length }} parts dans cette tontine : il y a
                 donc {{ cotisations.length }} cotisations à verser ce tour-ci.
               </p>
+
+              <!-- Un versement enregistré pour moi, que je n'ai pas déclaré.
+                   Je dois pouvoir dire si je le reconnais — sinon le bureau
+                   peut porter au registre un versement qui n'a pas eu lieu. -->
+              <section
+                v-for="declaration in aReconnaitre"
+                :key="declaration.id"
+                class="flex flex-col gap-3 rounded-card border border-declared-ink/20 bg-declared-surface p-4"
+                :data-testid="`a-reconnaitre-${declaration.id}`"
+              >
+                <p class="flex items-start gap-2 text-sm text-declared-ink">
+                  <Icon
+                    name="lucide:hand-coins"
+                    size="1rem"
+                    class="mt-0.5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    Le bureau a enregistré un versement en espèces de
+                    <AmountDisplay
+                      :amount="declaration.amount"
+                      size="sm"
+                    />
+                    à ton nom. Est-ce exact ?
+                  </span>
+                </p>
+
+                <template v-if="contestationOuverte === declaration.id">
+                  <label
+                    class="flex flex-col gap-1.5 text-sm font-medium text-declared-ink"
+                    :for="`motif-contestation-${declaration.id}`"
+                  >
+                    Qu’est-ce qui ne va pas ?
+                    <InputText
+                      :id="`motif-contestation-${declaration.id}`"
+                      v-model="motifContestation[declaration.id]"
+                      placeholder="Je n’ai rien remis ce mois-ci"
+                      :data-testid="`champ-motif-contestation-${declaration.id}`"
+                    />
+                  </label>
+                  <Button
+                    :label="decisionEnCours === declaration.id ? 'Envoi…' : 'Envoyer la contestation'"
+                    :disabled="decisionEnCours !== null
+                      || (motifContestation[declaration.id]?.trim().length ?? 0) < 5"
+                    class="bg-brand text-brand-ink hover:bg-brand-strong"
+                    :data-testid="`bouton-contester-${declaration.id}`"
+                    @click="contester(declaration.id)"
+                  />
+                </template>
+
+                <div
+                  v-else
+                  class="flex flex-col gap-2 sm:flex-row"
+                >
+                  <Button
+                    :label="decisionEnCours === declaration.id ? 'Envoi…' : 'Oui, c’est exact'"
+                    :disabled="decisionEnCours !== null"
+                    class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+                    :data-testid="`bouton-reconnaitre-${declaration.id}`"
+                    @click="reconnaitre(declaration.id)"
+                  />
+                  <Button
+                    label="Non, ce n’est pas exact"
+                    :disabled="decisionEnCours !== null"
+                    class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                    :data-testid="`bouton-ouvrir-contestation-${declaration.id}`"
+                    @click="contestationOuverte = declaration.id"
+                  />
+                </div>
+              </section>
 
               <ul
                 class="flex flex-col gap-2"

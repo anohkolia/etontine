@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { confirmateursPossibles, confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration } from '../../server/services/confirmations.ts'
-import { declarerPaiement } from '../../server/services/declarations.ts'
+import { declarerEspeces, declarerPaiement } from '../../server/services/declarations.ts'
+import { reconnaitreVersement } from '../../server/services/escalade.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
@@ -317,5 +318,65 @@ describe('bureau d’une seule personne — repli sur la règle de séparation �
     // Le cas courant garde exactement le payload qu'il avait : le marqueur
     // n'apparaît que là où il veut dire quelque chose.
     expect(ecriture!.payload).not.toHaveProperty('autoConfirmee')
+  })
+})
+
+describe('espèces enregistrées par le bureau — la contrepartie côté membre', () => {
+  function especesPourLeMembre() {
+    const sienne = db.select().from(memberships).all().find(m => m.userId === MEMBRE)!
+    return {
+      membershipId: sienne.id,
+      ...declarerEspeces(db, cotisationDe(sienne.id).id, TRESORIER, { amount: 25_000 }),
+    }
+  }
+
+  it('marque la source et laisse la cotisation en attente de décision', () => {
+    const { declarationId } = especesPourLeMembre()
+
+    const [d] = db.select().from(paymentDeclarations).where(eq(paymentDeclarations.id, declarationId)).all()
+    expect(d!.source).toBe('treasurer')
+    expect(d!.channel).toBe('cash')
+    expect(d!.decision).toBe('pending')
+    // Elle n'est pas reconnue tant que l'intéressé n'a rien dit.
+    expect(d!.memberAcknowledgedAt).toBeNull()
+  })
+
+  it('laisse le membre reconnaître le versement', () => {
+    const { declarationId } = especesPourLeMembre()
+    expect(reconnaitreVersement(db, declarationId, MEMBRE).ok).toBe(true)
+
+    const [d] = db.select().from(paymentDeclarations).where(eq(paymentDeclarations.id, declarationId)).all()
+    expect(d!.memberAcknowledgedAt).not.toBeNull()
+  })
+
+  it('refuse la reconnaissance par quelqu’un d’autre', () => {
+    const { declarationId } = especesPourLeMembre()
+
+    // Sans ce contrôle, le bureau se délivrerait à lui-même la reconnaissance
+    // qui est censée le tenir.
+    expect(reconnaitreVersement(db, declarationId, TRESORIER).ok).toBe(false)
+  })
+
+  it('laisse le membre contester ce qu’on a enregistré pour lui', () => {
+    const { declarationId } = especesPourLeMembre()
+
+    // §2.4 : « declared → disputed : trésorier, ou membre si déclaré par le
+    // trésorier ». Le service l'autorisait déjà — c'est la route qui le
+    // refusait, faute de rôle.
+    rejeterDeclaration(db, declarationId, MEMBRE, 'Je n’ai rien remis ce mois-ci')
+
+    const [d] = db.select().from(paymentDeclarations).where(eq(paymentDeclarations.id, declarationId)).all()
+    expect(d!.decision).toBe('rejected')
+
+    const [c] = db.select().from(contributions).where(eq(contributions.id, d!.contributionId)).all()
+    expect(c!.status).toBe('disputed')
+  })
+
+  it('interdit au trésorier de statuer sur ce qu’il a lui-même enregistré', () => {
+    const { declarationId } = especesPourLeMembre()
+
+    expect(() => confirmerDeclaration(db, declarationId, TRESORIER)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
   })
 })

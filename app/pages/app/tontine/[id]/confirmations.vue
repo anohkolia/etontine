@@ -36,6 +36,17 @@ interface EnAttente {
   estLaMienne: boolean
 }
 
+/** Une cotisation du tour en cours, vue par le bureau. */
+interface Cotisation {
+  id: string
+  membershipId: string
+  rotationPosition: number
+  expectedAmount: number
+  confirmedAmount: number
+  status: string
+  nom: string
+}
+
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const items = ref<EnAttente[]>([])
 const erreur = ref<string | null>(null)
@@ -43,6 +54,53 @@ const enCours = ref<string | null>(null)
 
 const rejetOuvert = ref<string | null>(null)
 const motifRejet = ref('')
+
+/**
+ * Enregistrement d'un versement en espèces, pour un membre qui a payé de la
+ * main à la main.
+ *
+ * C'est le cas dominant ici, et il n'avait aucun écran : la route existait,
+ * personne ne pouvait l'appeler. Un trésorier qui reçoit un billet devait donc
+ * attendre que le membre déclare depuis une application qu'il n'a pas.
+ *
+ * Le membre reçoit ensuite une demande de reconnaissance — c'est la
+ * contrepartie de la dissymétrie : celui qui n'a pas déclaré lui-même doit
+ * pouvoir dire s'il reconnaît le versement.
+ */
+const aSolder = ref<Cotisation[]>([])
+const especesOuvert = ref<string | null>(null)
+const montantEspeces = ref<Record<string, number>>({})
+
+function restantDe(c: Cotisation): number {
+  return Math.max(0, c.expectedAmount - c.confirmedAmount)
+}
+
+async function enregistrerEspeces(cotisation: Cotisation) {
+  erreur.value = null
+  enCours.value = cotisation.id
+  try {
+    await $fetch(`/api/v1/contributions/${cotisation.id}/declare-cash`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      // `membershipId` est renvoyé au serveur, qui vérifie qu'il correspond
+      // bien à la cotisation : le bureau ne peut pas enregistrer un versement
+      // au nom d'un membre en visant la ligne d'un autre.
+      body: {
+        amount: montantEspeces.value[cotisation.id],
+        channel: 'cash',
+        membershipId: cotisation.membershipId,
+      },
+    })
+    especesOuvert.value = null
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
 
 const confirmables = computed(() => items.value.filter(i => !i.estLaMienne))
 
@@ -64,6 +122,24 @@ async function charger() {
       `/api/v1/tontines/${tontineId}/pending-confirmations`,
     )
     items.value = reponse.items
+
+    // Les cotisations du tour en cours qui ne sont pas soldées : ce sont
+    // celles pour lesquelles le bureau peut enregistrer des espèces.
+    const detail = await $fetch<{ currentRound: { id: string } | null }>(
+      `/api/v1/tontines/${tontineId}`,
+    )
+
+    if (detail.currentRound) {
+      const cotisations = await $fetch<{ items: Cotisation[] }>(
+        `/api/v1/rounds/${detail.currentRound.id}/contributions`,
+      )
+      aSolder.value = cotisations.items.filter(c => c.confirmedAmount < c.expectedAmount)
+      for (const c of aSolder.value) montantEspeces.value[c.id] ??= restantDe(c)
+    }
+    else {
+      aSolder.value = []
+    }
+
     etat.value = 'contenu'
   }
   catch (e) {
@@ -153,15 +229,19 @@ useHead({ title: 'À confirmer — eTontine' })
       @retry="charger"
     />
 
-    <EmptyState
-      v-else-if="items.length === 0"
-      title="Rien à confirmer"
-      description="Toutes les déclarations ont été traitées. Les nouvelles apparaîtront ici."
-      icon="lucide:circle-check"
-    />
-
     <template v-else>
+      <!-- La file peut être vide sans que l'écran le soit : le bureau vient
+           aussi ici pour enregistrer des espèces, et il n'y a rien à confirmer
+           tant qu'il ne l'a pas fait. -->
+      <EmptyState
+        v-if="items.length === 0"
+        title="Rien à confirmer"
+        description="Toutes les déclarations ont été traitées. Les nouvelles apparaîtront ici."
+        icon="lucide:circle-check"
+      />
+
       <ul
+        v-else
         class="flex flex-col gap-3"
         data-testid="file-confirmation"
       >
@@ -301,6 +381,81 @@ useHead({ title: 'À confirmer — eTontine' })
           </div>
         </li>
       </ul>
+
+      <!-- Espèces reçues de la main à la main -->
+      <section
+        v-if="aSolder.length > 0"
+        class="flex flex-col gap-3 card-surface p-4"
+        data-testid="section-especes"
+      >
+        <h2 class="font-semibold text-ink">
+          Enregistrer des espèces
+        </h2>
+        <p class="text-sm text-ink-muted">
+          Pour un membre qui t’a remis l’argent en main propre. Il recevra une
+          demande de confirmation : c’est lui qui dit s’il reconnaît le
+          versement.
+        </p>
+
+        <ul class="flex flex-col gap-2">
+          <li
+            v-for="cotisation in aSolder"
+            :key="cotisation.id"
+            class="flex flex-col gap-2 rounded-control border border-line p-3"
+            :data-testid="`especes-${cotisation.id}`"
+          >
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="truncate font-semibold text-ink">{{ cotisation.nom }}</span>
+              <span class="shrink-0 text-sm text-ink-muted">
+                reste <AmountDisplay
+                  :amount="restantDe(cotisation)"
+                  size="sm"
+                />
+              </span>
+            </div>
+
+            <template v-if="especesOuvert === cotisation.id">
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                :for="`montant-especes-${cotisation.id}`"
+              >
+                Montant reçu (FCFA)
+                <InputText
+                  :id="`montant-especes-${cotisation.id}`"
+                  :value="montantEspeces[cotisation.id]"
+                  inputmode="numeric"
+                  :data-testid="`champ-especes-${cotisation.id}`"
+                  @input="montantEspeces[cotisation.id]
+                    = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+                />
+              </label>
+
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  :label="enCours === cotisation.id ? 'Enregistrement…' : 'Enregistrer'"
+                  :disabled="enCours !== null || !montantEspeces[cotisation.id]"
+                  class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+                  :data-testid="`bouton-enregistrer-especes-${cotisation.id}`"
+                  @click="enregistrerEspeces(cotisation)"
+                />
+                <Button
+                  label="Annuler"
+                  class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                  @click="especesOuvert = null"
+                />
+              </div>
+            </template>
+
+            <Button
+              v-else
+              label="Il a payé en espèces"
+              class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+              :data-testid="`bouton-especes-${cotisation.id}`"
+              @click="especesOuvert = cotisation.id"
+            />
+          </li>
+        </ul>
+      </section>
 
       <p
         v-if="erreur"
