@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { annulerAmende, appliquerAmende, calculerAmende } from '../../server/services/amendes.ts'
-import { enregistrerAvance, solderAvance } from '../../server/services/avances.ts'
+import { avancesDe, enregistrerAvance, solderAvance } from '../../server/services/avances.ts'
 import { ajouterMessage, ouvrirContestation, resoudreContestation } from '../../server/services/litiges.ts'
 import { appendLedger } from '../../server/services/ledger.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
@@ -209,6 +209,19 @@ describe('avances entre membres', () => {
     expect(() => enregistrerAvance(db, {
       roundId: tour.id, fromMembershipId: de, toMembershipId: de, amount: 25_000,
     })).toThrow(expect.objectContaining({ statusCode: 422 }))
+  })
+
+  it('dit qui a dépanné qui', () => {
+    const [de, vers] = deuxMembres()
+    const tour = db.select().from(rounds).all()[0]!
+    enregistrerAvance(db, { roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000 })
+
+    // « 25 000 F, tour 3 » ne règle aucune dispute : ce qu'on vient chercher
+    // dans une avance, ce sont les deux noms.
+    const [avance] = avancesDe(db, T)
+    expect(avance!.nomPreteur).not.toBe('')
+    expect(avance!.nomBeneficiaire).not.toBe('')
+    expect(avance!.nomPreteur).not.toBe(avance!.nomBeneficiaire)
   })
 
   it('se solde une seule fois', () => {

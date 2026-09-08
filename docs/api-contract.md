@@ -144,7 +144,8 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `GET` | `/receipts/:id/image` | Image < 40 Ko pour partage WhatsApp |
 | `POST` | `/contributions/:id/penalty` | Application d'une amende (président) |
 | `POST` | `/penalties/:id/waive` | `{ reason }` — annulation |
-| `POST` | `/advances` | `{ roundId, fromMembershipId, toMembershipId, amount }` |
+| `POST` | `/advances` | `{ roundId, fromMembershipId, toMembershipId, amount }`. Ne touche **aucune** cotisation : c'est une reconnaissance de dette entre deux membres |
+| `POST` | `/advances/:id/settle` | La dette entre les deux membres est réglée |
 | `POST` | `/ledger/:entryId/dispute` | Bouton « signaler une erreur » |
 | `POST` | `/disputes/:id/messages` · `POST /disputes/:id/resolve` | |
 

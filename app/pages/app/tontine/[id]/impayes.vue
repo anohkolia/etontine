@@ -15,9 +15,11 @@ const { formatRelativeDay } = useDate()
 
 interface Retard {
   contributionId: string
+  roundId: string
   roundIndex: number
   dueDate: string
   nom: string
+  membershipId: string
   rotationPosition: number
   restant: number
   status: 'late' | 'disputed'
@@ -29,13 +31,24 @@ interface Amende {
   managedName: string | null
 }
 interface Avance {
-  advance: { id: string, amount: number, settledAt: string | null }
+  advance: {
+    id: string
+    amount: number
+    settledAt: string | null
+    fromMembershipId: string
+    toMembershipId: string
+  }
   roundIndex: number
+  nomPreteur: string
+  nomBeneficiaire: string
 }
+
+interface MembreSimple { id: string, nom: string }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const donnees = ref<{
   myRole: string
+  membres: MembreSimple[]
   retards: Retard[]
   amendes: Amende[]
   avances: Avance[]
@@ -61,7 +74,10 @@ async function charger() {
     donnees.value = await $fetch<NonNullable<typeof donnees.value>>(
       `/api/v1/tontines/${tontineId}/impayes`,
     )
-    for (const r of donnees.value!.retards) montantAmende.value[r.contributionId] = r.amendeCalculee
+    for (const r of donnees.value!.retards) {
+      montantAmende.value[r.contributionId] = r.amendeCalculee
+      montantAvance.value[r.contributionId] ??= r.restant
+    }
     etat.value = 'contenu'
   }
   catch (e) {
@@ -78,6 +94,61 @@ async function appliquer(contributionId: string) {
       method: 'POST',
       body: { amount: montantAmende.value[contributionId] },
     })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
+
+/**
+ * Avance entre membres : quelqu'un dépanne un proche, et la dette se règle plus
+ * tard, de la main à la main.
+ *
+ * Le cas est fréquent et invisible dans les carnets papier. La route existait,
+ * l'écran affichait les avances — et rien ne pouvait en créer une, ni en solder
+ * une. Une reconnaissance de dette qu'on ne peut pas éteindre reste affichée
+ * après le remboursement, et c'est elle qui déclenche la dispute suivante.
+ *
+ * L'avance ne touche **aucune cotisation** : elle ne paie rien, elle consigne
+ * qui doit quoi à qui.
+ */
+const avanceOuverte = ref<string | null>(null)
+const preteur = ref<Record<string, string>>({})
+const montantAvance = ref<Record<string, number>>({})
+
+async function enregistrerAvance(retard: Retard) {
+  erreur.value = null
+  enCours.value = retard.contributionId
+  try {
+    await $fetch('/api/v1/advances', {
+      method: 'POST',
+      body: {
+        roundId: retard.roundId,
+        fromMembershipId: preteur.value[retard.contributionId],
+        toMembershipId: retard.membershipId,
+        amount: montantAvance.value[retard.contributionId] ?? retard.restant,
+      },
+    })
+    avanceOuverte.value = null
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
+
+async function solder(avanceId: string) {
+  erreur.value = null
+  enCours.value = avanceId
+  try {
+    await $fetch(`/api/v1/advances/${avanceId}/settle`, { method: 'POST' })
     await charger()
   }
   catch (e) {
@@ -223,6 +294,79 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 @click="appliquer(retard.contributionId)"
               />
             </div>
+
+            <!-- Quelqu'un a dépanné : on le consigne. L'avance ne paie pas la
+                 cotisation, elle dit qui doit quoi à qui. -->
+            <div
+              v-if="estPresident"
+              class="flex flex-col gap-2 border-t border-line pt-3"
+            >
+              <template v-if="avanceOuverte === retard.contributionId">
+                <label
+                  class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                  :for="`preteur-${retard.contributionId}`"
+                >
+                  Qui a avancé ?
+                  <select
+                    :id="`preteur-${retard.contributionId}`"
+                    v-model="preteur[retard.contributionId]"
+                    class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-ink"
+                    :data-testid="`champ-preteur-${retard.contributionId}`"
+                  >
+                    <option value="">
+                      Choisir un membre
+                    </option>
+                    <option
+                      v-for="membre in donnees.membres.filter(m => m.id !== retard.membershipId)"
+                      :key="membre.id"
+                      :value="membre.id"
+                    >
+                      {{ membre.nom }}
+                    </option>
+                  </select>
+                </label>
+
+                <label
+                  class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                  :for="`montant-avance-${retard.contributionId}`"
+                >
+                  Montant avancé (FCFA)
+                  <InputText
+                    :id="`montant-avance-${retard.contributionId}`"
+                    :value="montantAvance[retard.contributionId]"
+                    inputmode="numeric"
+                    :data-testid="`champ-montant-avance-${retard.contributionId}`"
+                    @input="montantAvance[retard.contributionId]
+                      = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+                  />
+                </label>
+
+                <div class="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    :label="enCours === retard.contributionId ? 'Enregistrement…' : 'Enregistrer l’avance'"
+                    :disabled="enCours !== null
+                      || !preteur[retard.contributionId]
+                      || !montantAvance[retard.contributionId]"
+                    class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+                    :data-testid="`bouton-enregistrer-avance-${retard.contributionId}`"
+                    @click="enregistrerAvance(retard)"
+                  />
+                  <Button
+                    label="Annuler"
+                    class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                    @click="avanceOuverte = null"
+                  />
+                </div>
+              </template>
+
+              <Button
+                v-else
+                label="Quelqu’un a avancé pour lui"
+                class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-avance-${retard.contributionId}`"
+                @click="avanceOuverte = retard.contributionId"
+              />
+            </div>
           </li>
         </ul>
       </section>
@@ -316,16 +460,38 @@ useHead({ title: 'Retards et amendes — eTontine' })
           <li
             v-for="avance in donnees.avances"
             :key="avance.advance.id"
-            class="flex items-center justify-between gap-3 card-surface p-3"
+            class="flex flex-col gap-2 card-surface p-3"
+            :data-testid="`avance-${avance.advance.id}`"
           >
-            <span class="text-sm text-ink-muted">
-              Tour {{ avance.roundIndex }}
-              <span v-if="avance.advance.settledAt"> · soldée</span>
-            </span>
-            <AmountDisplay
-              :amount="avance.advance.amount"
-              :muted="Boolean(avance.advance.settledAt)"
-            />
+            <div class="flex items-center justify-between gap-3">
+              <!-- Qui a dépanné qui : c'est ce qu'on vient chercher ici, pas
+                   un montant tout seul. -->
+              <span class="min-w-0 text-sm text-ink">
+                <strong class="font-semibold">{{ avance.nomPreteur }}</strong>
+                a avancé pour
+                <strong class="font-semibold">{{ avance.nomBeneficiaire }}</strong>
+              </span>
+              <AmountDisplay
+                :amount="avance.advance.amount"
+                :muted="Boolean(avance.advance.settledAt)"
+              />
+            </div>
+
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm text-ink-muted">
+                Tour {{ avance.roundIndex }}
+                <span v-if="avance.advance.settledAt"> · soldée</span>
+              </span>
+
+              <Button
+                v-if="estPresident && !avance.advance.settledAt"
+                :label="enCours === avance.advance.id ? 'Enregistrement…' : 'Marquer soldée'"
+                :disabled="enCours !== null"
+                class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-solder-${avance.advance.id}`"
+                @click="solder(avance.advance.id)"
+              />
+            </div>
           </li>
         </ul>
       </section>

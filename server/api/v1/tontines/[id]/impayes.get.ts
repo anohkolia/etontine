@@ -26,6 +26,7 @@ export default defineEventHandler(async (event) => {
   const enRetard = db
     .select({
       contributionId: contributions.id,
+      roundId: rounds.id,
       roundIndex: rounds.index,
       dueDate: contributions.dueDate,
       expectedAmount: contributions.expectedAmount,
@@ -48,8 +49,28 @@ export default defineEventHandler(async (event) => {
     ))
     .all()
 
+  // Les membres actifs, pour l'écran d'avance : il faut désigner qui dépanne.
+  // Ils voyagent avec le reste plutôt que dans un second appel — c'est la
+  // promesse de cette route, tout ce qu'il faut pour peindre l'écran d'un coup.
+  const membres = db
+    .select({
+      id: memberships.id,
+      managedName: memberships.managedName,
+      firstName: users.firstName,
+      lastName: users.lastName,
+    })
+    .from(memberships)
+    .leftJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active')))
+    .all()
+    .map(m => ({
+      id: m.id,
+      nom: [m.firstName, m.lastName].filter(Boolean).join(' ') || m.managedName || 'Membre',
+    }))
+
   return {
     myRole: membership.role,
+    membres,
     regles,
     retards: enRetard.map(r => ({
       ...r,

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
-import { advances, memberships, rounds } from '../db/schema.ts'
+import { advances, memberships, rounds, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
 import { notifier } from './notifications.ts'
 
@@ -80,12 +80,40 @@ export function solderAvance(db: Db, avanceId: string) {
   return { id: avanceId, settled: true }
 }
 
-/** Les avances d'une tontine. */
+/**
+ * Les avances d'une tontine, avec le nom des deux membres.
+ *
+ * Une avance sans noms ne dit rien : « 25 000 F, tour 3 » ne règle aucune
+ * dispute. Ce qu'on vient y chercher, c'est **qui** a dépanné **qui**.
+ */
 export function avancesDe(db: Db, tontineId: string) {
+  const noms = new Map(
+    db
+      .select({
+        id: memberships.id,
+        managedName: memberships.managedName,
+        firstName: users.firstName,
+        lastName: users.lastName,
+      })
+      .from(memberships)
+      .leftJoin(users, eq(users.id, memberships.userId))
+      .where(eq(memberships.tontineId, tontineId))
+      .all()
+      .map(m => [
+        m.id,
+        [m.firstName, m.lastName].filter(Boolean).join(' ') || m.managedName || 'Membre',
+      ] as const),
+  )
+
   return db
     .select({ advance: advances, roundIndex: rounds.index })
     .from(advances)
     .innerJoin(rounds, eq(rounds.id, advances.roundId))
     .where(eq(rounds.tontineId, tontineId))
     .all()
+    .map(a => ({
+      ...a,
+      nomPreteur: noms.get(a.advance.fromMembershipId) ?? 'Membre',
+      nomBeneficiaire: noms.get(a.advance.toMembershipId) ?? 'Membre',
+    }))
 }
