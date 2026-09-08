@@ -83,6 +83,40 @@ async function basculerConsentement(clef: 'data' | 'notifications', valeur: bool
   await $fetch('/api/v1/me/consents', { method: 'PATCH', body: { [clef]: valeur } })
 }
 
+/**
+ * Retire le verrouillage.
+ *
+ * `DELETE /auth/pin` existait sans appelant : on posait un code et on ne
+ * pouvait plus jamais l'ôter. Un verrou qu'on ne peut pas rendre finit par
+ * enfermer quelqu'un dehors — un téléphone partagé, une personne qui oublie,
+ * et l'application devient inutilisable.
+ *
+ * Le code courant reste exigé : sans lui, n'importe qui ayant le téléphone
+ * en main lèverait le verrou censé le protéger.
+ */
+const retraitEnCours = ref(false)
+
+async function retirerPin() {
+  messagePin.value = null
+  retraitEnCours.value = true
+  try {
+    await $fetch('/api/v1/auth/pin', {
+      method: 'DELETE',
+      body: { currentPin: pinActuel.value },
+    })
+    pin.value = ''
+    pinActuel.value = ''
+    await session.charger(true)
+    messagePin.value = 'Code de verrouillage retiré.'
+  }
+  catch (e) {
+    messagePin.value = message(e)
+  }
+  finally {
+    retraitEnCours.value = false
+  }
+}
+
 async function definirPin() {
   messagePin.value = null
   try {
@@ -352,6 +386,18 @@ useHead({ title: 'Mon profil — eTontine' })
             :disabled="pin.length < 4"
             class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
             data-testid="bouton-pin"
+          />
+
+          <!-- Le retrait exige le code courant, comme le changement : c'est le
+               même geste de preuve, pour la même raison. -->
+          <Button
+            v-if="session.user?.hasPin"
+            type="button"
+            :label="retraitEnCours ? 'Retrait…' : 'Retirer le code'"
+            :disabled="retraitEnCours || pinActuel.length < 4"
+            class="text-ink-muted hover:text-ink"
+            data-testid="bouton-retirer-pin"
+            @click="retirerPin"
           />
         </form>
       </section>

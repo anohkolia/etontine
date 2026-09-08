@@ -59,6 +59,15 @@ test('le code de verrouillage s’enregistre', async ({ page }) => {
   await page.getByTestId('bouton-pin').click()
 
   await expect(page.getByTestId('message-pin')).toContainText('enregistré')
+
+  // Et il se retire. Un verrou qu'on ne peut pas rendre finit par enfermer
+  // quelqu'un dehors — la route existait, sans aucun bouton pour l'appeler.
+  await page.getByTestId('champ-pin-actuel').fill('1234')
+  await page.getByTestId('bouton-retirer-pin').click()
+  await expect(page.getByTestId('message-pin')).toContainText('retiré')
+
+  // Retiré pour de bon : le champ « code actuel » disparaît avec lui.
+  await expect(page.getByTestId('champ-pin-actuel')).toHaveCount(0)
 })
 
 test('la page de données propose l’export et la suppression', async ({ page }) => {
