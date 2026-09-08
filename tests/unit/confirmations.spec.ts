@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration } from '../../server/services/confirmations.ts'
+import { confirmateursPossibles, confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration } from '../../server/services/confirmations.ts'
 import { declarerPaiement } from '../../server/services/declarations.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
@@ -18,10 +18,18 @@ const PRESIDENT = 'c1000000-0000-4000-8000-000000000001'
 const TRESORIER = 'c1000000-0000-4000-8000-000000000002'
 const MEMBRE = 'c1000000-0000-4000-8000-000000000003'
 
-/** Rattache un membre géré à un compte, pour qu'il puisse déclarer et être notifié. */
-function rattacher(nom: string, userId: string) {
+/**
+ * Rattache un membre géré à un compte, pour qu'il puisse déclarer et être
+ * notifié — et lui pose sa casquette.
+ *
+ * Le rôle n'est pas décoratif ici : `confirmerDeclaration` s'en sert pour
+ * savoir s'il existe un second valideur possible. Un « trésorier » resté
+ * `member` laisserait le bureau à une seule personne, et les déclarations du
+ * président seraient confirmées d'office au lieu d'attendre en file.
+ */
+function rattacher(nom: string, userId: string, role: 'treasurer' | 'member' = 'member') {
   const [gere] = db.select().from(memberships).all().filter(m => m.managedName === nom)
-  db.update(memberships).set({ userId }).where(eq(memberships.id, gere!.id)).run()
+  db.update(memberships).set({ userId, role }).where(eq(memberships.id, gere!.id)).run()
   return gere!.id
 }
 
@@ -50,7 +58,7 @@ beforeEach(async () => {
   publier(db, T)
   demarrerTontine(db, T, PRESIDENT)
 
-  rattacher('Koffi', TRESORIER)
+  rattacher('Koffi', TRESORIER, 'treasurer')
   rattacher('Fatou', MEMBRE)
 })
 
@@ -222,5 +230,92 @@ describe('file d’attente', () => {
 
     confirmerDeclaration(db, declarationId, TRESORIER)
     expect(fileDAttente(db, T)).toHaveLength(0)
+  })
+})
+
+describe('bureau d’une seule personne — repli sur la règle de séparation §2.4', () => {
+  /** Retire au trésorier sa casquette : le président reste seul au bureau. */
+  function bureauSeul() {
+    db.update(memberships).set({ role: 'member' }).where(eq(memberships.userId, TRESORIER)).run()
+  }
+
+  function maCotisation() {
+    const sienne = db.select().from(memberships).all().find(m => m.userId === PRESIDENT)!
+    return cotisationDe(sienne.id).id
+  }
+
+  it('ne voit aucun valideur possible quand le président est seul au bureau', () => {
+    bureauSeul()
+    expect(confirmateursPossibles(db, T, PRESIDENT)).toHaveLength(0)
+  })
+
+  it('confirme d’office la cotisation du président, faute de tiers', () => {
+    bureauSeul()
+    const resultat = declarerPaiement(db, maCotisation(), PRESIDENT, ENVOI)
+
+    // Sans ce repli, sa cotisation resterait « déclarée » à chaque tour : il
+    // serait en retard chez lui-même, et le pot toujours incomplet.
+    expect(resultat.autoConfirmee).toBe(true)
+    expect(resultat.contributionStatus).toBe('confirmed')
+
+    const [c] = db.select().from(contributions).where(eq(contributions.id, maCotisation())).all()
+    expect(c!.status).toBe('confirmed')
+    expect(c!.confirmedAmount).toBe(25_000)
+  })
+
+  it('inscrit au registre que personne ne l’a vérifiée', () => {
+    bureauSeul()
+    declarerPaiement(db, maCotisation(), PRESIDENT, ENVOI)
+
+    const [ecriture] = db.select().from(ledgerEntries).all()
+      .filter(e => e.type === 'contribution_confirmed')
+    const payload = ecriture!.payload as { autoConfirmee?: boolean, motif?: string }
+
+    // Le groupe doit pouvoir distinguer au registre une cotisation validée par
+    // un tiers d'une cotisation que son auteur a validée faute de tiers.
+    expect(payload.autoConfirmee).toBe(true)
+    expect(payload.motif).toBe('aucun_second_valideur')
+  })
+
+  it('ne s’annonce pas à soi-même que le trésorier a confirmé', () => {
+    bureauSeul()
+    declarerPaiement(db, maCotisation(), PRESIDENT, ENVOI)
+
+    const siennes = db.select().from(notifications).all()
+      .filter(n => n.userId === PRESIDENT && n.type === 'cotisation_confirmee')
+    expect(siennes).toHaveLength(0)
+  })
+
+  it('ne confirme pas d’office la déclaration d’un membre : le président peut la voir', () => {
+    bureauSeul()
+    const sienne = db.select().from(memberships).all().find(m => m.userId === MEMBRE)!
+    const resultat = declarerPaiement(db, cotisationDe(sienne.id).id, MEMBRE, ENVOI)
+
+    // Le repli ne vaut que pour celui qui n'a personne au-dessus de lui. La
+    // cotisation d'un membre a un valideur — le président — et l'attend.
+    expect(resultat.autoConfirmee).toBe(false)
+    expect(resultat.contributionStatus).toBe('declared')
+    expect(fileDAttente(db, T)).toHaveLength(1)
+  })
+
+  it('reprend la règle de séparation dès qu’un second membre de bureau existe', () => {
+    // Bureau garni : le président ne peut plus valider sa propre déclaration.
+    const { declarationId } = declarerPaiement(db, maCotisation(), PRESIDENT, ENVOI)
+
+    expect(() => confirmerDeclaration(db, declarationId, PRESIDENT)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('ne marque rien au registre quand la confirmation vient bien d’un tiers', () => {
+    const { declarationId } = declarerPaiement(db, maCotisation(), PRESIDENT, ENVOI)
+    confirmerDeclaration(db, declarationId, TRESORIER)
+
+    const [ecriture] = db.select().from(ledgerEntries).all()
+      .filter(e => e.type === 'contribution_confirmed')
+
+    // Le cas courant garde exactement le payload qu'il avait : le marqueur
+    // n'apparaît que là où il veut dire quelque chose.
+    expect(ecriture!.payload).not.toHaveProperty('autoConfirmee')
   })
 })

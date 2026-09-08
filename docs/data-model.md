@@ -196,6 +196,12 @@ due ──(déclaration)──> declared ──(confirmation)──> confirmed
 
 Règle de séparation : `payment_declarations.declared_by ≠ decided_by`. À vérifier côté serveur, pas côté client.
 
+**Repli, et un seul : le bureau d'une seule personne.** Quand l'organisateur cumule les rôles — cas courant d'une petite tontine —, la règle n'a personne à qui confier la décision : la cotisation de l'organisateur resterait bloquée en `declared` à chaque tour, il serait en retard chez lui-même et le pot toujours incomplet. Sa déclaration est alors confirmée d'office, et l'écriture `contribution_confirmed` porte `autoConfirmee: true` avec le motif — le registre doit distinguer une cotisation vérifiée par un tiers d'une cotisation validée par son auteur faute de tiers.
+
+Le repli est **dérivé des données, jamais d'un drapeau de l'appelant** : le serveur constate qu'aucune adhésion active de rôle président ou trésorier, autre que le déclarant, ne porte de compte. Dès qu'un second membre de bureau existe, la règle reprend d'elle-même. Il ne s'étend pas à la déclaration d'un membre ordinaire, qui a un valideur — le président — et l'attend.
+
+Ce qui justifie le repli n'est pas la commodité : c'est qu'il n'y a rien à vérifier. L'argent que l'organisateur cotise part sur son propre canal de collecte, aucun tiers ne le voit passer. Le contrôle réel est en aval, à l'accusé de réception du bénéficiaire (§2.5), qui lui reste réservé au bénéficiaire.
+
 ### 2.5 `payouts.status`
 ```
 prepared ──> counter_validated ──> declared ──> acknowledged

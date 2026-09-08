@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, paymentDeclarations, rounds, shares, users,
@@ -76,6 +76,32 @@ function contexte(db: Db, declarationId: string): ContexteDeclaration {
 }
 
 /**
+ * Qui peut confirmer une déclaration faite par `declarantId`.
+ *
+ * Les adhésions actives de rôle président ou trésorier qui ont un compte,
+ * **moins le déclarant lui-même** — puisque c'est précisément lui que la règle
+ * de séparation écarte.
+ *
+ * Cette liste existe pour une raison : sur une tontine où l'organisateur cumule
+ * tous les rôles, elle est vide, et la règle §2.4 n'a alors plus personne à qui
+ * confier la décision. Le savoir permet de traiter ce cas sans le confondre
+ * avec une tentative d'auto-validation dans un bureau qui, lui, a du monde.
+ */
+export function confirmateursPossibles(db: Db, tontineId: string, declarantId: string): string[] {
+  return db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(
+      eq(memberships.tontineId, tontineId),
+      eq(memberships.status, 'active'),
+      inArray(memberships.role, ['president', 'treasurer']),
+    ))
+    .all()
+    .map(m => m.userId)
+    .filter((id): id is string => id !== null && id !== declarantId)
+}
+
+/**
  * Confirme une déclaration.
  *
  * **Règle de séparation, vérifiée côté serveur** (docs/data-model.md §2.4) :
@@ -83,6 +109,14 @@ function contexte(db: Db, declarationId: string): ContexteDeclaration {
  * même le trésorier pour sa propre cotisation. C'est le contrôle qui empêche un
  * organisateur de se déclarer à jour tout seul, et il n'a de valeur que s'il
  * est appliqué ici — masquer un bouton côté client n'empêche rien.
+ *
+ * **Le seul repli : le bureau d'une seule personne.** Quand l'organisateur
+ * cumule les rôles, la règle n'a personne à qui confier la décision, et sa
+ * propre cotisation resterait bloquée en « déclarée » à chaque tour. Elle est
+ * alors confirmée d'office et le registre le dit — parce qu'il n'y a de toute
+ * façon rien à vérifier : l'argent que l'organisateur cotise part sur son
+ * propre canal de collecte, aucun tiers ne le voit passer. Le contrôle réel
+ * est en aval, à l'accusé de réception du bénéficiaire, qui lui reste réservé.
  */
 export function confirmerDeclaration(db: Db, declarationId: string, decideurId: string) {
   const { declaration, contribution, tontineId, roundId, membershipId } = contexte(db, declarationId)
@@ -90,14 +124,23 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
   if (declaration.decision !== 'pending') {
     // Déjà décidée : ce n'est pas une erreur, c'est un rejeu. On le dit sans
     // rien changer — c'est ce qui rend « tout confirmer » idempotent.
-    return { declarationId, dejaDecidee: true, contributionStatus: contribution.status }
+    return { declarationId, dejaDecidee: true, autoConfirmee: false, contributionStatus: contribution.status }
   }
 
+  // Règle de séparation §2.4 : personne ne décide sur sa propre déclaration.
+  // Elle ne cède que lorsqu'il n'y a **personne d'autre** — bureau d'une seule
+  // personne — et le repli est alors dérivé des données, jamais d'un drapeau
+  // que l'appelant pourrait poser. Dès qu'un second membre de bureau existe, la
+  // règle reprend d'elle-même, sans rien à défaire ici.
+  let autoConfirmee = false
   if (declaration.declaredBy === decideurId) {
-    throw apiError(
-      'FORBIDDEN',
-      'Tu ne peux pas confirmer ta propre déclaration. Un autre membre du bureau doit le faire.',
-    )
+    if (confirmateursPossibles(db, tontineId, decideurId).length > 0) {
+      throw apiError(
+        'FORBIDDEN',
+        'Tu ne peux pas confirmer ta propre déclaration. Un autre membre du bureau doit le faire.',
+      )
+    }
+    autoConfirmee = true
   }
 
   assertTransition('contribution', contribution.status, 'confirmed')
@@ -129,6 +172,10 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
       amount: declaration.amount,
       confirmedTotal: cumul,
       complete: soldee,
+      // Écrit **seulement** quand la confirmation n'a été vue par personne :
+      // le groupe doit pouvoir distinguer au registre une cotisation validée
+      // par un tiers d'une cotisation que son auteur a validée faute de tiers.
+      ...(autoConfirmee ? { autoConfirmee: true, motif: 'aucun_second_valideur' } : {}),
     },
   })
 
@@ -137,9 +184,11 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
     title: 'Ta cotisation est confirmée',
     body: 'Le trésorier a confirmé ta cotisation. Elle apparaît au registre.',
     url: `/app/tontine/${tontineId}/registre`,
-  })
+    // Jamais à soi-même : s'annoncer qu'un trésorier a confirmé, quand on est
+    // le trésorier et le cotisant, n'apprend rien à personne.
+  }, decideurId)
 
-  return { declarationId, dejaDecidee: false, contributionStatus: soldee ? 'confirmed' : 'due' }
+  return { declarationId, dejaDecidee: false, autoConfirmee, contributionStatus: soldee ? 'confirmed' : 'due' }
 }
 
 /**
@@ -241,6 +290,7 @@ function notifierMembre(
   membershipId: string,
   tontineId: string,
   message: { type: string, title: string, body: string, url: string },
+  saufUserId?: string,
 ) {
   const [membre] = db
     .select({ userId: memberships.userId })
@@ -251,5 +301,5 @@ function notifierMembre(
 
   // Un membre géré n'a pas de compte : rien à notifier ici. Il sera joint par
   // SMS, hors périmètre MVP.
-  if (membre?.userId) notifier(db, membre.userId, { ...message, tontineId })
+  if (membre?.userId && membre.userId !== saufUserId) notifier(db, membre.userId, { ...message, tontineId })
 }

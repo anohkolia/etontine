@@ -165,23 +165,11 @@ test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser
   ])
   await page.request.post(`/api/v1/tontines/${id}/start`)
 
-  // Le président déclare sa propre cotisation, par l'interface.
-  await page.goto(`/app/tontine/${id}/cotiser`)
-  await waitForHydration(page)
-  await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
-
-  // L'écran « où envoyer » montre toujours le nom du titulaire.
-  await expect(page.getByTestId('nom-titulaire')).toHaveText('Aya Koné')
-  await expect(page.getByTestId('reference-courte')).toContainText(/^TON-[A-Z0-9]{4}$/)
-
-  await page.getByTestId('bouton-jai-envoye').click()
-  await page.getByTestId('bouton-declarer').click()
-  await expect(page.getByTestId('message-declaration')).toContainText('trésorier')
-
-  // Bleu « Déclaré », jamais vert : ce n'est pas encore confirmé.
-  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
-
-  // Le trésorier rejoint, puis confirme — et ce n'est pas lui qui a déclaré.
+  // Le trésorier prend son poste **avant** que le président déclare, et l'ordre
+  // compte : tant qu'aucun autre membre du bureau n'a de compte, le serveur
+  // confirme d'office la déclaration du président faute de valideur possible
+  // (data-model §2.4). Ce parcours-ci teste le cas à deux, celui où la
+  // séparation joue vraiment.
   const membres = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as {
     members: Array<{ id: string, name: string | null }>
   }
@@ -202,6 +190,36 @@ test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser
   const lien = await page.request.post(`/api/v1/tontines/${id}/invites`)
   const { url } = await lien.json() as { url: string }
   await tresorier.request.post(`/api/v1/invites/${url.split('/join/')[1]}/accept`)
+
+  // Le président déclare sa propre cotisation, par l'interface.
+  await page.goto(`/app/tontine/${id}/cotiser`)
+  await waitForHydration(page)
+  await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
+
+  // L'écran « où envoyer » montre toujours le nom du titulaire.
+  await expect(page.getByTestId('nom-titulaire')).toHaveText('Aya Koné')
+  await expect(page.getByTestId('reference-courte')).toContainText(/^TON-[A-Z0-9]{4}$/)
+
+  await page.getByTestId('bouton-jai-envoye').click()
+  await page.getByTestId('bouton-declarer').click()
+  await expect(page.getByTestId('message-declaration')).toContainText('trésorier')
+
+  // Bleu « Déclaré », jamais vert : ce n'est pas encore confirmé. La couleur
+  // se vérifie ici et pas ailleurs — c'est le seul parcours où une déclaration
+  // reste réellement en attente, puisque le bureau y compte deux personnes.
+  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
+
+  const badge = page.getByTestId('status-badge').filter({ hasText: 'Déclaré' }).first()
+  const fond = await badge.evaluate(el => getComputedStyle(el).backgroundColor)
+  const confirme = await page.evaluate(() => {
+    const sonde = document.createElement('span')
+    sonde.className = 'bg-confirmed-surface'
+    document.body.appendChild(sonde)
+    const couleur = getComputedStyle(sonde).backgroundColor
+    sonde.remove()
+    return couleur
+  })
+  expect(fond).not.toBe(confirme)
 
   await tresorier.goto(`/app/tontine/${id}/confirmations`)
   await waitForHydration(tresorier)
@@ -238,16 +256,11 @@ test('parcours 4 — verser le pot : déclarer puis accuser réception', async (
   ])
   await page.request.post(`/api/v1/tontines/${id}/start`)
 
-  // Le président déclare sa cotisation par l'interface.
-  await page.goto(`/app/tontine/${id}/cotiser`)
-  await waitForHydration(page)
-  await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
-  await page.getByTestId('bouton-jai-envoye').click()
-  await page.getByTestId('bouton-declarer').click()
-  await expect(page.getByTestId('message-declaration')).toBeVisible()
-
-  // Le trésorier rejoint et confirme : personne ne confirme sa propre
-  // déclaration, le pot ne peut donc pas se remplir tout seul.
+  // Le trésorier prend son poste d'abord : personne ne confirme sa propre
+  // déclaration, et le pot ne peut donc pas se remplir tout seul. Tant qu'il
+  // n'a pas de compte, le président serait au contraire son propre valideur —
+  // le repli du bureau à une personne (data-model §2.4), qui n'est pas ce que
+  // ce parcours vérifie.
   const membres = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as {
     members: Array<{ id: string, name: string | null }>
   }
@@ -268,6 +281,14 @@ test('parcours 4 — verser le pot : déclarer puis accuser réception', async (
     data: { firstName: 'Koffi', lastName: 'N’Guessan' },
   })
   await tresorier.request.post(`/api/v1/invites/${url.split('/join/')[1]}/accept`)
+
+  // Le président déclare sa cotisation par l'interface.
+  await page.goto(`/app/tontine/${id}/cotiser`)
+  await waitForHydration(page)
+  await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
+  await page.getByTestId('bouton-jai-envoye').click()
+  await page.getByTestId('bouton-declarer').click()
+  await expect(page.getByTestId('message-declaration')).toBeVisible()
 
   await tresorier.goto(`/app/tontine/${id}/confirmations`)
   await waitForHydration(tresorier)

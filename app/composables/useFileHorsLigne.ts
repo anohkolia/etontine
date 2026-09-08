@@ -29,9 +29,15 @@ export function useFileHorsLigne() {
   /**
    * Envoie une mutation, ou l'enfile si le réseau manque.
    *
-   * Renvoie `true` si l'appel est parti, `false` s'il a été mis en attente.
+   * `partie` dit si l'appel est vraiment parti ; `reponse` porte le corps rendu
+   * par le serveur quand c'est le cas. L'écran en a besoin : le serveur peut
+   * décider davantage que ce que l'intention demandait — une déclaration
+   * confirmée dans la foulée, par exemple — et annoncer le contraire à
+   * l'utilisateur serait lui mentir sur ce qui vient de se passer.
    */
-  async function envoyerOuEnfiler(mutation: Omit<MutationEnAttente, 'id' | 'createdAt' | 'tentatives'>): Promise<boolean> {
+  async function envoyerOuEnfiler(
+    mutation: Omit<MutationEnAttente, 'id' | 'createdAt' | 'tentatives'>,
+  ): Promise<{ partie: boolean, reponse?: unknown }> {
     const complete: MutationEnAttente = {
       ...mutation,
       id: crypto.randomUUID(),
@@ -42,16 +48,16 @@ export function useFileHorsLigne() {
     if (!navigator.onLine) {
       await enfiler(complete)
       await rafraichir()
-      return false
+      return { partie: false }
     }
 
     try {
-      await $fetch(complete.url, {
+      const reponse = await $fetch(complete.url, {
         method: complete.method,
         headers: { 'Idempotency-Key': complete.idempotencyKey },
         body: complete.body as Record<string, unknown>,
       })
-      return true
+      return { partie: true, reponse }
     }
     catch (erreur) {
       // Une erreur métier (4xx) ne se rejoue pas : la remettre en file la
@@ -61,7 +67,7 @@ export function useFileHorsLigne() {
 
       await enfiler(complete)
       await rafraichir()
-      return false
+      return { partie: false }
     }
   }
 

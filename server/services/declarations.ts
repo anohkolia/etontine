@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, paymentDeclarations, rounds, tontines,
@@ -7,6 +7,7 @@ import {
 import type { PaymentChannel } from '../../shared/schemas/index.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
+import { confirmateursPossibles, confirmerDeclaration } from './confirmations.ts'
 import { appendLedger } from './ledger.ts'
 import { notifierTontine } from './notifications.ts'
 
@@ -32,9 +33,21 @@ export interface DeclarationInput {
 
 export interface ResultatDeclaration {
   declarationId: string
-  contributionStatus: 'declared'
+  /**
+   * L'état réel de la cotisation après coup. Vaut `declared` dans le cas
+   * courant ; `confirmed` ou `due` quand la déclaration a été confirmée
+   * d'office faute de second valideur — voir `autoConfirmee`.
+   */
+  contributionStatus: 'declared' | 'confirmed' | 'due'
   /** Vrai si l'on a reconnu un doublon récent au lieu d'en créer un second. */
   doublonEvite: boolean
+  /**
+   * Vrai quand la déclaration a été confirmée dans la foulée parce que le
+   * bureau n'a qu'un membre : personne d'autre ne pouvait le faire. L'écran
+   * s'en sert pour le dire au lieu d'annoncer une confirmation à venir qui ne
+   * viendrait jamais.
+   */
+  autoConfirmee: boolean
 }
 
 /**
@@ -71,12 +84,18 @@ export function declarerPaiement(
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
-  // La transition passe par la machine à états : `confirmed → declared` est
-  // impossible, et un client qui poste un statut n'a aucune prise dessus.
-  assertTransition('contribution', ligne.contribution.status, 'declared')
-
   // Garde-fou anti-doublon : même cotisation, même montant, même canal, dans
   // la fenêtre. On renvoie l'existante plutôt que d'en créer une seconde.
+  //
+  // Il passe **avant** la machine à états, et non après : un second appui sur
+  // le bouton n'est pas une transition qu'on refuse, c'est un geste qu'on
+  // reconnaît. Le placer après ferait répondre « passage impossible » à un
+  // membre qui a simplement tapé deux fois.
+  //
+  // Une déclaration déjà confirmée compte donc aussi comme doublon : sur une
+  // tontine où le bureau confirme d'office, la première n'est plus en attente
+  // au moment où la seconde arrive. Seul un rejet est exclu — après un rejet,
+  // re-déclarer est un geste légitime, pas un doublon.
   const depuis = new Date(Date.now() - FENETRE_DOUBLON_SECONDES * 1000)
   const [recente] = db
     .select()
@@ -85,7 +104,7 @@ export function declarerPaiement(
       eq(paymentDeclarations.contributionId, contributionId),
       eq(paymentDeclarations.declaredBy, declarantId),
       eq(paymentDeclarations.amount, input.amount),
-      eq(paymentDeclarations.decision, 'pending'),
+      inArray(paymentDeclarations.decision, ['pending', 'confirmed']),
       gte(paymentDeclarations.declaredAt, depuis),
     ))
     .orderBy(desc(paymentDeclarations.declaredAt))
@@ -93,8 +112,17 @@ export function declarerPaiement(
     .all()
 
   if (recente) {
-    return { declarationId: recente.id, contributionStatus: 'declared', doublonEvite: true }
+    return {
+      declarationId: recente.id,
+      contributionStatus: ligne.contribution.status as 'declared' | 'confirmed' | 'due',
+      doublonEvite: true,
+      autoConfirmee: recente.decision === 'confirmed',
+    }
   }
+
+  // La transition passe par la machine à états : `confirmed → declared` est
+  // impossible, et un client qui poste un statut n'a aucune prise dessus.
+  assertTransition('contribution', ligne.contribution.status, 'declared')
 
   const declarationId = randomUUID()
   db.insert(paymentDeclarations).values({
@@ -130,7 +158,24 @@ export function declarerPaiement(
     },
   })
 
-  return { declarationId, contributionStatus: 'declared', doublonEvite: false }
+  // Bureau d'une seule personne : nul autre ne peut confirmer cette
+  // déclaration, et la laisser en attente la bloquerait pour de bon. On
+  // enchaîne donc la confirmation, que `confirmerDeclaration` n'accorde que
+  // s'il constate lui-même l'absence de second valideur — et qui l'inscrit au
+  // registre comme telle.
+  if (confirmateursPossibles(db, ligne.tontineId, declarantId).length === 0) {
+    const confirmation = confirmerDeclaration(db, declarationId, declarantId)
+    if (confirmation.autoConfirmee) {
+      return {
+        declarationId,
+        contributionStatus: confirmation.contributionStatus as 'confirmed' | 'due',
+        doublonEvite: false,
+        autoConfirmee: true,
+      }
+    }
+  }
+
+  return { declarationId, contributionStatus: 'declared', doublonEvite: false, autoConfirmee: false }
 }
 
 /**

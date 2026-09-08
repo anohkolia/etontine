@@ -109,7 +109,7 @@ test('une image de 4 Mo est compressée sous 100 Ko avant l’envoi', async ({ p
   expect(ko).toBeLessThan(100)
 })
 
-test('déclarer affiche le statut bleu « Déclaré », et verrouille 90 secondes', async ({ page }) => {
+test('déclarer verrouille 90 secondes, et le bureau seul confirme d’office', async ({ page }) => {
   const id = await tontineLancee(page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
@@ -117,15 +117,18 @@ test('déclarer affiche le statut bleu « Déclaré », et verrouille 90 seconde
   await page.getByTestId('bouton-jai-envoye').click()
   await page.getByTestId('bouton-declarer').click()
 
-  await expect(page.getByTestId('message-declaration')).toContainText('trésorier')
+  // Ici le président est seul au bureau : personne d'autre ne peut vérifier sa
+  // déclaration, le serveur la confirme donc dans la foulée et l'écran le dit
+  // (data-model §2.4). Le cas à deux — bleu « Déclaré » en attente du
+  // trésorier — est tenu par le parcours 3 de `parcours-critiques.spec.ts`.
+  await expect(page.getByTestId('message-declaration')).toContainText('confirmée d’office')
 
   // Acceptation T15 : le bouton reste inactif 90 secondes après un envoi.
   const bouton = page.getByTestId('bouton-declarer')
   await expect(bouton).toBeDisabled()
   await expect(bouton).toContainText('Déjà déclaré')
 
-  // Et le statut est bleu « Déclaré », jamais vert.
-  const badge = page.getByTestId('status-badge').filter({ hasText: 'Déclaré' }).first()
+  const badge = page.getByTestId('status-badge').filter({ hasText: 'Confirmé' }).first()
   await expect(badge).toBeVisible()
 
   const fond = await badge.evaluate(el => getComputedStyle(el).backgroundColor)
@@ -137,7 +140,7 @@ test('déclarer affiche le statut bleu « Déclaré », et verrouille 90 seconde
     sonde.remove()
     return couleur
   })
-  expect(fond).not.toBe(confirme)
+  expect(fond).toBe(confirme)
 })
 
 test('une seconde déclaration donne un message explicite, jamais un doublon', async ({ page }) => {
@@ -149,9 +152,9 @@ test('une seconde déclaration donne un message explicite, jamais un doublon', a
   await page.getByTestId('bouton-declarer').click()
   await expect(page.getByTestId('message-declaration')).toBeVisible()
 
-  // On revient sur la cotisation : elle est déjà déclarée, et l'écran le dit.
+  // On revient sur la cotisation : elle est déjà soldée, et l'écran le dit.
   await page.reload()
   await waitForHydration(page)
-  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
+  await expect(page.getByTestId('liste-cotisations')).toContainText('Confirmé')
   await expect(page.locator('[data-testid^="bouton-envoyer-"]')).toHaveCount(0)
 })

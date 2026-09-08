@@ -175,7 +175,7 @@ async function declarer() {
     // La clé d'idempotence est fabriquée **ici**, au moment de la saisie, et
     // voyage avec l'intention : que l'envoi parte maintenant ou dans une heure
     // au retour du réseau, le serveur ne créera qu'une seule déclaration.
-    const partie = await envoyerOuEnfiler({
+    const { partie, reponse } = await envoyerOuEnfiler({
       url: `/api/v1/contributions/${cotisationChoisie.value.id}/declare`,
       method: 'POST',
       idempotencyKey: crypto.randomUUID(),
@@ -188,9 +188,17 @@ async function declarer() {
       },
     })
 
-    messageDeclaration.value = partie
-      ? 'Déclaration enregistrée. Le trésorier va la confirmer.'
-      : 'Pas de réseau : ta déclaration est gardée et partira toute seule à la reconnexion. Tu n’as rien à refaire.'
+    // Sur une tontine où le bureau n'a qu'un membre, le serveur confirme la
+    // déclaration dans la foulée : il n'y a personne d'autre pour le faire.
+    // Annoncer un trésorier qui va la confirmer serait annoncer une attente
+    // qui n'arrivera jamais.
+    const auto = (reponse as { autoConfirmee?: boolean } | undefined)?.autoConfirmee === true
+
+    messageDeclaration.value = !partie
+      ? 'Pas de réseau : ta déclaration est gardée et partira toute seule à la reconnexion. Tu n’as rien à refaire.'
+      : auto
+        ? 'Cotisation enregistrée et confirmée d’office : personne d’autre au bureau ne pouvait la vérifier. Le registre en garde la trace.'
+        : 'Déclaration enregistrée. Le trésorier va la confirmer.'
 
     demarrerVerrou()
     preuve.value = null

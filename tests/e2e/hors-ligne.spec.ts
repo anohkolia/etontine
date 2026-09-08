@@ -56,10 +56,12 @@ test('déclarer sans réseau, puis retrouver la déclaration synchronisée', asy
   await expect(page.getByTestId('offline-banner')).toBeHidden()
   await expect(page.getByTestId('file-en-attente')).toBeHidden({ timeout: 15_000 })
 
-  // Et la déclaration est bien arrivée côté serveur.
+  // Et la déclaration est bien arrivée côté serveur. Le président étant seul au
+  // bureau, elle y est confirmée dans la foulée — ce qui compte ici, c'est
+  // qu'elle soit partie, pas l'état où elle atterrit.
   await page.reload()
   await waitForHydration(page)
-  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
+  await expect(page.getByTestId('liste-cotisations')).toContainText('Confirmé')
 })
 
 test('la file ne déclare pas deux fois, même vidée plusieurs fois', async ({ page, context }) => {
@@ -77,9 +79,11 @@ test('la file ne déclare pas deux fois, même vidée plusieurs fois', async ({ 
   await expect(page.getByTestId('file-en-attente')).toBeHidden({ timeout: 15_000 })
 
   // La clé d'idempotence voyage avec l'intention : même si la file repartait,
-  // le serveur ne créerait pas de seconde déclaration.
-  const file = await page.request.get(`/api/v1/tontines/${id}/pending-confirmations`)
-  const { items } = await file.json() as { items: unknown[] }
+  // le serveur ne créerait pas de seconde déclaration. On compte au registre
+  // plutôt que dans la file du trésorier : celle-ci se vide dès que la
+  // déclaration est décidée, et ne prouverait donc plus rien.
+  const registre = await page.request.get(`/api/v1/tontines/${id}/ledger?type=contribution_declared`)
+  const { items } = await registre.json() as { items: unknown[] }
   expect(items).toHaveLength(1)
 })
 
@@ -102,8 +106,8 @@ test('aucune saisie n’est perdue si l’on quitte la page hors ligne', async (
 
   // Elle est partie au retour du réseau, sans intervention.
   await expect(page.getByTestId('file-en-attente')).toBeHidden({ timeout: 15_000 })
-  const file = await page.request.get(`/api/v1/tontines/${id}/pending-confirmations`)
-  const { items } = await file.json() as { items: unknown[] }
+  const registre = await page.request.get(`/api/v1/tontines/${id}/ledger?type=contribution_declared`)
+  const { items } = await registre.json() as { items: unknown[] }
   expect(items).toHaveLength(1)
 })
 

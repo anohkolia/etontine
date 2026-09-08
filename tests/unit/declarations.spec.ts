@@ -5,7 +5,7 @@ import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
-import { contributions, ledgerEntries, notifications, paymentDeclarations } from '../../server/db/schema.ts'
+import { contributions, ledgerEntries, memberships, notifications, paymentDeclarations } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -15,6 +15,7 @@ let T: string
 let maCotisation: string
 
 const PRESIDENT = 'b1000000-0000-4000-8000-000000000001'
+const TRESORIER = 'b1000000-0000-4000-8000-000000000010'
 
 beforeEach(async () => {
   const ctx = createTestDb()
@@ -27,7 +28,18 @@ beforeEach(async () => {
   majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
   ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
+  const fatou = ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
+
+  // Fatou a un compte et la casquette de trésorière, et c'est **porteur** :
+  // sans un second membre de bureau, la déclaration du président serait
+  // confirmée d'office faute de valideur possible. Ce fichier teste le cas
+  // courant, celui d'un bureau qui a du monde ; le bureau d'une seule personne
+  // a ses propres tests dans `confirmations.spec.ts`.
+  await createTestUser(db, TRESORIER, '+2250707000003')
+  db.update(memberships)
+    .set({ userId: TRESORIER, role: 'treasurer' })
+    .where(eq(memberships.id, fatou))
+    .run()
 
   const canal = creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
   marquerVerifie(db, canal)

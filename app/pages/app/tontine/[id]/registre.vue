@@ -60,6 +60,25 @@ const ICONE: Record<string, string> = {
   cash_unconfirmed: 'lucide:triangle-alert',
 }
 
+/**
+ * Une cotisation confirmée d'office ne se lit pas comme une cotisation
+ * confirmée par un tiers. Même type d'écriture, même chaîne de hachage — mais
+ * le registre doit dire lequel des deux il montre, sans quoi le mot
+ * « confirmée » recouvrirait deux choses très différentes : une vérification,
+ * et une absence de vérificateur.
+ */
+function estAutoConfirmee(e: Ecriture): boolean {
+  return e.type === 'contribution_confirmed' && e.payload.autoConfirmee === true
+}
+
+function libelleDe(e: Ecriture): string {
+  return estAutoConfirmee(e) ? 'Cotisation confirmée d’office' : (LIBELLE[e.type] ?? e.type)
+}
+
+function iconeDe(e: Ecriture): string {
+  return estAutoConfirmee(e) ? 'lucide:flag' : (ICONE[e.type] ?? 'lucide:circle-dashed')
+}
+
 const CANAUX_CONNUS = new Set(Object.keys(PAYMENT_CHANNEL))
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -261,17 +280,25 @@ useHead({ title: 'Registre — eTontine' })
             aria-hidden="true"
           >
             <Icon
-              :name="ICONE[ecriture.type] ?? 'lucide:circle-dashed'"
+              :name="iconeDe(ecriture)"
               size="1.25rem"
             />
           </span>
 
           <div class="flex min-w-0 flex-1 flex-col gap-1">
             <span class="font-semibold text-ink">
-              {{ LIBELLE[ecriture.type] ?? ecriture.type }}
+              {{ libelleDe(ecriture) }}
             </span>
             <span class="tabular text-sm text-ink-muted">
               {{ formatDate(ecriture.serverTimestamp) }} · écriture n° {{ ecriture.position }}
+            </span>
+            <!-- Dit pourquoi, sinon « d'office » ressemble à un passe-droit. -->
+            <span
+              v-if="estAutoConfirmee(ecriture)"
+              class="text-sm text-ink-muted"
+              data-testid="mention-auto-confirmee"
+            >
+              Aucun autre membre du bureau ne pouvait la vérifier.
             </span>
           </div>
 
