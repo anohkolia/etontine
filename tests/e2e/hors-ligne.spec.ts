@@ -118,3 +118,35 @@ test('la page d’aide reste consultable et répond aux questions d’argent', a
   await expect(page.locator('body')).toContainText('déclaré')
   await expect(page.locator('body')).toContainText('confirmé')
 })
+
+test('la promesse « ta saisie est gardée » ne suit pas d’un écran à l’autre', async ({ page, context }) => {
+  const id = await tontineLancee(page)
+
+  await page.goto(`/app/tontine/${id}/cotiser`)
+  await waitForHydration(page)
+
+  // La coquille avant la coupure : `waitForHydration` rend la main dès que Vue
+  // a pris le HTML, mais la mise en page attend encore `session.charger()` sous
+  // Suspense. Couper le réseau à cet instant vise un bandeau pas encore rendu.
+  await expect(page.getByTestId('barre-onglets')).toBeVisible()
+  await context.setOffline(true)
+
+  // Ici, la file couvre la déclaration : la promesse est tenue.
+  const bandeau = page.getByTestId('offline-banner')
+  await expect(bandeau).toContainText('Ce que tu saisis est gardé')
+
+  // Un écran plus loin, plus rien n'est mis en file. Laisser la phrase suivre
+  // ferait attendre un envoi qui n'a pas eu lieu — c'est tout l'intérêt du
+  // retour au défaut à la sortie de la page.
+  //
+  // La navigation se fait **dans l'application**, par l'onglet : un `goto`
+  // rechargerait tout et remettrait l'état à zéro de lui-même, sans rien
+  // éprouver du mécanisme.
+  await context.setOffline(false)
+  await page.getByTestId('onglet-profil').click()
+  await page.waitForURL(url => url.pathname === '/app/profil')
+  await context.setOffline(true)
+
+  await expect(bandeau).toContainText('a besoin du réseau')
+  await expect(bandeau).not.toContainText('Ce que tu saisis')
+})

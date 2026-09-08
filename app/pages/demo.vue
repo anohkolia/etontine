@@ -34,7 +34,10 @@ const prochainTour = new Date(Date.now() + 3 * 86_400_000)
 
 <template>
   <div>
-    <OfflineBanner />
+    <!-- La vitrine montre la promesse forte, celle des écrans couverts par la
+         file de mutations. Elle est déclarée ici plutôt que subie : le défaut
+         est volontairement le plus prudent des trois. -->
+    <OfflineBanner nature="saisie" />
 
     <main class="mx-auto flex min-h-dvh max-w-2xl flex-col gap-10 px-6 py-12">
       <header class="flex flex-col gap-2">

@@ -6,7 +6,8 @@
  * passe pour le membre. Sans cette phrase, le membre renvoie son paiement une
  * seconde fois.
  *
- * Encore faut-il qu'elle soit vraie sur l'écran où on la lit. Trois cas :
+ * Encore faut-il qu'elle soit vraie sur l'écran où on la lit. Trois cas, décrits
+ * par `NatureHorsLigne` :
  *
  * - `saisie` — la file de mutations couvre l'écran (T24) : une déclaration
  *   faite sans réseau part toute seule au retour. C'est la promesse forte, et
@@ -18,17 +19,22 @@
  *   pas non plus. Annoncer le contraire est pire que se taire : le membre
  *   attend un envoi qui n'a jamais eu lieu.
  *
+ * Deux façons de le dire, selon qui rend le bandeau. Une page qui le pose
+ * elle-même passe la propriété. Sous `layouts/app.vue`, c'est le gabarit qui le
+ * rend et la page déclare sa nature par `useNatureHorsLigne()`.
+ *
  * Ni couleur seule (règle 10), ni montant (règle 21).
  */
-const { nature = 'saisie' } = defineProps<{
-  nature?: 'saisie' | 'lecture' | 'reseau-requis'
-}>()
+import type { NatureHorsLigne } from '../../composables/useNatureHorsLigne'
 
+const { nature } = defineProps<{ nature?: NatureHorsLigne }>()
+
+const declaree = useNatureHorsLigne()
 const consigne = computed(() => ({
   'saisie': 'Ce que tu saisis est gardé et partira au retour du réseau.',
   'lecture': 'Cette page reste lisible. Le reste attend le retour du réseau.',
   'reseau-requis': 'Cette étape a besoin du réseau. Reprends dès qu’il revient.',
-}[nature]))
+}[nature ?? declaree.value]))
 
 const online = useOnline()
 const { enAttente, vider, rafraichir } = useFileHorsLigne()

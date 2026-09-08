@@ -16,6 +16,11 @@ definePageMeta({ layout: 'app', middleware: 'auth' })
 const route = useRoute()
 const tontineId = route.params.id as string
 const { compresser } = useCompressionImage()
+
+// Le seul écran que la file de mutations couvre : c'est ici, et nulle part
+// ailleurs, que le bandeau peut promettre qu'une saisie faite sans réseau
+// partira toute seule.
+useNatureHorsLigne(() => 'saisie')
 const { envoyerOuEnfiler } = useFileHorsLigne()
 const enLigne = useOnline()
 

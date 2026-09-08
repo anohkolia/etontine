@@ -10,7 +10,8 @@
  *
  * Le bandeau hors-ligne est ici et non dans chaque page : la coupure réseau
  * concerne toute l'application, et un écran qui l'oublierait laisserait le
- * membre croire que sa déclaration est partie.
+ * membre croire que sa déclaration est partie. Ce qu'il promet, en revanche,
+ * appartient à la page : voir `useNatureHorsLigne()`.
  */
 const session = useSessionStore()
 await session.charger()
@@ -20,6 +21,10 @@ const entete = useEnTete()
 
 <template>
   <div class="mx-auto flex min-h-dvh w-full max-w-2xl flex-col bg-surface-muted">
+    <!-- Sans nature déclarée, le bandeau prend la plus prudente des trois : la
+         file de mutations ne couvre qu'un écran, et promettre partout qu'une
+         saisie est gardée ferait attendre des envois qui n'ont pas eu lieu.
+         L'écran qui tient la promesse la réclame par `useNatureHorsLigne()`. -->
     <OfflineBanner />
 
     <header
