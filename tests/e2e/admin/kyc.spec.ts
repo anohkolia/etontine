@@ -178,6 +178,16 @@ test('un rejet exige un motif, et le motif reste visible', async ({ page, browse
   await waitForHydration(page)
   await expect(page.locator('[data-testid^="dossier-"]').filter({ hasText: numero })).toHaveCount(0)
 
+  // **Le motif arrive jusqu'à l'intéressé.** C'est la moitié qui manquait : le
+  // back-office exigeait une explication, la notification renvoyait le membre
+  // « voir ce qui doit être corrigé », et son écran ne montrait rien.
+  await membre.goto(`${APP_MEMBRE}/app/profil/identite`)
+  await waitForHydration(membre)
+  await expect(membre.getByTestId('motif-refus-identite')).toContainText('illisible')
+
+  // Et le formulaire est de nouveau là : on corrige, on redépose.
+  await expect(membre.getByTestId('champ-piece')).toBeVisible()
+
   await contexteMembre.close()
 })
 

@@ -8,6 +8,11 @@ export interface SessionUser {
   lastName: string | null
   avatarUrl: string | null
   kycLevel: number
+  /** L'état du dossier d'identité, distinct du palier atteint. */
+  kycStatus: 'none' | 'pending_review' | 'approved' | 'rejected'
+  /** Le motif du refus, obligatoire côté back-office. */
+  kycRejectionReason: string | null
+  kycSubmittedAt: string | null
   hasPin: boolean
 }
 

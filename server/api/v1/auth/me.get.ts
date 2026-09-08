@@ -32,6 +32,14 @@ export default defineEventHandler(async (event) => {
       lastName: user.lastName,
       avatarUrl: user.avatarUrl,
       kycLevel: user.kycLevel,
+      // L'**état** du dossier, pas seulement le palier atteint. Sans lui,
+      // quelqu'un dont le dossier attend voit le formulaire de dépôt et
+      // redépose, et quelqu'un dont le dossier a été refusé n'apprend jamais
+      // pourquoi — alors que la notification de refus l'envoie précisément
+      // sur cet écran « pour voir ce qui doit être corrigé ».
+      kycStatus: user.kycStatus,
+      kycRejectionReason: user.kycRejectionReason,
+      kycSubmittedAt: user.kycSubmittedAt,
       hasPin: Boolean(user.pinHash),
     },
     memberships: adhesions,

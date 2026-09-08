@@ -36,6 +36,24 @@ const resultat = ref<string | null>(null)
 const erreur = ref<string | null>(null)
 
 const dejaVerifie = computed(() => (session.user?.kycLevel ?? 0) >= 2)
+
+/**
+ * L'écran n'avait que deux états : vérifié, ou dépose tes pièces.
+ *
+ * Il en manquait deux, et ce sont ceux qui comptent. **En examen** : sans lui,
+ * quelqu'un qui vient de déposer revoit le formulaire et redépose, persuadé
+ * que rien n'est parti. **Refusé** : le back-office exige un motif d'au moins
+ * dix caractères, la notification renvoie ici « pour voir ce qui doit être
+ * corrigé », et le motif n'arrivait jamais jusqu'à cet écran. On demandait à
+ * quelqu'un de corriger sans lui dire quoi.
+ */
+const enExamen = computed(() =>
+  !dejaVerifie.value && session.user?.kycStatus === 'pending_review',
+)
+const refuse = computed(() =>
+  !dejaVerifie.value && session.user?.kycStatus === 'rejected',
+)
+const motifRefus = computed(() => session.user?.kycRejectionReason ?? null)
 const complet = computed(() => piece.value !== null && selfie.value !== null)
 
 /**
@@ -162,74 +180,115 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
       data-testid="identite-verifiee"
     />
 
-    <form
-      v-else
-      class="flex flex-col gap-5"
-      @submit.prevent="envoyer"
+    <!-- En examen : surtout, pas le formulaire. Le revoir ferait redéposer. -->
+    <div
+      v-else-if="enExamen"
+      class="flex flex-col gap-3 card-surface p-4"
+      data-testid="identite-en-examen"
     >
-      <div class="flex flex-col gap-2">
-        <label
-          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
-          for="piece"
-        >
-          Ma pièce d’identité
-          <span class="text-sm font-normal text-ink-subtle">
-            CNI, passeport ou permis de conduire — PDF, JPG, JPEG ou PNG, 2 Mo maximum.
-          </span>
-          <input
-            id="piece"
-            type="file"
-            :accept="FORMATS"
-            class="min-h-touch rounded-control border border-line-strong bg-surface p-2 text-sm"
-            data-testid="champ-piece"
-            @change="choisirPiece"
-          >
-        </label>
-        <p
-          v-if="nomPiece && poidsPiece !== null"
-          class="flex items-start gap-1.5 text-sm text-confirmed-ink"
-          data-testid="piece-retenue"
-        >
-          <Icon
-            name="lucide:file-text"
-            size="0.875rem"
-            class="mt-0.5 shrink-0"
-            aria-hidden="true"
-          />
-          {{ nomPiece }} — {{ Math.max(1, Math.round(poidsPiece / 1024)) }} Ko
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <p class="text-sm font-medium text-ink-muted">
-          Mon selfie
-          <span class="block font-normal text-ink-subtle">
-            Pris maintenant, à la caméra : c’est ce qui permet de comparer ton
-            visage à ta pièce.
-          </span>
-        </p>
-        <SelfieCamera
-          :poids="poidsSelfie"
-          @prise="retenirSelfie"
+      <p class="flex items-start gap-2 text-sm text-ink">
+        <Icon
+          name="lucide:clock"
+          size="1rem"
+          class="mt-0.5 shrink-0"
+          aria-hidden="true"
         />
-      </div>
-
-      <p
-        v-if="erreur"
-        role="alert"
-        class="rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
-        data-testid="erreur-identite"
-      >
-        {{ erreur }}
+        <span>
+          <strong class="font-semibold">Ton dossier est en cours d’examen.</strong>
+          Tu n’as rien à refaire. Tu recevras une notification dès qu’il aura
+          été regardé.
+        </span>
       </p>
-      <Button
-        type="submit"
-        :label="envoi ? 'Envoi…' : 'Envoyer mon dossier'"
-        :disabled="envoi || !complet"
-        class="bg-brand text-brand-ink hover:bg-brand-strong"
-        data-testid="bouton-envoyer-identite"
-      />
-    </form>
+    </div>
+
+    <template v-else>
+      <!-- Refusé : le motif d'abord, le formulaire ensuite. Demander de
+           corriger sans dire quoi ne mène qu'à un second refus. -->
+      <p
+        v-if="refuse && motifRefus"
+        class="flex items-start gap-2 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+        data-testid="motif-refus-identite"
+      >
+        <Icon
+          name="lucide:octagon-alert"
+          size="1rem"
+          class="mt-0.5 shrink-0"
+          aria-hidden="true"
+        />
+        <span>
+          <strong class="font-semibold">Ton dossier n’a pas été accepté.</strong>
+          {{ motifRefus }} Corrige, puis redépose tes pièces ci-dessous.
+        </span>
+      </p>
+
+      <form
+        class="flex flex-col gap-5"
+        @submit.prevent="envoyer"
+      >
+        <div class="flex flex-col gap-2">
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="piece"
+          >
+            Ma pièce d’identité
+            <span class="text-sm font-normal text-ink-subtle">
+              CNI, passeport ou permis de conduire — PDF, JPG, JPEG ou PNG, 2 Mo maximum.
+            </span>
+            <input
+              id="piece"
+              type="file"
+              :accept="FORMATS"
+              class="min-h-touch rounded-control border border-line-strong bg-surface p-2 text-sm"
+              data-testid="champ-piece"
+              @change="choisirPiece"
+            >
+          </label>
+          <p
+            v-if="nomPiece && poidsPiece !== null"
+            class="flex items-start gap-1.5 text-sm text-confirmed-ink"
+            data-testid="piece-retenue"
+          >
+            <Icon
+              name="lucide:file-text"
+              size="0.875rem"
+              class="mt-0.5 shrink-0"
+              aria-hidden="true"
+            />
+            {{ nomPiece }} — {{ Math.max(1, Math.round(poidsPiece / 1024)) }} Ko
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <p class="text-sm font-medium text-ink-muted">
+            Mon selfie
+            <span class="block font-normal text-ink-subtle">
+              Pris maintenant, à la caméra : c’est ce qui permet de comparer ton
+              visage à ta pièce.
+            </span>
+          </p>
+          <SelfieCamera
+            :poids="poidsSelfie"
+            @prise="retenirSelfie"
+          />
+        </div>
+
+        <p
+          v-if="erreur"
+          role="alert"
+          class="rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+          data-testid="erreur-identite"
+        >
+          {{ erreur }}
+        </p>
+        <Button
+          type="submit"
+          :label="envoi ? 'Envoi…' : 'Envoyer mon dossier'"
+          :disabled="envoi || !complet"
+          class="bg-brand text-brand-ink hover:bg-brand-strong"
+          data-testid="bouton-envoyer-identite"
+        />
+      </form>
+    </template>
   </div>
 </template>
 
