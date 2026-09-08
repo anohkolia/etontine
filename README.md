@@ -4,9 +4,10 @@ Gestion de tontine rotative pour la Côte d'Ivoire. Nuxt 4 fullstack (client +
 routes serveur Nitro), PWA mobile-first.
 
 Les règles du projet sont dans [`CLAUDE.md`](./CLAUDE.md). Les spécifications
-font foi : [`docs/data-model.md`](./docs/data-model.md),
-[`docs/api-contract.md`](./docs/api-contract.md),
-[`docs/backlog.md`](./docs/backlog.md).
+font foi : [`docs/data-model.md`](./docs/data-model.md) et
+[`docs/api-contract.md`](./docs/api-contract.md). Ce sont les deux seules, et
+elles sont tenues à jour avec le code — une décision qui s'écarte de ce
+qu'elles disent s'y inscrit dans le même commit.
 
 ## Démarrer
 
@@ -67,22 +68,16 @@ pnpm exec playwright install chromium
 
 ## État
 
-Les 27 tickets de [`docs/backlog.md`](./docs/backlog.md) sont livrés.
-409 tests unitaires, 126 tests de bout en bout à 360 px et 1280 px, budgets de
-poids et Lighthouse tenus. Bilan, écarts assumés et réglages à renseigner avant
-la production : [`docs/decisions/livraison-mvp.md`](./docs/decisions/livraison-mvp.md).
+506 tests unitaires, 180 tests de bout en bout à 360 px et 1280 px, budgets de
+poids et Lighthouse tenus.
 
 L'interface a été refondue à partir de la maquette de `template/` : en-tête en
 dégradé, navigation basse, jauge circulaire, cartes flottantes. Ce qui en a été
-repris, et surtout ce qui en a été écarté parce que la maquette suit la v1.0 du
-cahier des charges (score de confiance, abonnement, paiement « en 1 clic ») :
-[`docs/decisions/T-refonte-visuelle.md`](./docs/decisions/T-refonte-visuelle.md).
+écarté l'a été parce que la maquette suit la v1.0 du cahier des charges — score
+de confiance, paiement « en 1 clic » — et que le produit ne les tient pas.
 
-Les trois écrans qui manquaient — ajout et vérification d'un numéro de
-collecte, détail d'une tontine, réglages du président — sont livrés :
-[`docs/decisions/T-canaux-et-reglages.md`](./docs/decisions/T-canaux-et-reglages.md).
-Ce dernier écran est le seul endroit d'où l'on peut déclencher la règle 22
-(changement de numéro : notification à tous, gel de 48 h).
+L'écran de réglages du président est le seul endroit d'où l'on déclenche la
+règle 22 (changement de numéro : notification à tous, gel de 48 h).
 
 La monétisation est livrée : trois paliers forfaitaires — Gratuit, Standard
 (7 500 F), Plus (10 000 F) —, la grille publique `/tarifs`, l'écran
@@ -96,10 +91,26 @@ se vérifient au franchissement, jamais rétroactivement : une tontine en cours
 va au bout de son cycle même si son président repasse sous un palier plus
 étroit.
 
+Le parcours de l'organisateur est complet de bout en bout : monter et publier
+une tontine, accepter ou refuser les demandes d'adhésion, fixer l'ordre de
+passage à la main ou au sort, faire sortir un membre en sachant ce qu'il
+laisse derrière lui, enregistrer les espèces reçues en main propre,
+confirmer, relancer, appliquer une amende, consigner une avance, verser le
+pot, clore un tour dont le bénéficiaire ne peut pas accuser réception, et
+répondre à une erreur signalée au registre. Une tontine se termine d'elle-même
+quand son dernier tour se ferme.
+
+Deux réglages tiennent compte du fait que l'organisateur cumule souvent tous
+les rôles : sa propre cotisation est confirmée d'office quand personne d'autre
+ne peut la vérifier, et le bénéficiaire d'un tour peut contre-valider le
+versement qu'il va recevoir. Les deux sont tracés au registre, et
+`docs/data-model.md` §2.4 et §2.5 disent pourquoi.
+
 **Reste ouvert** : `@nuxtjs/i18n` et Vee-Validate sont absents alors que
-`CLAUDE.md` les impose ; l'historique factuel du membre (§6 module 11) n'a ni
-API ni écran ; le rail de paiement de l'abonnement n'est pas choisi — le
-prélèvement récurrent n'étant pas garanti ici, le règlement reste manuel.
+`CLAUDE.md` les impose ; l'historique factuel du membre n'a ni API ni écran ;
+le statut `defaulted` d'un membre ne se pose par aucune interface ; le rail de
+paiement de l'abonnement n'est pas choisi — le prélèvement récurrent n'étant
+pas garanti ici, le règlement reste manuel.
 
 ## Choix du socle
 
@@ -113,14 +124,12 @@ prélèvement récurrent n'étant pas garanti ici, le règlement reste manuel.
 - **Ordre des couches CSS** déclaré en tête de `app/assets/css/main.css` :
   `theme, base, primevue, components, utilities`. Les utilitaires Tailwind
   gagnent donc toujours sur PrimeVue, ce qui rend `!important` inutile.
-  Détail et mesures : [`docs/decisions/T02-couches-css.md`](./docs/decisions/T02-couches-css.md).
 - **Tailwind 4 configuré en CSS** (`@theme`), pas de `tailwind.config.js`.
 - **Rendu** : `/` pré-rendue pour le SEO, `/app/**` en SPA (`ssr: false`).
   Aucune page personnalisée n'est rendue côté serveur.
 - **Palette en hexadécimal**, jamais en `oklch` : `tests/unit/contraste.spec.ts`
   lit les tokens de `main.css` et calcule le rapport WCAG dessus. Changer une
   couleur sans relancer les tests fait échouer la suite.
-  Détail : [`docs/decisions/T03-design-system.md`](./docs/decisions/T03-design-system.md).
 - **Un statut ne s'affiche jamais par sa seule couleur** : `shared/constants/statuts.ts`
   impose le triplet mot + icône + couleur, et `<StatusBadge>` rend les trois.
 - **Icônes hors ligne** : `@nuxt/icon` en `provider: 'none'`, les icônes sont
