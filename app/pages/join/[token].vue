@@ -25,11 +25,25 @@ interface Apercu {
   memberCount: number
   totalShares: number
   status: string
+  /** Le groupe a atteint le nombre de membres du palier de son président. */
+  complet: boolean
 }
 
 const { data: apercu, error, status, refresh } = await useFetch<Apercu>(`/api/v1/invites/${token}`)
 
 const adhesion = ref<'repos' | 'envoi' | 'faite'>('repos')
+
+/**
+ * La tontine a démarré : sa rotation est figée, elle n'accueille plus de
+ * nouvel arrivant. On le dit avant le clic plutôt qu'après.
+ *
+ * Le bouton reste actif pour autant : quelqu'un que le bureau a déjà saisi à
+ * la main vient ici confirmer son compte, et lui a toujours sa place. Le
+ * serveur fait la différence, pas l'écran.
+ */
+const dejaDemarree = computed(() =>
+  Boolean(apercu.value) && apercu.value!.status !== 'draft' && apercu.value!.status !== 'open',
+)
 const messageAdhesion = ref<string | null>(null)
 
 /**
@@ -206,6 +220,30 @@ useHead(() => ({
           data-testid="message-adhesion"
         >
           {{ messageAdhesion }}
+        </p>
+
+        <!-- Ce qui empêchera peut-être de rejoindre, dit avant le clic.
+             Règle 10 : mot + icône, jamais la couleur seule. -->
+        <p
+          v-if="dejaDemarree || apercu.complet"
+          class="flex items-start gap-2 rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+          data-testid="avertissement-adhesion"
+        >
+          <Icon
+            name="lucide:info"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          <span v-if="dejaDemarree">
+            Cette tontine a déjà commencé : l’ordre de passage est fixé et elle
+            n’accueille plus de nouveaux membres. Si le bureau t’a déjà inscrit,
+            tu peux quand même confirmer ton compte ici.
+          </span>
+          <span v-else>
+            Le groupe est complet. Demande au président s’il peut te faire une
+            place avant de continuer.
+          </span>
         </p>
 
         <!-- Règle 13 : action primaire en bas d'écran. -->

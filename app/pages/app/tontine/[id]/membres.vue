@@ -43,6 +43,42 @@ const ajoutEnCours = ref(false)
 
 const estPresident = computed(() => tontine.value?.myRole === 'president')
 
+/**
+ * Les adhésions arrivées par lien, en attente de l'accord du président.
+ *
+ * Sans cet écran, elles restaient en `pending_approval` pour toujours : aucune
+ * part, aucune place dans la rotation, et jamais les trois membres actifs
+ * qu'exige le démarrage. Un lien d'invitation ne menait donc nulle part.
+ */
+const enAttente = computed(() => membres.value.filter(m => m.status === 'pending_approval'))
+
+const partsApprobation = ref<Record<string, number>>({})
+const decisionEnCours = ref<string | null>(null)
+
+function partsDe(membreId: string): number {
+  return partsApprobation.value[membreId] ?? 1
+}
+
+async function decider(membreId: string, status: 'active' | 'left') {
+  erreur.value = null
+  decisionEnCours.value = membreId
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membreId}`, {
+      method: 'PATCH',
+      body: status === 'active'
+        ? { status, shares: partsDe(membreId) }
+        : { status },
+    })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
+
 const invitation = ref<{ url: string, token: string } | null>(null)
 const { phrase } = useEngagement()
 
@@ -230,6 +266,70 @@ useHead({ title: 'Membres — eTontine' })
         {{ tontine.totalShares }} parts au total · pot attendu par tour :
         <AmountDisplay :amount="tontine.expectedPot" />
       </p>
+
+      <!-- Demandes d'adhésion arrivées par lien -->
+      <section
+        v-if="estPresident && enAttente.length > 0"
+        class="flex flex-col gap-3 card-surface p-4"
+        data-testid="section-adhesions"
+      >
+        <h2 class="font-semibold text-ink">
+          Demandes d’adhésion
+        </h2>
+        <p class="text-sm text-ink-muted">
+          Ces personnes ont ouvert ton lien d’invitation. Tant que tu n’as pas
+          donné ton accord, elles ne cotisent pas et ne prennent pas la main.
+        </p>
+
+        <ul class="flex flex-col gap-3">
+          <li
+            v-for="membre in enAttente"
+            :key="membre.id"
+            class="flex flex-col gap-2 rounded-control border border-line p-3"
+            :data-testid="`adhesion-${membre.id}`"
+          >
+            <span class="font-semibold text-ink">
+              {{ membre.name ?? 'Membre inscrit' }}
+            </span>
+            <span
+              v-if="membre.phone"
+              class="tabular text-sm text-ink-muted"
+            >{{ membre.phone }}</span>
+
+            <label
+              class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+              :for="`parts-adhesion-${membre.id}`"
+            >
+              Nombre de parts
+              <InputText
+                :id="`parts-adhesion-${membre.id}`"
+                :value="partsDe(membre.id)"
+                inputmode="numeric"
+                :data-testid="`champ-parts-adhesion-${membre.id}`"
+                @input="partsApprobation[membre.id]
+                  = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 1"
+              />
+            </label>
+
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <Button
+                :label="decisionEnCours === membre.id ? 'Enregistrement…' : 'Approuver'"
+                :disabled="decisionEnCours !== null"
+                class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+                :data-testid="`bouton-approuver-${membre.id}`"
+                @click="decider(membre.id, 'active')"
+              />
+              <Button
+                label="Refuser"
+                :disabled="decisionEnCours !== null"
+                class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                :data-testid="`bouton-refuser-${membre.id}`"
+                @click="decider(membre.id, 'left')"
+              />
+            </div>
+          </li>
+        </ul>
+      </section>
 
       <!-- Ajout d'un membre géré -->
       <section

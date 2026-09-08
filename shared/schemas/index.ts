@@ -233,6 +233,13 @@ export const managedMemberInput = z.object({
 export const memberUpdateInput = z.object({
   role: membershipRole.optional(),
   shares: z.number().int().min(1).max(5).optional(),
+  /**
+   * `active` approuve une adhésion en attente, `left` la refuse ou fait sortir
+   * un membre. Les autres états ne se posent pas à la main : `invited` et
+   * `pending_approval` viennent du parcours d'invitation, et `defaulted`
+   * demande une règle que le président ne pose pas d'un clic.
+   */
+  status: z.enum(['active', 'left']).optional(),
 })
 
 /* ------------------------------------------------------------------ */

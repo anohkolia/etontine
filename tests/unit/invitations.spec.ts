@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { accepterInvitation, apercuInvitation, creerInvitation } from '../../server/services/invitations.ts'
+import {
+  accepterInvitation, apercuInvitation, approuverAdhesion, creerInvitation, refuserAdhesion,
+} from '../../server/services/invitations.ts'
 import { ajouterMembreGere, attribuerParts } from '../../server/services/membres.ts'
 import { creerBrouillon, majTontine } from '../../server/services/tontines.ts'
 import { useEngagement } from '../../app/composables/useEngagement.ts'
 import { useMoney } from '../../app/composables/useMoney.ts'
-import { ledgerEntries, memberships, shares } from '../../server/db/schema.ts'
+import { ledgerEntries, memberships, shares, tontines } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -175,5 +177,88 @@ describe('phrase d’engagement — acceptation T12', () => {
 
   it('ne promet rien tant que les parts ne sont pas attribuées', () => {
     expect(phrase(25_000, 0, 'monthly')).toBe('')
+  })
+})
+
+describe('accord du président sur une adhésion — le lien menait dans le vide', () => {
+  async function demandeEnAttente() {
+    await createTestUser(db, ARRIVANT, '+2250707000002')
+    const { token } = creerInvitation(db, T, PRESIDENT)
+    return accepterInvitation(db, token, ARRIVANT).membershipId
+  }
+
+  it('rend le membre actif **et** lui attribue sa part', async () => {
+    const membershipId = await demandeEnAttente()
+
+    // Sans la part, l'approbation ne servait à rien : le membre n'entrait dans
+    // aucune rotation, ne cotisait jamais et ne prenait jamais la main.
+    expect(db.select().from(shares).where(eq(shares.membershipId, membershipId)).all()).toHaveLength(0)
+
+    approuverAdhesion(db, membershipId, PRESIDENT)
+
+    const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).all()
+    expect(m!.status).toBe('active')
+    expect(db.select().from(shares).where(eq(shares.membershipId, membershipId)).all()).toHaveLength(1)
+  })
+
+  it('accepte un nombre de parts choisi par le président', async () => {
+    const membershipId = await demandeEnAttente()
+    approuverAdhesion(db, membershipId, PRESIDENT, 2)
+
+    expect(db.select().from(shares).where(eq(shares.membershipId, membershipId)).all()).toHaveLength(2)
+  })
+
+  it('inscrit l’accord au registre', async () => {
+    const membershipId = await demandeEnAttente()
+    approuverAdhesion(db, membershipId, PRESIDENT)
+
+    const ecritures = db.select().from(ledgerEntries).all()
+      .filter(e => e.type === 'member_joined' && (e.payload as { approuve?: boolean }).approuve === true)
+    expect(ecritures).toHaveLength(1)
+  })
+
+  it('refuse d’approuver une fois la rotation figée', async () => {
+    const membershipId = await demandeEnAttente()
+    db.update(tontines).set({ status: 'running', rotationFrozenAt: new Date() }).where(eq(tontines.id, T)).run()
+
+    // Les tours sont générés d'un coup au démarrage : ajouter une part ensuite
+    // ne créerait ni le tour du nouveau venu ni ses cotisations.
+    expect(() => approuverAdhesion(db, membershipId, PRESIDENT)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('fait sortir le demandeur quand le président refuse', async () => {
+    const membershipId = await demandeEnAttente()
+    refuserAdhesion(db, membershipId, PRESIDENT)
+
+    const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).all()
+    expect(m!.status).toBe('left')
+    expect(db.select().from(shares).where(eq(shares.membershipId, membershipId)).all()).toHaveLength(0)
+  })
+
+  it('n’accueille plus de nouvel arrivant sur une tontine démarrée', async () => {
+    await createTestUser(db, ARRIVANT, '+2250707000002')
+    db.update(tontines).set({ status: 'running', rotationFrozenAt: new Date() }).where(eq(tontines.id, T)).run()
+    const { token } = creerInvitation(db, T, PRESIDENT)
+
+    // On le dit au moment du clic, plutôt que de le laisser attendre un accord
+    // que le président ne pourrait pas donner.
+    expect(() => accepterInvitation(db, token, ARRIVANT)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('laisse malgré tout un membre géré reprendre son siège', async () => {
+    const membershipId = ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 1 })
+    await createTestUser(db, ARRIVANT, NUMERO_GERE)
+    db.update(tontines).set({ status: 'running', rotationFrozenAt: new Date() }).where(eq(tontines.id, T)).run()
+    const { token } = creerInvitation(db, T, PRESIDENT)
+
+    // Son siège existe déjà et ses cotisations sont à son nom : il ne prend la
+    // place de personne, il reprend la sienne.
+    const resultat = accepterInvitation(db, token, ARRIVANT)
+    expect(resultat.rattache).toBe(true)
+    expect(resultat.membershipId).toBe(membershipId)
   })
 })

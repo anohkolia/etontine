@@ -216,7 +216,10 @@ describe('invitation — le lien cesse d’être partageable quand le groupe est
   })
 
   it('refuse un nouvel arrivant une fois la limite atteinte', () => {
-    const t = tontineActive('Tontine pleine')
+    // `open` et non `running` : une tontine démarrée n'accueille de toute façon
+    // plus personne — sa rotation est figée. C'est bien le quota qu'on éprouve
+    // ici, pas ce refus-là.
+    const t = tontineActive('Tontine pleine', 'open')
     const { token } = creerInvitation(db, t, PRESIDENT)
     remplir(t, PALIER_PAR_ID.free.membresParTontine!)
 

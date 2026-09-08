@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
-import { memberships, shares, tontines } from '../db/schema.ts'
+import { memberships, shares, tontines, users } from '../db/schema.ts'
 import type { MembershipRole } from '../../shared/schemas/index.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
@@ -100,20 +100,33 @@ export function rotationDe(db: Db, tontineId: string) {
     .all()
 }
 
-/** Les membres d'une tontine, avec leur nombre de parts et leurs positions. */
+/**
+ * Les membres d'une tontine, avec leur nombre de parts et leurs positions.
+ *
+ * Le nom et le numéro viennent du compte quand il y en a un, et de la saisie
+ * du bureau sinon. Les prendre uniquement dans `managed_*` affichait « Membre
+ * inscrit », sans numéro, pour quiconque était arrivé par lien — c'est-à-dire
+ * précisément les personnes sur lesquelles le président doit se prononcer.
+ */
 export function membresDe(db: Db, tontineId: string) {
   const parts = rotationDe(db, tontineId)
   const lignes = db
-    .select()
+    .select({
+      membership: memberships,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      userPhone: users.phone,
+    })
     .from(memberships)
+    .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.tontineId, tontineId))
     .all()
 
-  return lignes.map(m => ({
+  return lignes.map(({ membership: m, firstName, lastName, userPhone }) => ({
     id: m.id,
     userId: m.userId,
-    name: m.managedName,
-    phone: m.managedPhone,
+    name: [firstName, lastName].filter(Boolean).join(' ') || m.managedName,
+    phone: m.managedPhone ?? userPhone,
     role: m.role,
     status: m.status,
     /** Un membre à double part apparaît deux fois dans la rotation. */

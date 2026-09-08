@@ -3,8 +3,10 @@ import { and, eq, isNull } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { invites, memberships, shares, tontines, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
+import { assertTransition } from '../utils/transitions.ts'
 import { placeDisponible, verifierQuotaMembres } from './abonnement.ts'
 import { appendLedger } from './ledger.ts'
+import { attribuerParts } from './membres.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -199,6 +201,27 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
     return { membershipId: gere.id, rattache: true, status: gere.status === 'active' ? 'active' : 'pending_approval' }
   }
 
+  // Une tontine démarrée n'accueille plus personne : les tours et les
+  // cotisations sont générés sur des parts figées, et un arrivant n'y aurait ni
+  // tour ni dû. On le dit **ici**, au moment où il clique, plutôt que de le
+  // laisser en attente d'un accord que le président ne pourrait pas donner.
+  // Le rattachement d'un membre géré, lui, passe plus haut : son siège existe
+  // déjà, il ne fait que reprendre le sien.
+  const [tontineCourante] = db
+    .select({ status: tontines.status, rotationFrozenAt: tontines.rotationFrozenAt })
+    .from(tontines)
+    .where(eq(tontines.id, apercu.tontineId))
+    .limit(1)
+    .all()
+
+  if (tontineCourante?.status !== 'draft' && tontineCourante?.status !== 'open') {
+    throw apiError(
+      'FORBIDDEN',
+      'Cette tontine a déjà démarré : elle n’accueille plus de nouveaux membres.',
+      { field: 'status' },
+    )
+  }
+
   // Nouvel arrivant : il occupe une place de plus, donc le quota du président
   // s'applique. Le contrôle est **ici** et pas seulement à la création du lien :
   // un lien créé quand il restait deux places peut être ouvert par cinq
@@ -223,20 +246,65 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
   return { membershipId, rattache: false, status: 'pending_approval' }
 }
 
-/** Approuve une adhésion en attente. Réservé au président. */
-export function approuverAdhesion(db: Db, membershipId: string, acteurId: string) {
+/**
+ * Approuve une adhésion en attente. Réservé au président.
+ *
+ * **Et lui attribue ses parts.** L'oubli était fatal : un arrivant par lien
+ * n'en recevait aucune, donc n'entrait dans aucune rotation, ne cotisait
+ * jamais et ne prenait jamais la main. Il était membre au sens de la table et
+ * absent au sens de la tontine.
+ *
+ * L'approbation s'arrête au démarrage. Les tours et les cotisations sont tous
+ * générés d'un coup à ce moment-là, sur les parts figées : en ajouter une
+ * ensuite ne créerait ni le tour du nouveau venu ni ses cotisations, et
+ * fausserait le pot attendu de tous les tours déjà en cours. Mieux vaut un
+ * refus clair qu'une adhésion qui n'existe qu'à moitié.
+ */
+export function approuverAdhesion(db: Db, membershipId: string, acteurId: string, parts = 1) {
   const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
   if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
+
+  assertTransition('membership', m.status, 'active')
+
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, m.tontineId)).limit(1).all()
+  if (tontine?.status === 'running' || tontine?.rotationFrozenAt) {
+    throw apiError(
+      'FORBIDDEN',
+      'La tontine a démarré : l’ordre de passage est figé, on ne peut plus y ajouter de membre.',
+      { field: 'status' },
+    )
+  }
+
+  verifierQuotaMembres(db, m.tontineId)
 
   db.update(memberships)
     .set({ status: 'active', joinedAt: new Date() })
     .where(eq(memberships.id, membershipId))
     .run()
 
+  attribuerParts(db, m.tontineId, membershipId, parts)
+
   appendLedger(db, {
     tontineId: m.tontineId,
     type: 'member_joined',
     actorId: acteurId,
-    payload: { membershipId, approuve: true },
+    payload: { membershipId, approuve: true, shares: parts },
+  })
+}
+
+/** Refuse une adhésion en attente. La transition passe par la table d'états. */
+export function refuserAdhesion(db: Db, membershipId: string, acteurId: string) {
+  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+  if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
+
+  assertTransition('membership', m.status, 'left')
+
+  db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId)).run()
+
+  appendLedger(db, {
+    tontineId: m.tontineId,
+    type: 'member_left',
+    actorId: acteurId,
+    payload: { membershipId, refuse: true },
   })
 }

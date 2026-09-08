@@ -93,11 +93,11 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `POST` | `/tontines/:id/rotation` | Ordre fixe ou tirage. Tirage effectué **côté serveur**, graine + résultat écrits au registre |
 | `GET` | `/tontines/:id/members` | Avec `shares`, `rotationPosition`, statut du tour courant |
 | `POST` | `/tontines/:id/members` | Ajout d'un membre géré `{ name, phone, shares }` |
-| `PATCH` | `/tontines/:id/members/:mid` | Rôle, nombre de parts, statut |
+| `PATCH` | `/tontines/:id/members/:mid` | Rôle, nombre de parts, statut. `status: "active"` **approuve** une adhésion en attente et lui attribue ses parts (une par défaut) ; `status: "left"` la refuse. L'approbation est refusée une fois la rotation figée |
 | `DELETE` | `/tontines/:id/members/:mid` | Sortie avec calcul de ce qui est dû |
 | `POST` | `/tontines/:id/invites` | → `{ token, url, expiresAt }` |
 | `GET` | `/invites/:token` | **Public**. Aperçu avant connexion : nom, président, montant, fréquence, nb membres |
-| `POST` | `/invites/:token/accept` | Auth requise → `membership` en `pending_approval` |
+| `POST` | `/invites/:token/accept` | Auth requise → `membership` en `pending_approval`. **Refusé si la tontine a démarré** : sa rotation est figée, un arrivant n'y aurait ni tour ni dû. Le rattachement d'un membre géré à son compte reste possible — son siège existe déjà |
 
 ---
 
