@@ -81,6 +81,40 @@ function iconeDe(e: Ecriture): string {
 
 const CANAUX_CONNUS = new Set(Object.keys(PAYMENT_CHANNEL))
 
+/**
+ * Signalement d'une erreur sur une écriture.
+ *
+ * Le registre est append-only : rien ne s'efface, donc la seule façon de dire
+ * « ce n'est pas ce qui s'est passé » est de l'écrire à côté et que tout le
+ * monde le voie. `ouvrirContestation` et sa route existaient ; aucun écran
+ * n'ouvrait la porte. Un membre qui contestait n'avait donc plus qu'un
+ * recours : quitter la tontine en accusant le bureau.
+ */
+const signalementOuvert = ref<string | null>(null)
+const messageSignalement = ref('')
+const signalementEnvoye = ref<string | null>(null)
+const signalementEnCours = ref(false)
+
+async function signaler(entryId: string) {
+  signalementEnCours.value = true
+  try {
+    await $fetch(`/api/v1/ledger/${entryId}/dispute`, {
+      method: 'POST',
+      body: { message: messageSignalement.value.trim() },
+    })
+    signalementOuvert.value = null
+    messageSignalement.value = ''
+    signalementEnvoye.value = entryId
+  }
+  catch (e) {
+    erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
+      ?? 'Impossible de joindre le serveur.'
+  }
+  finally {
+    signalementEnCours.value = false
+  }
+}
+
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const ecritures = ref<Ecriture[]>([])
 const erreur = ref<string | null>(null)
@@ -300,6 +334,56 @@ useHead({ title: 'Registre — eTontine' })
             >
               Aucun autre membre du bureau ne pouvait la vérifier.
             </span>
+
+            <!-- La soupape : rien ne s'efface d'un registre append-only, on
+                 écrit à côté. Ouverte à tout membre, pas au seul bureau. -->
+            <p
+              v-if="signalementEnvoye === ecriture.id"
+              class="text-sm text-confirmed-ink"
+              :data-testid="`signalement-envoye-${ecriture.id}`"
+            >
+              Signalement envoyé. Le bureau doit l’examiner ; le suivi est sur
+              l’écran des impayés.
+            </p>
+
+            <template v-else-if="signalementOuvert === ecriture.id">
+              <label
+                class="flex flex-col gap-1.5 pt-1 text-sm font-medium text-ink-muted"
+                :for="`message-signalement-${ecriture.id}`"
+              >
+                Qu’est-ce qui ne va pas ?
+                <InputText
+                  :id="`message-signalement-${ecriture.id}`"
+                  v-model="messageSignalement"
+                  placeholder="Le montant ne correspond pas à ce que j’ai envoyé"
+                  :data-testid="`champ-signalement-${ecriture.id}`"
+                />
+              </label>
+              <div class="flex flex-col gap-2 pt-1 sm:flex-row">
+                <Button
+                  :label="signalementEnCours ? 'Envoi…' : 'Envoyer le signalement'"
+                  :disabled="signalementEnCours || messageSignalement.trim().length < 5"
+                  class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+                  :data-testid="`bouton-envoyer-signalement-${ecriture.id}`"
+                  @click="signaler(ecriture.id)"
+                />
+                <Button
+                  label="Annuler"
+                  class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                  @click="signalementOuvert = null"
+                />
+              </div>
+            </template>
+
+            <button
+              v-else
+              type="button"
+              class="min-h-touch self-start text-sm font-semibold text-ink-muted underline underline-offset-2 hover:text-ink"
+              :data-testid="`bouton-signaler-${ecriture.id}`"
+              @click="signalementOuvert = ecriture.id; messageSignalement = ''"
+            >
+              Signaler une erreur
+            </button>
           </div>
 
           <!-- Montant et canal alignés à droite, comme dans le registre du

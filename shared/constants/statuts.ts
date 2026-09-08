@@ -87,6 +87,18 @@ export const TONTINE_STATUS: Presentation<z.infer<typeof tontineStatus>> = {
   archived: { label: 'Archivée', icon: 'lucide:archive', surface: 'bg-due-surface', ink: 'text-due-ink' },
 }
 
+/**
+ * Contestations ouvertes sur une écriture du registre.
+ *
+ * Deux états seulement : ouverte, ou close avec sa conclusion. Le triplet
+ * mot + icône + couleur vaut ici comme ailleurs — une contestation signalée
+ * par la seule couleur serait invisible à qui distingue mal le rouge.
+ */
+export const DISPUTE_STATUS: Presentation<'open' | 'resolved'> = {
+  open: { label: 'À examiner', icon: 'lucide:octagon-alert', surface: 'bg-disputed-surface', ink: 'text-disputed-ink' },
+  resolved: { label: 'Close', icon: 'lucide:circle-check', surface: 'bg-confirmed-surface', ink: 'text-confirmed-ink' },
+}
+
 /** Toutes les tables, pour les contrôles d'exhaustivité et la page de démonstration. */
 export const ALL_STATUS_TABLES = {
   contribution: CONTRIBUTION_STATUS,
@@ -94,9 +106,10 @@ export const ALL_STATUS_TABLES = {
   payout: PAYOUT_STATUS,
   membership: MEMBERSHIP_STATUS,
   tontine: TONTINE_STATUS,
+  dispute: DISPUTE_STATUS,
 } as const
 
-/** Les cinq machines à états présentables. */
+/** Les machines à états présentables. */
 export type StatusKind = keyof typeof ALL_STATUS_TABLES
 
 /** Les statuts valides pour une machine donnée — utilisé pour typer `<StatusBadge>`. */

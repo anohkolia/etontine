@@ -45,6 +45,24 @@ interface Avance {
 
 interface MembreSimple { id: string, nom: string }
 
+/**
+ * Une contestation ouverte sur une écriture du registre.
+ *
+ * Elle était déjà renvoyée par la route — et l'écran la jetait. Un signalement
+ * qui n'apparaît nulle part est pire que pas de signalement : le membre croit
+ * avoir alerté, et personne n'a rien vu.
+ */
+interface Litige {
+  dispute: {
+    id: string
+    status: 'open' | 'resolved'
+    resolution: string | null
+  }
+  entryType: string
+  entryPosition: number
+  messages: Array<{ id: string, body: string, auteur: string, createdAt: string }>
+}
+
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const donnees = ref<{
   myRole: string
@@ -52,6 +70,7 @@ const donnees = ref<{
   retards: Retard[]
   amendes: Amende[]
   avances: Avance[]
+  litiges: Litige[]
 } | null>(null)
 const erreur = ref<string | null>(null)
 
@@ -149,6 +168,47 @@ async function solder(avanceId: string) {
   enCours.value = avanceId
   try {
     await $fetch(`/api/v1/advances/${avanceId}/settle`, { method: 'POST' })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
+
+/** Répondre dans un fil, et le clore. Le fil remplace la discussion de vive voix. */
+const reponse = ref<Record<string, string>>({})
+const resolution = ref<Record<string, string>>({})
+
+async function repondre(disputeId: string) {
+  erreur.value = null
+  enCours.value = disputeId
+  try {
+    await $fetch(`/api/v1/disputes/${disputeId}/messages`, {
+      method: 'POST',
+      body: { message: reponse.value[disputeId] },
+    })
+    reponse.value[disputeId] = ''
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
+
+async function clore(disputeId: string) {
+  erreur.value = null
+  enCours.value = disputeId
+  try {
+    await $fetch(`/api/v1/disputes/${disputeId}/resolve`, {
+      method: 'POST',
+      body: { resolution: resolution.value[disputeId] },
+    })
     await charger()
   }
   catch (e) {
@@ -441,6 +501,98 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 @click="annuler(amende.penalty.id)"
               />
             </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Contestations -->
+      <section
+        v-if="donnees.litiges.length > 0"
+        class="flex flex-col gap-3"
+      >
+        <h2 class="font-semibold text-ink">
+          Erreurs signalées
+        </h2>
+        <ul
+          class="flex flex-col gap-3"
+          data-testid="liste-litiges"
+        >
+          <li
+            v-for="litige in donnees.litiges"
+            :key="litige.dispute.id"
+            class="flex flex-col gap-3 card-surface p-4"
+            :data-testid="`litige-${litige.dispute.id}`"
+          >
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-sm font-semibold text-ink">
+                Écriture n° {{ litige.entryPosition }}
+              </span>
+              <StatusBadge
+                kind="dispute"
+                :status="litige.dispute.status"
+                compact
+              />
+            </div>
+
+            <ul class="flex flex-col gap-2">
+              <li
+                v-for="msg in litige.messages"
+                :key="msg.id"
+                class="rounded-control bg-surface-muted p-3 text-sm text-ink"
+              >
+                <span class="font-semibold">{{ msg.auteur }}</span> — {{ msg.body }}
+              </li>
+            </ul>
+
+            <p
+              v-if="litige.dispute.status === 'resolved'"
+              class="rounded-control bg-confirmed-surface p-3 text-sm text-confirmed-ink"
+            >
+              Conclusion : {{ litige.dispute.resolution }}
+            </p>
+
+            <template v-else>
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                :for="`reponse-${litige.dispute.id}`"
+              >
+                Répondre
+                <InputText
+                  :id="`reponse-${litige.dispute.id}`"
+                  v-model="reponse[litige.dispute.id]"
+                  :data-testid="`champ-reponse-${litige.dispute.id}`"
+                />
+              </label>
+              <Button
+                :label="enCours === litige.dispute.id ? 'Envoi…' : 'Envoyer'"
+                :disabled="enCours !== null || (reponse[litige.dispute.id]?.trim().length ?? 0) < 5"
+                class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-repondre-${litige.dispute.id}`"
+                @click="repondre(litige.dispute.id)"
+              />
+
+              <!-- Clore sans un mot laisse le doute là où il était. -->
+              <template v-if="estPresident">
+                <label
+                  class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                  :for="`resolution-${litige.dispute.id}`"
+                >
+                  Conclusion, pour clore
+                  <InputText
+                    :id="`resolution-${litige.dispute.id}`"
+                    v-model="resolution[litige.dispute.id]"
+                    :data-testid="`champ-resolution-${litige.dispute.id}`"
+                  />
+                </label>
+                <Button
+                  :label="enCours === litige.dispute.id ? 'Clôture…' : 'Clore la contestation'"
+                  :disabled="enCours !== null || (resolution[litige.dispute.id]?.trim().length ?? 0) < 5"
+                  class="bg-brand text-brand-ink hover:bg-brand-strong"
+                  :data-testid="`bouton-clore-litige-${litige.dispute.id}`"
+                  @click="clore(litige.dispute.id)"
+                />
+              </template>
+            </template>
           </li>
         </ul>
       </section>

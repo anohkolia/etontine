@@ -147,7 +147,8 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `POST` | `/advances` | `{ roundId, fromMembershipId, toMembershipId, amount }`. Ne touche **aucune** cotisation : c'est une reconnaissance de dette entre deux membres |
 | `POST` | `/advances/:id/settle` | La dette entre les deux membres est réglée |
 | `POST` | `/ledger/:entryId/dispute` | Bouton « signaler une erreur » |
-| `POST` | `/disputes/:id/messages` · `POST /disputes/:id/resolve` | |
+| `POST` | `/disputes/:id/messages` | Répond dans le fil. **Tout membre actif** — un fil où seul le bureau répond n'est pas une contestation, c'est un guichet |
+| `POST` | `/disputes/:id/resolve` | `{ resolution }` obligatoire — président ou censeur. La conclusion est écrite, pas seulement décidée |
 
 ---
 
