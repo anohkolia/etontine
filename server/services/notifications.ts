@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, lt } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { memberships, notifications, users } from '../db/schema.ts'
 
@@ -108,4 +108,73 @@ export function notificationsNonLues(db: Db, userId: string) {
     .from(notifications)
     .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
     .all()
+}
+
+/**
+ * Les notifications d'un utilisateur, de la plus récente à la plus ancienne.
+ *
+ * Elles s'écrivaient depuis le début et **aucune route ne les rendait** : la
+ * table était en écriture seule du point de vue de l'application. Cotisation
+ * confirmée, pot versé, numéro de collecte changé, dossier d'identité rejeté —
+ * tout y tombait, et rien n'en ressortait. Le push, quand il est configuré,
+ * porte la bannière jusqu'au système ; quelqu'un qui l'a ratée, ou dont le
+ * navigateur n'en reçoit pas, n'avait aucun recours.
+ */
+export function mesNotifications(
+  db: Db,
+  userId: string,
+  options: { limit?: number, cursor?: number } = {},
+) {
+  const limite = Math.min(options.limit ?? 30, 100)
+
+  const conditions = [eq(notifications.userId, userId)]
+  if (options.cursor !== undefined) {
+    conditions.push(lt(notifications.createdAt, new Date(options.cursor)))
+  }
+
+  const lignes = db
+    .select()
+    .from(notifications)
+    .where(and(...conditions))
+    .orderBy(desc(notifications.createdAt))
+    .limit(limite + 1)
+    .all()
+
+  const items = lignes.slice(0, limite)
+
+  return {
+    items,
+    nextCursor: lignes.length > limite
+      ? String(items.at(-1)?.createdAt.getTime() ?? '')
+      : null,
+    /** Le compteur porte sur **tout**, pas sur la page rendue. */
+    unread: notificationsNonLues(db, userId).length,
+  }
+}
+
+/**
+ * Marque des notifications comme lues.
+ *
+ * Sans identifiants, marque tout : c'est le geste courant — on ouvre l'écran,
+ * on a vu. Avec, seulement celles-là, et toujours restreintes à leur
+ * destinataire : personne ne marque lues les notifications d'un autre.
+ */
+export function marquerLues(db: Db, userId: string, ids?: string[]): number {
+  const conditions = [eq(notifications.userId, userId), isNull(notifications.readAt)]
+  if (ids?.length) conditions.push(inArray(notifications.id, ids))
+
+  const concernees = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(and(...conditions))
+    .all()
+
+  if (concernees.length === 0) return 0
+
+  db.update(notifications)
+    .set({ readAt: new Date() })
+    .where(inArray(notifications.id, concernees.map(n => n.id)))
+    .run()
+
+  return concernees.length
 }

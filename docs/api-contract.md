@@ -156,6 +156,8 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 
 | Méthode | Route | Description |
 |:--|:--|:--|
+| `GET` | `/me/notifications` | Mes notifications, de la plus récente à la plus ancienne. `?limit=&cursor=`. `unread` porte sur **toutes**, pas sur la page rendue — c'est le nombre qu'affiche l'en-tête |
+| `POST` | `/me/notifications/read` | `{ ids? }` — marque lues ; tout si `ids` est absent. Toujours restreint au destinataire |
 | `GET`/`PATCH` | `/me/notification-preferences` | Par tontine, avec plage de silence |
 | `GET` | `/push/vapid-key` | Clé publique VAPID, ou `null` si le push n'est pas configuré. Publique par construction |
 | `POST` | `/push/subscribe` | Abonnement Web Push. Le navigateur s'abonne depuis `/app/profil/notifications`, **sur un geste explicite** : une demande de permission surgie de nulle part se refuse d'un réflexe, et un refus est définitif |
@@ -194,6 +196,7 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `/app/tontine/[id]/versement` | Trésorier | Préparation → déclaration |
 | `/app/tontine/[id]/impayes` | Bureau | Retards, amendes, dossiers |
 | `/app/tontine/[id]/reglages` | Président | |
+| `/app/notifications` | Auth | Ce qui s'est passé, lisible même sans push |
 | `/app/profil`, `/app/profil/donnees` | Auth | |
 | `/recu/[id]` | Lien signé | Vérification publique |
 | `/admin/**` | Super-admin | **Application distincte, hors périmètre MVP** |

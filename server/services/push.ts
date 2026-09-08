@@ -12,9 +12,9 @@ let configure = false
  * Configure VAPID une seule fois.
  *
  * Sans clés, on ne lève pas : le push est un confort, pas le cœur du produit.
- * Les notifications restent enregistrées en base et consultables dans
- * l'application. Faire échouer une confirmation de cotisation parce qu'une clé
- * VAPID manque serait absurde.
+ * Les notifications restent enregistrées en base et lisibles dans
+ * `/app/notifications`. Faire échouer une confirmation de cotisation parce
+ * qu'une clé VAPID manque serait absurde.
  */
 function preparer(): boolean {
   if (configure) return true

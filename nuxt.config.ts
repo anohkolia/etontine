@@ -152,6 +152,7 @@ export default defineNuxtConfig({
       // reste alignée sur shared/constants/statuts.ts.
       icons: [
         'lucide:archive',
+        'lucide:bell',
         'lucide:calendar',
         'lucide:circle-check',
         'lucide:circle-dashed',

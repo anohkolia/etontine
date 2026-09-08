@@ -39,11 +39,13 @@ test('un seul appel de données peint l’écran', async ({ page }) => {
   const appels: string[] = []
   page.on('request', (requete) => {
     const chemin = new URL(requete.url()).pathname
-    // `/auth/me` est l'amorçage de session, partagé par toute l'application et
-    // mis en cache dans le magasin : il ne fait pas partie des données de
-    // l'écran. C'est la multiplication des appels **par tontine** que
-    // l'acceptation vise à interdire.
-    if (chemin.startsWith('/api/v1/') && chemin !== '/api/v1/auth/me') appels.push(chemin)
+    // Deux appels appartiennent à la **coquille**, pas à l'écran : `/auth/me`,
+    // l'amorçage de session mis en cache dans le magasin, et le compteur de
+    // notifications, que la cloche de l'en-tête affiche sur toutes les pages
+    // authentifiées. Ni l'un ni l'autre ne se multiplie par tontine — et c'est
+    // cette multiplication-là que l'acceptation vise à interdire.
+    const coquille = ['/api/v1/auth/me', '/api/v1/me/notifications']
+    if (chemin.startsWith('/api/v1/') && !coquille.includes(chemin)) appels.push(chemin)
   })
 
   await page.goto('/app')

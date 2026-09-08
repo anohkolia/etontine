@@ -3,9 +3,6 @@
 Application de gestion de tontine rotative pour la Côte d'Ivoire.
 Nuxt 4 fullstack (client + routes serveur Nitro), PWA mobile-first.
 
-**Lis `docs/data-model.md` et `docs/api-contract.md` avant d'écrire du code.**
-**Prends les tickets dans l'ordre de `docs/backlog.md`. Un ticket à la fois.**
-
 ---
 
 ## Commandes
@@ -38,7 +35,7 @@ pnpm db:migrate     # migrations drizzle
 | PWA | `@vite-pwa/nuxt` | |
 | i18n | `@nuxtjs/i18n` | toutes les chaînes externalisées dès le départ |
 
-Si une bibliothèque supplémentaire semble nécessaire, **demande avant de l'ajouter**. Chaque dépendance client coûte du budget de poids (voir plus bas).
+Si une bibliothèque supplémentaire semble nécessaire, **demande avant de l'ajouter**.
 
 ---
 
@@ -62,40 +59,7 @@ shared/
 docs/               # spécifications
 ```
 
-**Rendu :** `/` pré-rendue (SEO). Application authentifiée en SPA (`routeRules: { '/app/**': { ssr: false } }`). Ne pas faire de SSR sur des pages personnalisées.
-
 ---
-
-## Règles non négociables
-
-### Autorité serveur
-1. **Aucune transition d'état ne se décide côté client.** Le client envoie une intention (`POST /contributions/:id/declare`), le serveur valide la transition contre la machine à états et le rôle de l'appelant. Un client qui envoie `status: "confirmed"` reçoit un 400.
-2. **Tous les montants sont calculés côté serveur.** Le client affiche, il ne calcule jamais un dû, une amende ou un total de pot.
-3. **Écritures de registre append-only.** Aucune route `PUT`/`DELETE` sur `ledger_entries`. Une correction est une nouvelle écriture d'annulation, elle-même tracée.
-4. **Idempotence obligatoire** sur toute création liée à l'argent : header `Idempotency-Key`, rejeu = même réponse, pas de doublon.
-
-### Argent
-5. **L'application ne détient jamais de fonds.** Pas de solde, pas de portefeuille, pas de compte. Le membre envoie directement sur le canal de collecte de l'organisateur, puis **déclare**.
-6. **Montants en entiers, en FCFA, jamais en flottant.** Pas de centimes. Type `number` entier partout, colonne `integer` en base.
-7. **Format d'affichage imposé** : `25 000 FCFA` — espace fine insécable (`\u202F`) comme séparateur de milliers, zéro décimale, suffixe `FCFA`. Utilise **toujours** `useMoney()`, jamais `toLocaleString` directement dans un composant.
-
-### Vocabulaire d'interface
-8. Verbes autorisés : déclarer, confirmer, enregistrer, justifier, rapprocher.
-   Verbes **interdits dans l'UI** : encaisser, créditer, débiter, reverser, transférer, solde, portefeuille.
-9. Termes métier à utiliser : « prendre la main » (recevoir le pot), « cotisation », « tour », « amende », « le président », « le trésorier ». Ne pas écrire « ramassage », « bénéficiaire du décaissement », « échéance ».
-
-### UI
-10. **Jamais d'information portée par la couleur seule** : toujours couleur + icône + mot.
-11. **Pas de `DataTable` sous le breakpoint `md`.** Liste de cartes empilées sur mobile.
-12. **Pas de `localStorage` pour des données financières.** Pinia persisté = cache d'affichage uniquement, jamais source de vérité.
-13. Cibles tactiles ≥ 44×44 px. Taille de texte de base 16 px. Actions primaires en bas d'écran.
-14. Chaque écran implémente **cinq états** : chargement (squelette), vide, erreur, hors-ligne, contenu. Un écran livré sans ses états est un écran incomplet.
-
-### Performance — budgets appliqués en CI
-15. JS initial compressé **< 180 Ko**. Premier chargement total **< 250 Ko** hors images. Navigation ultérieure **< 40 Ko**.
-16. Police **système** (`system-ui`). Aucune police téléchargée.
-17. Génération PDF et Excel **côté serveur** (Nitro). Ne jamais embarquer `jsPDF` ou `xlsx` dans le bundle client.
-18. Images uploadées (captures de paiement) compressées **côté client à < 100 Ko** avant envoi.
 
 ### Sécurité
 19. Session par cookie `httpOnly`, `SameSite=Lax`, `Secure`.
@@ -110,19 +74,6 @@ docs/               # spécifications
 - **Unitaires obligatoires** sur : calcul des dus, calcul des amendes, ordre de rotation avec parts multiples, transitions d'état. Zéro tolérance d'erreur sur ces quatre-là.
 - **E2E Playwright** sur les quatre parcours critiques : inscription OTP, rejoindre par lien, cotiser (déclarer → confirmer), verser le pot (déclarer → accuser réception).
 - Un ticket n'est pas terminé sans ses tests.
-
----
-
-## Ce que tu ne dois pas décider seul
-
-Ces points ne sont pas tranchés. Si un ticket semble en dépendre, **arrête-toi et demande** :
-
-- Modèle de monétisation (abonnement / frais de service / freemium)
-- Visibilité du score de confiance
-- Plafonds de montant pour les tontines ouvertes
-- Formulation exacte des CGU et mentions légales
-
-N'invente pas de valeur par défaut « raisonnable » sur ces sujets. Une hypothèse silencieuse ici coûte une refonte.
 
 ---
 

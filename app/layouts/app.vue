@@ -17,6 +17,12 @@ const session = useSessionStore()
 await session.charger()
 
 const entete = useEnTete()
+
+// La cloche vit dans l'en-tête et non dans la barre basse : celle-ci a quatre
+// onglets et une grille à quatre colonnes, et « Aide » doit y rester — le
+// module 14 la veut consultable hors connexion.
+const { nonLues, rafraichirCompteur } = useNotifications()
+onMounted(rafraichirCompteur)
 </script>
 
 <template>
@@ -44,8 +50,8 @@ const entete = useEnTete()
         {{ entete.retour.label }}
       </NuxtLink>
 
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0 flex-1">
           <h1
             class="truncate text-lg font-bold"
             data-testid="entete-titre"
@@ -60,6 +66,29 @@ const entete = useEnTete()
             {{ entete.sousTitre }}
           </p>
         </div>
+
+        <NuxtLink
+          to="/app/notifications"
+          class="relative flex min-h-touch min-w-touch items-center justify-center text-night-ink/85 transition-colors hover:text-night-ink"
+          data-testid="lien-notifications"
+        >
+          <Icon
+            name="lucide:bell"
+            size="1.25rem"
+            aria-hidden="true"
+          />
+          <!-- Le nombre est écrit, pas seulement signalé par une pastille :
+               une pastille seule ne dit pas s'il y a une nouvelle ou douze,
+               et ne se voit pas de tout le monde (règle 10). -->
+          <span
+            v-if="nonLues > 0"
+            class="tabular absolute top-0.5 right-0.5 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-bold text-brand-ink"
+            data-testid="compteur-notifications"
+          >{{ nonLues > 9 ? '9+' : nonLues }}</span>
+          <span class="sr-only">
+            Mes notifications{{ nonLues > 0 ? ` — ${nonLues} non lue${nonLues > 1 ? 's' : ''}` : '' }}
+          </span>
+        </NuxtLink>
 
         <NuxtLink
           to="/app/profil"
