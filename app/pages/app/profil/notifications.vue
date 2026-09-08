@@ -28,6 +28,27 @@ const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const donnees = ref<Reponse | null>(null)
 const erreur = ref<string | null>(null)
 
+/**
+ * L'abonnement du navigateur, appareil par appareil.
+ *
+ * Les réglages ci-dessous disent **ce qu'on veut** recevoir ; celui-ci dit si
+ * cet appareil-là peut le recevoir. Les deux sont nécessaires, et le second
+ * manquait entièrement : aucun navigateur ne s'était jamais abonné, donc les
+ * notifications ne quittaient jamais la base.
+ *
+ * La permission se demande sur ce bouton, jamais à l'ouverture : une demande
+ * surgie de nulle part se refuse d'un réflexe, et un refus est définitif.
+ */
+const { etat: etatPush, erreur: erreurPush, enCours: pushEnCours, rafraichir: rafraichirPush, activer } = usePush()
+
+const MESSAGE_PUSH: Record<string, string> = {
+  'indisponible': 'Ce navigateur ne sait pas recevoir de notifications. Elles restent consultables ici.',
+  'non-configure': 'Les notifications ne sont pas encore activées sur ce serveur. Elles restent consultables ici.',
+  'refuse': 'Tu as refusé les notifications pour ce site. Il faut les réautoriser dans les réglages du navigateur.',
+  'inactif': 'Cet appareil ne reçoit pas encore les notifications.',
+  'actif': 'Cet appareil reçoit les notifications.',
+}
+
 const DEFAUT: Reglage = {
   pushEnabled: true, remindersEnabled: true, quietHoursStart: null, quietHoursEnd: null,
 }
@@ -65,7 +86,10 @@ async function enregistrer(tontineId: string | null, modifications: Partial<Regl
   await charger()
 }
 
-onMounted(charger)
+onMounted(async () => {
+  await charger()
+  await rafraichirPush()
+})
 useEnTete(() => ({
   titre: 'Notifications',
   sousTitre: 'Ce que tu reçois, et quand',
@@ -89,6 +113,46 @@ useHead({ title: 'Notifications — eTontine' })
     />
 
     <template v-else-if="donnees">
+      <!-- Cet appareil -->
+      <section
+        class="flex flex-col gap-3 card-surface p-4"
+        data-testid="section-push"
+      >
+        <h2 class="font-semibold text-ink">
+          Sur cet appareil
+        </h2>
+
+        <p
+          class="flex items-start gap-2 text-sm text-ink-muted"
+          data-testid="etat-push"
+        >
+          <Icon
+            :name="etatPush === 'actif' ? 'lucide:circle-check' : 'lucide:mail'"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ MESSAGE_PUSH[etatPush] }}
+        </p>
+
+        <Button
+          v-if="etatPush === 'inactif'"
+          :label="pushEnCours ? 'Activation…' : 'Activer sur cet appareil'"
+          :disabled="pushEnCours"
+          class="bg-brand text-brand-ink hover:bg-brand-strong"
+          data-testid="bouton-activer-push"
+          @click="activer"
+        />
+
+        <p
+          v-if="erreurPush"
+          role="alert"
+          class="rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+        >
+          {{ erreurPush }}
+        </p>
+      </section>
+
       <!-- Réglages généraux -->
       <section class="flex flex-col gap-3 card-surface p-4">
         <h2 class="font-semibold text-ink">

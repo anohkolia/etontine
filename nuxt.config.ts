@@ -233,6 +233,12 @@ export default defineNuxtConfig({
       ],
     },
     workbox: {
+      // Les écouteurs `push` et `notificationclick` vivent dans un script à
+      // part, importé par le service worker généré. On garde ainsi `generateSW`
+      // et toute sa mise en cache : basculer en `injectManifest` pour deux
+      // écouteurs aurait demandé de réécrire ce qui fait marcher l'application
+      // hors ligne.
+      importScripts: ['/push-sw.js'],
       // Les pages d'aide et la coquille de l'application sont mises en cache :
       // c'est ce qui permet d'ouvrir l'application sans réseau et d'y saisir
       // une déclaration, qui partira au retour de la connexion.

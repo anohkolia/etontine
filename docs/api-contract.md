@@ -157,7 +157,8 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | Méthode | Route | Description |
 |:--|:--|:--|
 | `GET`/`PATCH` | `/me/notification-preferences` | Par tontine, avec plage de silence |
-| `POST` | `/push/subscribe` | Abonnement Web Push |
+| `GET` | `/push/vapid-key` | Clé publique VAPID, ou `null` si le push n'est pas configuré. Publique par construction |
+| `POST` | `/push/subscribe` | Abonnement Web Push. Le navigateur s'abonne depuis `/app/profil/notifications`, **sur un geste explicite** : une demande de permission surgie de nulle part se refuse d'un réflexe, et un refus est définitif |
 | `GET` | `/tontines/:id/reminders/whatsapp` | Renvoie les liens `wa.me` **pré-remplis** pour les retardataires. L'envoi reste manuel — c'est le MVP, ne pas simuler un envoi automatique |
 
 ---
