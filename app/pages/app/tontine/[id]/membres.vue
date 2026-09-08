@@ -21,6 +21,16 @@ interface Membre {
   status: 'invited' | 'pending_approval' | 'active' | 'left' | 'defaulted'
   positions: number[]
   shares: number
+  /** Ce qu'il doit encore sur les tours non clos — calculé côté serveur. */
+  resteDu: number
+}
+
+/** Une part, à sa place dans l'ordre de passage. */
+interface Part {
+  shareId: string
+  rotationPosition: number
+  membershipId: string
+  nom: string
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -54,6 +64,70 @@ const enAttente = computed(() => membres.value.filter(m => m.status === 'pending
 
 const partsApprobation = ref<Record<string, number>>({})
 const decisionEnCours = ref<string | null>(null)
+
+/**
+ * Ordre de passage réordonné à la main.
+ *
+ * Le mode `fixed` existait côté serveur — l'ordre convenu de vive voix est le
+ * cas le plus fréquent, bien avant le tirage — et aucun écran ne le proposait :
+ * le président n'avait que le tirage au sort, qu'il le veuille ou non.
+ *
+ * On travaille sur une copie locale : tant que rien n'est enregistré, rien ne
+ * bouge côté serveur, et le président peut se raviser.
+ */
+const ordre = ref<Part[]>([])
+const ordreModifie = ref(false)
+const ordreEnCours = ref(false)
+
+function deplacer(index: number, sens: -1 | 1) {
+  const cible = index + sens
+  if (cible < 0 || cible >= ordre.value.length) return
+  const copie = [...ordre.value]
+  ;[copie[index], copie[cible]] = [copie[cible]!, copie[index]!]
+  ordre.value = copie
+  ordreModifie.value = true
+}
+
+async function enregistrerOrdre() {
+  erreur.value = null
+  ordreEnCours.value = true
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/rotation`, {
+      method: 'POST',
+      body: { mode: 'fixed', order: ordre.value.map(p => p.shareId) },
+    })
+    ordreModifie.value = false
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    ordreEnCours.value = false
+  }
+}
+
+/**
+ * Sortie d'un membre. Le montant vient du serveur, jamais d'un calcul d'écran :
+ * ce chiffre part au registre, il ne se devine pas.
+ */
+const sortieOuverte = ref<string | null>(null)
+
+async function faireSortir(membreId: string) {
+  erreur.value = null
+  decisionEnCours.value = membreId
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membreId}`, { method: 'DELETE' })
+    sortieOuverte.value = null
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
 
 function partsDe(membreId: string): number {
   return partsApprobation.value[membreId] ?? 1
@@ -116,10 +190,12 @@ async function charger() {
   try {
     const [detail, liste] = await Promise.all([
       $fetch<typeof tontine.value>(`/api/v1/tontines/${tontineId}`),
-      $fetch<{ members: Membre[] }>(`/api/v1/tontines/${tontineId}/members`),
+      $fetch<{ members: Membre[], rotation: Part[] }>(`/api/v1/tontines/${tontineId}/members`),
     ])
     tontine.value = detail
     membres.value = liste.members
+    ordre.value = liste.rotation
+    ordreModifie.value = false
     etat.value = 'contenu'
   }
   catch (e) {
@@ -212,50 +288,97 @@ useHead({ title: 'Membres — eTontine' })
         class="flex flex-col gap-2"
         data-testid="liste-membres"
       >
-        <li
+        <!-- `template v-for` : la confirmation de sortie est un second élément
+             de liste, pas un encart coincé dans la carte du membre. -->
+        <template
           v-for="membre in membres"
           :key="membre.id"
-          class="card-surface flex items-start gap-3 p-3"
-          :data-testid="`membre-${membre.id}`"
         >
-          <!-- Le rang dans la rotation, en pastille — repris de la liste de
+          <li
+            class="card-surface flex items-start gap-3 p-3"
+            :data-testid="`membre-${membre.id}`"
+          >
+            <!-- Le rang dans la rotation, en pastille — repris de la liste de
                membres du template. Il répond à la question que le membre pose
                en premier : « je passe quand ? ». Un double part affiche ses
                deux positions, séparées par une barre. -->
-          <span
-            class="tabular flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-surface text-xs font-bold text-brand-strong"
-            aria-hidden="true"
-          >{{ membre.positions.length > 0 ? membre.positions.join('/') : '—' }}</span>
-
-          <div class="flex min-w-0 flex-1 flex-col gap-1">
-            <span class="truncate font-semibold text-ink">
-              {{ membre.name ?? 'Membre inscrit' }}
-            </span>
             <span
-              v-if="membre.phone"
-              class="tabular truncate text-sm text-ink-muted"
-            >{{ membre.phone }}</span>
+              class="tabular flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-surface text-xs font-bold text-brand-strong"
+              aria-hidden="true"
+            >{{ membre.positions.length > 0 ? membre.positions.join('/') : '—' }}</span>
 
-            <!-- Un double part occupe deux positions distinctes : on les montre
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <span class="truncate font-semibold text-ink">
+                {{ membre.name ?? 'Membre inscrit' }}
+              </span>
+              <span
+                v-if="membre.phone"
+                class="tabular truncate text-sm text-ink-muted"
+              >{{ membre.phone }}</span>
+
+              <!-- Un double part occupe deux positions distinctes : on les montre
                  toutes les deux, c'est ce que le bureau vient vérifier. -->
-            <span
-              class="text-sm text-ink-muted"
-              :data-testid="`parts-${membre.id}`"
-            >
-              {{ membre.shares }} part{{ membre.shares > 1 ? 's' : '' }}
-              <template v-if="membre.positions.length > 0">
-                · position{{ membre.positions.length > 1 ? 's' : '' }}
-                {{ membre.positions.join(' et ') }}
-              </template>
-            </span>
-          </div>
+              <span
+                class="text-sm text-ink-muted"
+                :data-testid="`parts-${membre.id}`"
+              >
+                {{ membre.shares }} part{{ membre.shares > 1 ? 's' : '' }}
+                <template v-if="membre.positions.length > 0">
+                  · position{{ membre.positions.length > 1 ? 's' : '' }}
+                  {{ membre.positions.join(' et ') }}
+                </template>
+              </span>
+            </div>
 
-          <StatusBadge
-            kind="membership"
-            :status="membre.status"
-            compact
-          />
-        </li>
+            <div class="flex shrink-0 flex-col items-end gap-2">
+              <StatusBadge
+                kind="membership"
+                :status="membre.status"
+                compact
+              />
+
+              <Button
+                v-if="estPresident && membre.status === 'active' && membre.role !== 'president'"
+                :label="sortieOuverte === membre.id ? 'Annuler' : 'Faire sortir'"
+                class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-sortie-${membre.id}`"
+                @click="sortieOuverte = sortieOuverte === membre.id ? null : membre.id"
+              />
+            </div>
+          </li>
+
+          <!-- Ce qu'une sortie laisse derrière elle, dit avant de la faire.
+             Le montant vient du serveur : il partira au registre tel quel. -->
+          <li
+            v-if="sortieOuverte === membre.id"
+            class="flex flex-col gap-3 rounded-card border border-disputed-ink/20 bg-disputed-surface p-4"
+            :data-testid="`confirmation-sortie-${membre.id}`"
+          >
+            <p class="text-sm text-disputed-ink">
+              <template v-if="membre.resteDu > 0">
+                {{ membre.name ?? 'Ce membre' }} doit encore
+                <AmountDisplay
+                  :amount="membre.resteDu"
+                  size="sm"
+                />
+                sur les tours en cours. Le montant sera inscrit au registre avec
+                son départ.
+              </template>
+              <template v-else>
+                {{ membre.name ?? 'Ce membre' }} ne doit rien sur les tours en
+                cours. Son départ sera inscrit au registre.
+              </template>
+            </p>
+
+            <Button
+              :label="decisionEnCours === membre.id ? 'Sortie…' : 'Confirmer la sortie'"
+              :disabled="decisionEnCours !== null"
+              class="bg-brand text-brand-ink hover:bg-brand-strong"
+              :data-testid="`bouton-confirmer-sortie-${membre.id}`"
+              @click="faireSortir(membre.id)"
+            />
+          </li>
+        </template>
       </ul>
 
       <p
@@ -429,6 +552,72 @@ useHead({ title: 'Membres — eTontine' })
       >
         {{ erreur }}
       </p>
+
+      <!-- Ordre de passage — à la main, ou au sort -->
+      <section
+        v-if="estPresident && tontine?.status === 'open' && ordre.length > 0"
+        class="flex flex-col gap-3 card-surface p-4"
+        data-testid="section-ordre"
+      >
+        <h2 class="font-semibold text-ink">
+          Ordre de passage
+        </h2>
+        <p class="text-sm text-ink-muted">
+          L’ordre convenu entre vous se pose ici. Le tirage au sort n’est qu’une
+          autre façon de trancher, pas la seule.
+        </p>
+
+        <ul class="flex flex-col gap-2">
+          <li
+            v-for="(part, index) in ordre"
+            :key="part.shareId"
+            class="flex items-center gap-3 rounded-control border border-line p-2"
+            :data-testid="`ordre-${index + 1}`"
+          >
+            <span
+              class="tabular flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-surface text-xs font-bold text-brand-strong"
+              aria-hidden="true"
+            >{{ index + 1 }}</span>
+            <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink">{{ part.nom }}</span>
+
+            <Button
+              :disabled="index === 0"
+              class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+              :aria-label="`Faire monter ${part.nom}`"
+              :data-testid="`monter-${part.shareId}`"
+              @click="deplacer(index, -1)"
+            >
+              <Icon
+                name="lucide:chevron-up"
+                size="1rem"
+                aria-hidden="true"
+              />
+            </Button>
+            <Button
+              :disabled="index === ordre.length - 1"
+              class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+              :aria-label="`Faire descendre ${part.nom}`"
+              :data-testid="`descendre-${part.shareId}`"
+              @click="deplacer(index, 1)"
+            >
+              <Icon
+                name="lucide:chevron-down"
+                size="1rem"
+                aria-hidden="true"
+              />
+            </Button>
+          </li>
+        </ul>
+
+        <Button
+          v-if="ordreModifie"
+          :label="ordreEnCours ? 'Enregistrement…' : 'Enregistrer cet ordre'"
+          :disabled="ordreEnCours"
+          class="bg-brand text-brand-ink hover:bg-brand-strong"
+          data-testid="bouton-enregistrer-ordre"
+          @click="enregistrerOrdre"
+        />
+      </section>
 
       <div
         v-if="estPresident && tontine?.status === 'open'"

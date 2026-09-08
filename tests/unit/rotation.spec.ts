@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  ajouterMembreGere, attribuerParts, definirRotation, membresDe, rotationDe,
+  ajouterMembreGere, attribuerParts, definirRotation, membresDe, resteDu, retirerMembre, rotationDe,
 } from '../../server/services/membres.ts'
 import { melangerAvecGraine, verifierTirage } from '../../server/services/rotation.ts'
 import { dateDuTour, demarrerTontine } from '../../server/services/tours.ts'
@@ -269,5 +269,71 @@ describe('dates des tours — les quatre fréquences', () => {
 
   it('mensuelle : février d’une année bissextile', () => {
     expect(dateDuTour('2028-01-31', 2, 'monthly')).toBe('2028-02-29')
+  })
+})
+
+describe('sortie d’un membre — « avec calcul de ce qui est dû »', () => {
+  it('chiffre ce qu’il laisse derrière lui', () => {
+    const yao = groupeAvecDoublePart()
+    demarrerTontine(db, T, PRESIDENT)
+
+    // Sept tours, deux parts : quatorze cotisations de 25 000 à son nom, et
+    // aucune n'est confirmée.
+    expect(resteDu(db, yao)).toBe(14 * 25_000)
+  })
+
+  it('inscrit le montant au registre avec le départ', () => {
+    const yao = groupeAvecDoublePart()
+    demarrerTontine(db, T, PRESIDENT)
+
+    const resultat = retirerMembre(db, yao, PRESIDENT)
+    expect(resultat.resteDu).toBe(14 * 25_000)
+
+    // Une adhésion qui disparaît sans chiffre, c'est le groupe qui découvre le
+    // trou au tour suivant sans trace de qui devait quoi.
+    const [ecriture] = db.select().from(ledgerEntries).all().filter(e => e.type === 'member_left')
+    expect((ecriture!.payload as { resteDu: number }).resteDu).toBe(14 * 25_000)
+  })
+
+  it('ne compte pas les tours déjà clos', () => {
+    const yao = groupeAvecDoublePart()
+    demarrerTontine(db, T, PRESIDENT)
+
+    const premier = db.select().from(rounds).all().find(r => r.index === 1)!
+    db.update(rounds).set({ status: 'closed' }).where(eq(rounds.id, premier.id)).run()
+
+    // Un tour clos est soldé : ce qui n'a pas été versé y est un impayé
+    // constaté, pas une dette à venir.
+    expect(resteDu(db, yao)).toBe(12 * 25_000)
+  })
+
+  it('sort un membre géré sans casser le registre', () => {
+    const yao = groupeAvecDoublePart()
+
+    // L'acteur inscrit au registre est celui qui **agit**, pas celui qui part :
+    // un membre géré n'a pas de compte, et l'y mettre violait la clé étrangère.
+    expect(() => retirerMembre(db, yao, PRESIDENT)).not.toThrow()
+
+    const [ecriture] = db.select().from(ledgerEntries).all().filter(e => e.type === 'member_left')
+    expect(ecriture!.actorId).toBe(PRESIDENT)
+  })
+
+  it('refuse de faire sortir le président', () => {
+    groupeAvecDoublePart()
+    const [msPresident] = db.select().from(memberships).where(eq(memberships.role, 'president')).all()
+
+    // La tontine perdrait le seul rôle capable de confirmer, de contre-valider
+    // et de clore.
+    expect(() => retirerMembre(db, msPresident!.id, PRESIDENT)).toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('expose le reste dû dans la liste des membres', () => {
+    const yao = groupeAvecDoublePart()
+    demarrerTontine(db, T, PRESIDENT)
+
+    const membre = membresDe(db, T).find(m => m.id === yao)!
+    expect(membre.resteDu).toBe(14 * 25_000)
   })
 })

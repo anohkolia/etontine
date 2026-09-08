@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
-import { memberships, shares, tontines, users } from '../db/schema.ts'
+import { contributions, memberships, rounds, shares, tontines, users } from '../db/schema.ts'
 import type { MembershipRole } from '../../shared/schemas/index.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
@@ -90,14 +90,23 @@ export function rotationDe(db: Db, tontineId: string) {
       membershipId: memberships.id,
       userId: memberships.userId,
       managedName: memberships.managedName,
+      firstName: users.firstName,
+      lastName: users.lastName,
       role: memberships.role,
       status: memberships.status,
     })
     .from(shares)
     .innerJoin(memberships, eq(memberships.id, shares.membershipId))
+    .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(shares.tontineId, tontineId))
     .orderBy(asc(shares.rotationPosition))
     .all()
+    .map(p => ({
+      ...p,
+      // L'écran d'ordre de passage nomme des personnes : sans le compte, une
+      // ligne arrivée par lien n'aurait aucun nom à afficher.
+      nom: [p.firstName, p.lastName].filter(Boolean).join(' ') || p.managedName || 'Membre',
+    }))
 }
 
 /**
@@ -132,6 +141,9 @@ export function membresDe(db: Db, tontineId: string) {
     /** Un membre à double part apparaît deux fois dans la rotation. */
     positions: parts.filter(p => p.membershipId === m.id).map(p => p.rotationPosition),
     shares: parts.filter(p => p.membershipId === m.id).length,
+    // Ce qu'une sortie laisserait derrière : le montrer **avant** de faire
+    // sortir quelqu'un, pas après.
+    resteDu: resteDu(db, m.id),
   }))
 }
 
@@ -231,20 +243,73 @@ export function definirRole(db: Db, membershipId: string, role: MembershipRole) 
   db.update(memberships).set({ role }).where(eq(memberships.id, membershipId)).run()
 }
 
-/** Fait sortir un membre. La transition est contrôlée par la table d'états. */
-export function retirerMembre(db: Db, membershipId: string) {
+/**
+ * Ce qu'un membre doit encore, sur les tours qui ne sont pas clos.
+ *
+ * Le calcul vit ici parce que deux écrans en ont besoin — la liste des membres,
+ * pour dire ce qu'une sortie laisserait derrière elle, et la sortie elle-même,
+ * qui l'inscrit au registre. Le recopier serait deux calculs d'argent dont rien
+ * ne garantirait qu'ils disent la même chose.
+ */
+export function resteDu(db: Db, membershipId: string): number {
+  return db
+    .select({
+      expected: contributions.expectedAmount,
+      confirmed: contributions.confirmedAmount,
+    })
+    .from(contributions)
+    .innerJoin(rounds, eq(rounds.id, contributions.roundId))
+    .where(and(
+      eq(contributions.membershipId, membershipId),
+      ne(rounds.status, 'closed'),
+    ))
+    .all()
+    .reduce((n, c) => n + Math.max(0, c.expected - c.confirmed), 0)
+}
+
+/**
+ * Fait sortir un membre, **et dit ce qu'il laisse derrière lui**.
+ *
+ * Le contrat annonçait « sortie avec calcul de ce qui est dû » ; la sortie
+ * était muette. Une adhésion qui disparaît sans chiffre, c'est le groupe qui
+ * découvre le trou au tour suivant, sans trace de qui devait quoi au moment du
+ * départ. Le montant part donc au registre avec la sortie.
+ *
+ * Le président ne peut pas sortir : la tontine perdrait son seul rôle capable
+ * de confirmer, de contre-valider et de clore. Il faudrait d'abord passer la
+ * présidence, ce qui est un autre geste.
+ */
+export function retirerMembre(db: Db, membershipId: string, acteurId: string) {
   const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
   if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
+  if (m.role === 'president') {
+    throw apiError(
+      'FORBIDDEN',
+      'Le président ne peut pas quitter sa propre tontine. Passe d’abord la présidence à quelqu’un d’autre.',
+      { field: 'role' },
+    )
+  }
+
   assertTransition('membership', m.status, 'left')
+
+  const du = resteDu(db, membershipId)
+
   db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId)).run()
 
   appendLedger(db, {
     tontineId: m.tontineId,
     type: 'member_left',
-    actorId: m.userId ?? membershipId,
-    payload: { membershipId, name: m.managedName },
+    // Celui qui **agit**, pas celui qui part. L'ancien repli sur l'identifiant
+    // d'adhésion faisait échouer la sortie de tout membre géré : sans compte,
+    // il n'existe pas dans `users`, et la clé étrangère du registre refusait
+    // l'écriture. Retirer quelqu'un que le bureau avait saisi à la main —
+    // c'est-à-dire le cas le plus courant — levait donc une erreur SQL.
+    actorId: acteurId,
+    payload: { membershipId, name: m.managedName, resteDu: du },
   })
+
+  return { membershipId, resteDu: du }
 }
 
 /** Compte les adhésions actives — contrôle avant démarrage. */
