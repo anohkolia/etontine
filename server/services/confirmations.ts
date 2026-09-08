@@ -303,3 +303,51 @@ function notifierMembre(
   // SMS, hors périmètre MVP.
   if (membre?.userId && membre.userId !== saufUserId) notifier(db, membre.userId, { ...message, tontineId })
 }
+
+/**
+ * Rouvre une cotisation contestée, pour que le membre puisse renvoyer.
+ *
+ * Le rejet exige un motif, et son but est qu'on corrige. Mais `disputed` ne
+ * mène qu'à `confirmed` ou `due` (§2.4) : re-déclarer depuis `disputed` est
+ * impossible, et **rien n'empruntait le retour vers `due`**. Une déclaration
+ * rejetée bloquait donc la cotisation pour de bon — le membre lisait « ta
+ * déclaration a été rejetée », et n'avait aucun moyen d'en refaire une.
+ *
+ * L'acteur est le président ou le censeur, comme le veut §2.4 : rouvrir, c'est
+ * constater que la contestation est résolue.
+ */
+export function rouvrirCotisation(db: Db, contributionId: string, acteurId: string) {
+  const [ligne] = db
+    .select({ contribution: contributions, tontineId: rounds.tontineId, roundId: rounds.id })
+    .from(contributions)
+    .innerJoin(rounds, eq(rounds.id, contributions.roundId))
+    .where(eq(contributions.id, contributionId))
+    .limit(1)
+    .all()
+
+  if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
+
+  assertTransition('contribution', ligne.contribution.status, 'due')
+
+  db.update(contributions)
+    .set({ status: 'due' })
+    .where(eq(contributions.id, contributionId))
+    .run()
+
+  appendLedger(db, {
+    tontineId: ligne.tontineId,
+    roundId: ligne.roundId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'cotisation_rouverte', contributionId },
+  })
+
+  notifierMembre(db, ligne.contribution.membershipId, ligne.tontineId, {
+    type: 'cotisation_rouverte',
+    title: 'Tu peux renvoyer ta cotisation',
+    body: 'Le bureau a rouvert ta cotisation. Tu peux déclarer à nouveau.',
+    url: `/app/tontine/${ligne.tontineId}/cotiser`,
+  }, acteurId)
+
+  return { contributionId, status: 'due' as const }
+}

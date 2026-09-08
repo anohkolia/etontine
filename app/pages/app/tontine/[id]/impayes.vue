@@ -163,6 +163,28 @@ async function enregistrerAvance(retard: Retard) {
   }
 }
 
+/**
+ * Rouvre une cotisation contestée.
+ *
+ * `disputed` ne mène qu'à `confirmed` ou `due`, et re-déclarer depuis
+ * `disputed` est refusé : sans ce geste, un rejet bloquait la cotisation pour
+ * de bon. Le membre lisait le motif et ne pouvait rien en faire.
+ */
+async function rouvrir(contributionId: string) {
+  erreur.value = null
+  enCours.value = contributionId
+  try {
+    await $fetch(`/api/v1/contributions/${contributionId}/reopen`, { method: 'POST' })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = null
+  }
+}
+
 async function solder(avanceId: string) {
   erreur.value = null
   enCours.value = avanceId
@@ -352,6 +374,25 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-appliquer-amende-${retard.contributionId}`"
                 @click="appliquer(retard.contributionId)"
+              />
+            </div>
+
+            <!-- Une cotisation contestée attend qu'on la rouvre : tant qu'elle
+                 reste en `disputed`, son membre ne peut pas renvoyer. -->
+            <div
+              v-if="estPresident && retard.status === 'disputed'"
+              class="flex flex-col gap-2 border-t border-line pt-3"
+            >
+              <p class="text-sm text-ink-muted">
+                Sa déclaration a été rejetée. Tant que tu ne rouvres pas sa
+                cotisation, il ne peut pas en refaire une.
+              </p>
+              <Button
+                :label="enCours === retard.contributionId ? 'Réouverture…' : 'Rouvrir sa cotisation'"
+                :disabled="enCours !== null"
+                class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-rouvrir-${retard.contributionId}`"
+                @click="rouvrir(retard.contributionId)"
               />
             </div>
 

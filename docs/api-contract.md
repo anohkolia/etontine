@@ -112,7 +112,8 @@ Ce qui tourne déjà n'est jamais cassé : une tontine en cours va au bout de so
 | `POST` | `/contributions/:id/declare` | `{ amount, channel, providerRef?, proofUrl? }` → `declared`. Idempotence obligatoire |
 | `POST` | `/contributions/:id/declare-cash` | Trésorier, pour un tiers → `declared`, notification de confirmation au membre |
 | `POST` | `/declarations/:id/confirm` | Trésorier/président → `confirmed`. Refusé si `declared_by = caller` |
-| `POST` | `/declarations/:id/reject` | `{ reason }` obligatoire → `disputed` |
+| `POST` | `/declarations/:id/reject` | `{ reason }` obligatoire → `disputed`. Ouvert au bureau **et au membre concerné** quand la déclaration vient du trésorier (§2.4) |
+| `POST` | `/contributions/:id/reopen` | `disputed → due` — président ou censeur. **Sans elle, un rejet est sans retour** : re-déclarer depuis `disputed` est refusé par la machine à états, et le motif demanderait de corriger ce qu'on ne peut plus renvoyer |
 | `POST` | `/declarations/bulk-confirm` | `{ ids: [] }` — le « tout confirmer » du trésorier |
 | `GET` | `/tontines/:id/pending-confirmations` | La file du trésorier |
 

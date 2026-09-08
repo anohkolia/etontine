@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { confirmateursPossibles, confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration } from '../../server/services/confirmations.ts'
+import {
+  confirmateursPossibles, confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration,
+  rouvrirCotisation,
+} from '../../server/services/confirmations.ts'
 import { declarerEspeces, declarerPaiement } from '../../server/services/declarations.ts'
 import { reconnaitreVersement } from '../../server/services/escalade.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
@@ -377,6 +380,64 @@ describe('espèces enregistrées par le bureau — la contrepartie côté membre
 
     expect(() => confirmerDeclaration(db, declarationId, TRESORIER)).toThrow(
       expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+})
+
+describe('après un rejet — la cotisation repartait dans le vide', () => {
+  function rejetee() {
+    const sienne = db.select().from(memberships).all().find(m => m.userId === MEMBRE)!
+    const contributionId = cotisationDe(sienne.id).id
+    const { declarationId } = declarerPaiement(db, contributionId, MEMBRE, ENVOI)
+    rejeterDeclaration(db, declarationId, TRESORIER, 'Aucun envoi retrouvé à ce montant')
+    return contributionId
+  }
+
+  it('interdit de re-déclarer tant que la cotisation est contestée', () => {
+    const contributionId = rejetee()
+
+    // `disputed` ne mène qu'à `confirmed` ou `due` : la machine à états refuse
+    // une seconde déclaration, et rien n'empruntait le retour vers `due`. Le
+    // motif du rejet demandait donc de corriger quelque chose qu'on ne pouvait
+    // plus renvoyer.
+    expect(() => declarerPaiement(db, contributionId, MEMBRE, ENVOI)).toThrow(
+      expect.objectContaining({ statusCode: 409 }),
+    )
+  })
+
+  it('rouvre la cotisation, et le membre peut renvoyer', () => {
+    const contributionId = rejetee()
+    rouvrirCotisation(db, contributionId, PRESIDENT)
+
+    const [c] = db.select().from(contributions).where(eq(contributions.id, contributionId)).all()
+    expect(c!.status).toBe('due')
+    expect(() => declarerPaiement(db, contributionId, MEMBRE, ENVOI)).not.toThrow()
+  })
+
+  it('inscrit la réouverture au registre', () => {
+    const contributionId = rejetee()
+    rouvrirCotisation(db, contributionId, PRESIDENT)
+
+    const ecritures = db.select().from(ledgerEntries).all()
+      .filter(e => (e.payload as { changement?: string }).changement === 'cotisation_rouverte')
+    expect(ecritures).toHaveLength(1)
+  })
+
+  it('prévient le membre sans citer un montant (règle 21)', () => {
+    const contributionId = rejetee()
+    rouvrirCotisation(db, contributionId, PRESIDENT)
+
+    const envoyees = db.select().from(notifications).all().filter(n => n.type === 'cotisation_rouverte')
+    expect(envoyees).toHaveLength(1)
+    expect(envoyees[0]!.userId).toBe(MEMBRE)
+    expect(/FCFA|\d{4}/.test(envoyees[0]!.body)).toBe(false)
+  })
+
+  it('refuse de rouvrir une cotisation qui n’est pas contestée', () => {
+    const sienne = db.select().from(memberships).all().find(m => m.userId === MEMBRE)!
+
+    expect(() => rouvrirCotisation(db, cotisationDe(sienne.id).id, PRESIDENT)).toThrow(
+      expect.objectContaining({ statusCode: 409 }),
     )
   })
 })

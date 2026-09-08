@@ -104,6 +104,9 @@ interface DeclarationEnAttente {
   source: 'member' | 'treasurer' | 'system'
   declaredAt: string
   memberAcknowledgedAt: string | null
+  decision: 'pending' | 'confirmed' | 'rejected'
+  decidedAt: string | null
+  rejectionReason: string | null
 }
 
 const declarations = ref<DeclarationEnAttente[]>([])
@@ -111,10 +114,26 @@ const motifContestation = ref<Record<string, string>>({})
 const contestationOuverte = ref<string | null>(null)
 const decisionEnCours = ref<string | null>(null)
 
-/** Celles que je n'ai ni faites ni encore reconnues. */
+/** Celles que je n'ai ni faites ni encore reconnues, et qui attendent encore. */
 const aReconnaitre = computed(() =>
-  declarations.value.filter(d => d.source === 'treasurer' && !d.memberAcknowledgedAt),
+  declarations.value.filter(d =>
+    d.source === 'treasurer' && d.decision === 'pending' && !d.memberAcknowledgedAt,
+  ),
 )
+
+/**
+ * Les rejets, avec leur motif.
+ *
+ * Le motif est obligatoire au rejet, il est enregistré, et la notification
+ * renvoie ici « pour voir le motif ». Il n'arrivait jamais : `my-contributions`
+ * ne remontait que les déclarations en attente. Le membre voyait le badge
+ * « Contesté » et devait deviner ce qui clochait — donc renvoyait la même
+ * chose, et se faisait rejeter une seconde fois.
+ */
+function rejetDe(contributionId: string) {
+  return declarations.value.find(d => d.contributionId === contributionId && d.decision === 'rejected')
+    ?? null
+}
 
 async function reconnaitre(declarationId: string) {
   erreur.value = null
@@ -441,33 +460,54 @@ useHead({ title: 'Cotiser — eTontine' })
                 <li
                   v-for="cotisation in cotisations"
                   :key="cotisation.id"
-                  class="flex items-center justify-between gap-3 card-surface p-3"
+                  class="flex flex-col gap-3 card-surface p-3"
                   :data-testid="`cotisation-${cotisation.id}`"
                 >
-                  <div class="flex flex-col gap-1">
-                    <span class="text-sm text-ink-muted">
-                      Part en position {{ cotisation.rotationPosition }}
-                    </span>
-                    <AmountDisplay
-                      :amount="cotisation.expectedAmount - cotisation.confirmedAmount"
-                      size="lg"
-                    />
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-sm text-ink-muted">
+                        Part en position {{ cotisation.rotationPosition }}
+                      </span>
+                      <AmountDisplay
+                        :amount="cotisation.expectedAmount - cotisation.confirmedAmount"
+                        size="lg"
+                      />
+                    </div>
+
+                    <div class="flex flex-col items-end gap-2">
+                      <StatusBadge
+                        kind="contribution"
+                        :status="cotisation.status"
+                        compact
+                      />
+                      <Button
+                        v-if="cotisation.status === 'due' || cotisation.status === 'late'"
+                        label="Envoyer"
+                        class="bg-brand text-brand-ink hover:bg-brand-strong"
+                        :data-testid="`bouton-envoyer-${cotisation.id}`"
+                        @click="choisir(cotisation.id)"
+                      />
+                    </div>
                   </div>
 
-                  <div class="flex flex-col items-end gap-2">
-                    <StatusBadge
-                      kind="contribution"
-                      :status="cotisation.status"
-                      compact
+                  <!-- « Contesté » sans le motif ne dit pas quoi corriger : on
+                       renvoie la même chose, et on se fait rejeter à nouveau. -->
+                  <p
+                    v-if="cotisation.status === 'disputed' && rejetDe(cotisation.id)"
+                    class="flex items-start gap-2 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+                    :data-testid="`motif-rejet-${cotisation.id}`"
+                  >
+                    <Icon
+                      name="lucide:octagon-alert"
+                      size="1rem"
+                      class="mt-0.5 shrink-0"
+                      aria-hidden="true"
                     />
-                    <Button
-                      v-if="cotisation.status === 'due' || cotisation.status === 'late'"
-                      label="Envoyer"
-                      class="bg-brand text-brand-ink hover:bg-brand-strong"
-                      :data-testid="`bouton-envoyer-${cotisation.id}`"
-                      @click="choisir(cotisation.id)"
-                    />
-                  </div>
+                    <span>
+                      <strong class="font-semibold">Ta déclaration a été rejetée.</strong>
+                      {{ rejetDe(cotisation.id)?.rejectionReason }}
+                    </span>
+                  </p>
                 </li>
               </ul>
 
