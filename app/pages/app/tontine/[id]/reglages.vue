@@ -51,6 +51,7 @@ interface Detail {
   penaltyAmount: number
   penaltyPeriod: 'once' | 'per_day'
   graceDays: number
+  counterValidationThreshold: number
   myRole: 'president' | 'treasurer' | 'auditor' | 'member'
   channels: Canal[]
 }
@@ -75,6 +76,13 @@ const form = reactive({
   locality: '',
   description: '',
   collectionChannelIds: [] as string[],
+  // Réglages d'argent : modifiables tant que la tontine n'a pas démarré.
+  shareAmount: 0,
+  frequency: 'monthly' as Detail['frequency'],
+  penaltyAmount: 0,
+  penaltyPeriod: 'once' as 'once' | 'per_day',
+  graceDays: 0,
+  counterValidationThreshold: 0,
 })
 
 const EMOJIS = TONTINE_EMOJIS
@@ -134,6 +142,12 @@ async function charger() {
       locality: detail.locality ?? '',
       description: detail.description ?? '',
       collectionChannelIds: detail.channels.map(c => c.id),
+      shareAmount: detail.shareAmount,
+      frequency: detail.frequency,
+      penaltyAmount: detail.penaltyAmount,
+      penaltyPeriod: detail.penaltyPeriod,
+      graceDays: detail.graceDays,
+      counterValidationThreshold: detail.counterValidationThreshold,
     })
     etat.value = 'contenu'
   }
@@ -155,6 +169,19 @@ async function enregistrer() {
     }
     if (nomModifiable.value) corps.name = form.name.trim()
     if (canalChange.value) corps.collectionChannelIds = form.collectionChannelIds
+
+    // Tant que rien n'a démarré, l'argent se règle ici. Après, le serveur
+    // refuse — et l'écran ne propose plus les champs.
+    if (!lancee.value) {
+      Object.assign(corps, {
+        shareAmount: form.shareAmount,
+        frequency: form.frequency,
+        penaltyAmount: form.penaltyAmount,
+        penaltyPeriod: form.penaltyPeriod,
+        graceDays: form.graceDays,
+        counterValidationThreshold: form.counterValidationThreshold,
+      })
+    }
 
     await $fetch(`/api/v1/tontines/${tontineId}`, { method: 'PATCH', body: corps })
     succes.value = canalChange.value
@@ -438,7 +465,125 @@ useHead({ title: 'Réglages — eTontine' })
           des cotisations déjà calculées, et pour certaines déjà versées.
         </p>
 
-        <dl class="flex flex-col gap-2 text-sm">
+        <!-- Avant le démarrage, ces réglages s'éditent ici. C'était le trou :
+             ils n'étaient modifiables nulle part une fois le wizard quitté, et
+             le seuil de contre-validation n'était exposé par aucun écran — il
+             restait à sa valeur par défaut pour la vie de la tontine. -->
+        <div
+          v-if="!lancee"
+          class="flex flex-col gap-4"
+          data-testid="reglages-argent"
+        >
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="montant-part"
+          >
+            Montant d’une part (FCFA)
+            <InputText
+              id="montant-part"
+              :value="form.shareAmount"
+              inputmode="numeric"
+              data-testid="champ-montant-part"
+              @input="form.shareAmount = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+            />
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="frequence"
+          >
+            Fréquence
+            <select
+              id="frequence"
+              v-model="form.frequency"
+              class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-ink"
+              data-testid="champ-frequence"
+            >
+              <option
+                v-for="(libelle, valeur) in FREQUENCE"
+                :key="valeur"
+                :value="valeur"
+              >
+                {{ libelle }}
+              </option>
+            </select>
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="amende"
+          >
+            Amende de retard (FCFA, 0 pour aucune)
+            <InputText
+              id="amende"
+              :value="form.penaltyAmount"
+              inputmode="numeric"
+              data-testid="champ-amende"
+              @input="form.penaltyAmount = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+            />
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="periode-amende"
+          >
+            Comment elle s’applique
+            <select
+              id="periode-amende"
+              v-model="form.penaltyPeriod"
+              class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-ink"
+              data-testid="champ-periode-amende"
+            >
+              <option value="once">
+                Une seule fois
+              </option>
+              <option value="per_day">
+                Par jour de retard
+              </option>
+            </select>
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="delai-grace"
+          >
+            Délai de grâce (jours)
+            <InputText
+              id="delai-grace"
+              :value="form.graceDays"
+              inputmode="numeric"
+              data-testid="champ-delai-grace"
+              @input="form.graceDays = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+            />
+            <span class="text-sm font-normal text-ink-subtle">
+              Marquer quelqu’un en retard dès le lendemain use la relance et
+              fait désinstaller l’application.
+            </span>
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="seuil-contre-validation"
+          >
+            Contre-validation au-delà de (FCFA)
+            <InputText
+              id="seuil-contre-validation"
+              :value="form.counterValidationThreshold"
+              inputmode="numeric"
+              data-testid="champ-seuil"
+              @input="form.counterValidationThreshold = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
+            />
+            <span class="text-sm font-normal text-ink-subtle">
+              Au-dessus de ce montant, un versement demande une seconde paire
+              d’yeux avant de partir : le censeur, ou celui qui prend la main.
+            </span>
+          </label>
+        </div>
+
+        <dl
+          v-else
+          class="flex flex-col gap-2 text-sm"
+        >
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
               Montant d’une part
@@ -479,13 +624,17 @@ useHead({ title: 'Réglages — eTontine' })
           </div>
         </dl>
 
+        <!-- Le lien ne vaut que pour un brouillon, et il emporte
+             l'identifiant : sans lui, le wizard reprenait ce que le navigateur
+             avait gardé — donc rien après une publication — et ouvrait une
+             **seconde** tontine au lieu de modifier celle-ci. -->
         <NuxtLink
-          v-if="!lancee"
-          to="/app/tontine/create"
+          v-if="tontine.status === 'draft'"
+          :to="`/app/tontine/create?id=${tontineId}`"
           class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-5 text-sm font-semibold text-ink"
           data-testid="lien-configurer"
         >
-          Modifier dans le wizard
+          Reprendre le wizard
         </NuxtLink>
       </section>
 

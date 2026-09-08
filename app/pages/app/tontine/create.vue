@@ -104,6 +104,16 @@ async function charger() {
   try {
     canaux.value = await $fetch<Canal[]>('/api/v1/me/channels')
 
+    // Un identifiant dans l'adresse l'emporte sur ce que le navigateur a
+    // gardé. C'est ce qui manquait : depuis les réglages d'une tontine, le
+    // wizard reprenait le brouillon du magasin — vidé après chaque
+    // publication — et ouvrait donc une **seconde** tontine au lieu de
+    // modifier celle qu'on venait de quitter.
+    const demande = useRoute().query.id
+    if (typeof demande === 'string' && demande !== brouillon.tontineId) {
+      brouillon.reprendre(demande, 1)
+    }
+
     // Reprise d'un brouillon laissé en plan : on recharge ses valeurs réelles
     // depuis le serveur, jamais depuis le stockage du navigateur.
     if (brouillon.tontineId) {
