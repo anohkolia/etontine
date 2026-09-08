@@ -32,6 +32,12 @@ export interface EtatVersement {
     msisdn: string | null
     /** Vrai si le numéro a changé il y a moins de 48 h. */
     phoneRecentlyChanged: boolean
+    /**
+     * A-t-il un compte ? Sans compte, il ne peut pas accuser réception — et
+     * l'écran doit proposer au président la seule sortie qui reste plutôt que
+     * d'annoncer une confirmation qui n'arrivera jamais.
+     */
+    hasAccount: boolean
   }
   counterValidationRequired: boolean
   counterValidationThreshold: number
@@ -146,6 +152,7 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
 
   const [beneficiaire] = db
     .select({
+      userId: memberships.userId,
       managedName: memberships.managedName,
       managedPhone: memberships.managedPhone,
       firstName: users.firstName,
@@ -185,6 +192,7 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
         || 'Membre',
       msisdn: beneficiaire?.phone ?? beneficiaire?.managedPhone ?? null,
       phoneRecentlyChanged,
+      hasAccount: Boolean(beneficiaire?.userId),
     },
     counterValidationRequired: collected > tontine.counterValidationThreshold,
     counterValidationThreshold: tontine.counterValidationThreshold,
@@ -494,4 +502,90 @@ export function accuserReception(
     roundClosed: true,
     ecart: receivedAmount - versement.amount,
   }
+}
+
+/**
+ * Clôture forcée d'un tour, sans accusé de réception.
+ *
+ * §2.3 pose la règle : **pas de clôture sans accusé du bénéficiaire.** Elle a
+ * une bonne raison — sans elle, la parole du trésorier suffirait à clore un
+ * tour, ce qui revient à lui demander de se délivrer un quitus à lui-même.
+ *
+ * Mais elle avait un trou : `accuserReception` exige un compte, et le
+ * bénéficiaire d'un tour est très souvent un **membre géré**, saisi à la main
+ * par le bureau, sans application. Il ne pouvait donc jamais accuser réception.
+ * Le tour restait ouvert, `ouvrirTourSuivant` n'en ouvrait aucun autre tant
+ * qu'un tour est en cours, et la tontine entière se figeait au premier
+ * bénéficiaire sans compte. Le pot était parti, l'argent reçu, et
+ * l'application refusait d'en tenir compte.
+ *
+ * D'où cette sortie, prévue au contrat et réservée au président. Elle ne ment
+ * pas : le versement **reste** `declared`, personne n'a accusé réception, et
+ * le registre porte le motif, l'auteur, et si le bénéficiaire avait seulement
+ * les moyens de le faire. La règle tient, l'exception est tracée.
+ */
+export function cloturerTourSansAccuse(
+  db: Db,
+  roundId: string,
+  acteurId: string,
+  motif: string,
+) {
+  if (!motif || motif.trim().length < 5) {
+    throw apiError(
+      'VALIDATION_ERROR',
+      'Explique pourquoi le tour est clos sans accusé de réception.',
+      { field: 'reason' },
+    )
+  }
+
+  const { round } = contexteTour(db, roundId)
+  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+
+  if (!versement || versement.status !== 'declared') {
+    // Clore avant que le pot soit parti n'est pas une exception, c'est une
+    // perte : le bénéficiaire n'aurait rien reçu et n'aurait plus de tour.
+    throw apiError(
+      'INVALID_TRANSITION',
+      'Le pot doit avoir été déclaré envoyé avant de clore le tour sans accusé.',
+      { field: 'status' },
+    )
+  }
+
+  assertTransition('round', round.status, 'closed')
+
+  const [beneficiaire] = db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(eq(memberships.id, versement.beneficiaryMembershipId))
+    .limit(1)
+    .all()
+
+  const maintenant = new Date()
+  db.update(rounds).set({ status: 'closed', closedAt: maintenant }).where(eq(rounds.id, roundId)).run()
+
+  appendLedger(db, {
+    tontineId: round.tontineId,
+    roundId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: {
+      changement: 'cloture_sans_accuse',
+      payoutId: versement.id,
+      amount: versement.amount,
+      motif: motif.trim(),
+      // Un bénéficiaire sans compte ne *pouvait pas* accuser réception ; un
+      // bénéficiaire qui en a un ne l'a pas fait. Le registre distingue les
+      // deux, parce que ce n'est pas la même histoire.
+      beneficiairePouvaitAccuser: Boolean(beneficiaire?.userId),
+    },
+  })
+
+  notifierTontine(db, round.tontineId, {
+    type: 'tour_clos',
+    title: 'Le tour a été clos par le président',
+    body: 'Le tour est clos sans accusé de réception. Le motif est inscrit au registre.',
+    url: `/app/tontine/${round.tontineId}/registre`,
+  })
+
+  return { roundId, status: 'closed' as const, payoutStatus: versement.status }
 }

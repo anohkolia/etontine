@@ -27,6 +27,8 @@ interface EtatVersement {
     name: string
     msisdn: string | null
     phoneRecentlyChanged: boolean
+    /** Sans compte, il ne peut pas accuser réception : personne ne le peut. */
+    hasAccount: boolean
   }
   counterValidationRequired: boolean
   counterValidationThreshold: number
@@ -60,6 +62,9 @@ const enCours = ref(false)
 const termine = ref(false)
 
 const quatreChiffres = ref('')
+const motifCloture = ref('')
+/** Le tour vient d'être clos sans accusé : ce n'est pas la même fin. */
+const closSansAccuse = ref(false)
 const assumerIncomplet = ref(false)
 const canalVersement = ref<'wave' | 'orange' | 'mtn' | 'moov' | 'cash'>('wave')
 const referenceVersement = ref('')
@@ -125,6 +130,31 @@ async function appeler(chemin: string, corps?: Record<string, unknown>) {
       body: corps ?? {},
     })
     if (chemin === 'acknowledge') termine.value = true
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    enCours.value = false
+  }
+}
+
+/**
+ * Clôture forcée : la route ne vit pas sous `payout/`, parce que ce n'est pas
+ * une étape du versement. C'est un aveu qu'une étape n'aura pas lieu.
+ */
+async function clore() {
+  erreur.value = null
+  enCours.value = true
+  try {
+    await $fetch(`/api/v1/rounds/${versement.value!.roundId}/close`, {
+      method: 'POST',
+      body: { reason: motifCloture.value.trim() },
+    })
+    termine.value = true
+    closSansAccuse.value = true
+    motifCloture.value = ''
     await charger()
   }
   catch (e) {
@@ -507,17 +537,79 @@ useHead({ title: 'Verser le pot — eTontine' })
         </template>
 
         <p
-          v-else
+          v-else-if="versement.beneficiary.hasAccount"
           class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
           data-testid="attente-accuse"
         >
           Le pot est envoyé. Le tour restera ouvert tant que
           {{ versement.beneficiary.name }} n’aura pas confirmé l’avoir reçu.
         </p>
+
+        <p
+          v-else
+          class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+          data-testid="accuse-impossible"
+        >
+          {{ versement.beneficiary.name }} n’a pas l’application : personne ne
+          peut poser l’accusé de réception à sa place. Le président peut clore
+          le tour en disant pourquoi.
+        </p>
+      </section>
+
+      <!-- Sortie de secours — président seulement, et tracée -->
+      <section
+        v-if="estPresident && versement.payout?.status === 'declared' && !jeSuisBeneficiaire"
+        class="flex flex-col gap-3 card-surface p-4"
+        data-testid="etape-cloture-forcee"
+      >
+        <h2 class="font-semibold text-ink">
+          Clore le tour sans accusé
+        </h2>
+        <p class="text-sm text-ink-muted">
+          À n’utiliser que si le bénéficiaire ne peut pas confirmer lui-même.
+          Le versement restera marqué « déclaré » — personne n’aura accusé
+          réception — et ton motif sera inscrit au registre.
+        </p>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="motif-cloture"
+        >
+          Pourquoi ?
+          <InputText
+            id="motif-cloture"
+            v-model="motifCloture"
+            placeholder="Yao a reçu le pot, il n’a pas l’application"
+            data-testid="champ-motif-cloture"
+          />
+        </label>
+
+        <Button
+          :label="enCours ? 'Clôture…' : 'Clore le tour'"
+          :disabled="enCours || motifCloture.trim().length < 5"
+          class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+          data-testid="bouton-clore-tour"
+          @click="clore()"
+        />
       </section>
 
       <section
-        v-if="termine || versement.payout?.status === 'acknowledged'"
+        v-if="closSansAccuse"
+        class="flex flex-col gap-2 card-surface p-4"
+        data-testid="tour-clos-sans-accuse"
+      >
+        <StatusBadge
+          kind="payout"
+          status="declared"
+        />
+        <p class="text-sm text-ink-muted">
+          Le tour est clos. Le versement reste marqué « déclaré » : personne
+          n’a accusé réception, et le registre garde ton motif.
+        </p>
+      </section>
+
+      <section
+        v-else-if="termine || versement.payout?.status === 'acknowledged'"
         class="flex flex-col gap-2 card-surface p-4"
         data-testid="versement-termine"
       >

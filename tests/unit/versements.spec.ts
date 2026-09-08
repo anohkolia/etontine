@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  accuserReception, contreValidateursPossibles, contreValiderVersement, declarerVersement,
-  etatVersement, preparerVersement,
+  accuserReception, cloturerTourSansAccuse, contreValidateursPossibles, contreValiderVersement,
+  declarerVersement, etatVersement, preparerVersement,
 } from '../../server/services/versements.ts'
 import { declarerPaiement } from '../../server/services/declarations.ts'
 import { confirmerDeclaration } from '../../server/services/confirmations.ts'
@@ -10,7 +10,8 @@ import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
-import { contributions, ledgerEntries, memberships, rounds, shares, tontines, users } from '../../server/db/schema.ts'
+import { ouvrirTourSuivant } from '../../server/services/echeances.ts'
+import { contributions, ledgerEntries, memberships, payouts, rounds, shares, tontines, users } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -360,5 +361,85 @@ describe('contre-validation ouverte au bénéficiaire — docs/data-model.md §2
     const [ecriture] = db.select().from(ledgerEntries).all()
       .filter(e => e.type === 'payout_declared')
     expect(ecriture!.payload).not.toHaveProperty('contreValidationImpossible')
+  })
+})
+
+describe('clôture d’un tour sans accusé — la tontine ne se fige plus', () => {
+  beforeEach(() => {
+    potComplet()
+    db.update(tontines).set({ counterValidationThreshold: 500_000 }).where(eq(tontines.id, T)).run()
+  })
+
+  /** Amène le tour 1 jusqu'au versement déclaré. */
+  function potEnvoye() {
+    preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+    declarerVersement(db, tour1, TRESORIER, { channel: 'wave' })
+  }
+
+  it('refuse de clore avant que le pot soit parti', () => {
+    preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+
+    // Clore là ne serait pas une exception, ce serait une perte sèche pour le
+    // bénéficiaire : rien reçu, et plus de tour.
+    expect(() => cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Il ne répond pas')).toThrow(
+      expect.objectContaining({ statusCode: 409 }),
+    )
+  })
+
+  it('exige un motif', () => {
+    potEnvoye()
+
+    expect(() => cloturerTourSansAccuse(db, tour1, PRESIDENT, '')).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
+  })
+
+  it('clôt le tour et laisse le versement « déclaré »', () => {
+    potEnvoye()
+    cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Yao a reçu le pot, il n’a pas l’application')
+
+    const [r] = db.select().from(rounds).where(eq(rounds.id, tour1)).all()
+    expect(r!.status).toBe('closed')
+
+    // Le versement ne passe **pas** à `acknowledged` : personne n'a accusé
+    // réception, et l'écrire serait un faux.
+    const [p] = db.select().from(payouts).where(eq(payouts.roundId, tour1)).all()
+    expect(p!.status).toBe('declared')
+    expect(p!.acknowledgedAt).toBeNull()
+  })
+
+  it('inscrit le motif, l’auteur et si l’accusé était seulement possible', () => {
+    potEnvoye()
+    cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Yao a reçu le pot, il n’a pas l’application')
+
+    const [ecriture] = db.select().from(ledgerEntries).all()
+      .filter(e => (e.payload as { changement?: string }).changement === 'cloture_sans_accuse')
+    const payload = ecriture!.payload as { motif: string, beneficiairePouvaitAccuser: boolean }
+
+    expect(ecriture!.actorId).toBe(PRESIDENT)
+    expect(payload.motif).toContain('l’application')
+    // Le président est bénéficiaire du tour 1 et il a un compte : il aurait pu
+    // accuser réception. Un bénéficiaire sans compte, non — ce n'est pas la
+    // même histoire, et le registre doit permettre de les distinguer.
+    expect(payload.beneficiairePouvaitAccuser).toBe(true)
+  })
+
+  it('libère le tour suivant, qui restait bloqué derrière', () => {
+    potEnvoye()
+    cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Reçu de la main à la main')
+
+    // `ouvrirTourSuivant` n'ouvre rien tant qu'un tour est en cours : un tour
+    // qui ne peut pas se clore figeait donc la tontine entière.
+    const ouverts = ouvrirTourSuivant(db, new Date('2100-01-01T00:00:00Z'))
+    expect(ouverts).toBe(1)
+  })
+
+  it('refuse un second passage sur un tour déjà clos', () => {
+    potEnvoye()
+    cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Reçu de la main à la main')
+
+    expect(() => cloturerTourSansAccuse(db, tour1, PRESIDENT, 'Encore')).toThrow(
+      expect.objectContaining({ statusCode: 409 }),
+    )
   })
 })

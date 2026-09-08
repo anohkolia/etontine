@@ -179,6 +179,10 @@ pending ──> collecting ──> payout_pending ──> closed
 - `collecting` → `payout_pending` : toutes les contributions confirmées, **ou** le président force en assumant un pot incomplet (écriture au registre avec le montant manquant).
 - `payout_pending` → `closed` : uniquement après `payouts.status = acknowledged`. **Pas de clôture sans accusé de réception du bénéficiaire.**
 
+  **Une exception, réservée au président** (`POST /rounds/:id/close`) : l'accusé de réception exige un compte, et le bénéficiaire est très souvent un membre géré, saisi à la main par le bureau, sans application. Il ne peut alors pas le poser — et le tour restait ouvert pour toujours, `open-next-round` n'ouvrant aucun tour tant qu'un tour est en cours. La tontine entière se figeait au premier bénéficiaire sans compte, alors que le pot était parti et l'argent reçu.
+
+  La sortie ne ment pas : le versement **reste** `declared`, aucun accusé n'est fabriqué, et l'écriture `settings_changed` porte `changement: 'cloture_sans_accuse'`, le motif — obligatoire —, l'auteur, et `beneficiairePouvaitAccuser`, qui distingue celui qui *ne pouvait pas* confirmer de celui qui *ne l'a pas fait*. Le pot doit avoir été déclaré envoyé : clore avant serait une perte sèche pour le bénéficiaire, pas une exception.
+
 ### 2.4 `contributions.status`
 ```
 due ──(déclaration)──> declared ──(confirmation)──> confirmed
