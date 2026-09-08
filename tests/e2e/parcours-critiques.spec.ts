@@ -253,6 +253,26 @@ test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser
   // Confirmée : le pot avance, et l'écriture est au registre.
   await expect(tresorier.getByTestId('file-confirmation')).toBeHidden()
 
+  // Confirmée : le membre peut en tirer un reçu. C'est la preuve qu'on demande
+  // des mois plus tard, et rien ne la produisait — le lien signé, sa
+  // vérification et la page publique existaient sans qu'aucun écran y mène.
+  await page.goto(`/app/tontine/${id}/cotiser`)
+  await waitForHydration(page)
+  const boutonRecu = page.locator('[data-testid^="bouton-recu-"]').first()
+  await expect(boutonRecu).toBeVisible()
+  await boutonRecu.click()
+
+  const lienRecu = page.locator('[data-testid^="lien-recu-"]').first()
+  await expect(lienRecu).toBeVisible()
+
+  // Le lien s'ouvre **sans compte** : c'est ce qui en fait une preuve.
+  const contextePublic = await browser.newContext()
+  const visiteur = await contextePublic.newPage()
+  await visiteur.goto((await lienRecu.getAttribute('href'))!)
+  await waitForHydration(visiteur)
+  await expect(visiteur.locator('body')).toContainText('25 000')
+  await contextePublic.close()
+
   await page.goto(`/app/tontine/${id}/registre`)
   await waitForHydration(page)
   await expect(page.getByTestId('liste-registre')).toContainText('Cotisation confirmée')

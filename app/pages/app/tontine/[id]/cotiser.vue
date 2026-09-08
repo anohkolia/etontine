@@ -130,6 +130,42 @@ const aReconnaitre = computed(() =>
  * « Contesté » et devait deviner ce qui clochait — donc renvoyait la même
  * chose, et se faisait rejeter une seconde fois.
  */
+/**
+ * Le reçu d'une cotisation confirmée.
+ *
+ * Le lien signé, sa vérification en temps constant, la page publique et
+ * l'image sous 40 Ko pour WhatsApp étaient tous écrits et testés — et
+ * `POST /declarations/:id/receipt-link` n'avait aucun appelant. Rien ne menait
+ * à `/recu/`. Le membre ne pouvait pas montrer une preuve de ce qu'il avait
+ * versé, ce qui est pourtant la première chose qu'on demande dans une tontine.
+ */
+const { copier, copie } = useCopie()
+const recus = ref<Record<string, string>>({})
+const recuEnCours = ref<string | null>(null)
+
+function confirmeeDe(contributionId: string) {
+  return declarations.value.find(d => d.contributionId === contributionId && d.decision === 'confirmed')
+    ?? null
+}
+
+async function obtenirRecu(declarationId: string) {
+  erreur.value = null
+  recuEnCours.value = declarationId
+  try {
+    const { url } = await $fetch<{ url: string }>(
+      `/api/v1/declarations/${declarationId}/receipt-link`,
+      { method: 'POST' },
+    )
+    recus.value[declarationId] = url
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    recuEnCours.value = null
+  }
+}
+
 function rejetDe(contributionId: string) {
   return declarations.value.find(d => d.contributionId === contributionId && d.decision === 'rejected')
     ?? null
@@ -488,6 +524,46 @@ useHead({ title: 'Cotiser — eTontine' })
                         @click="choisir(cotisation.id)"
                       />
                     </div>
+                  </div>
+
+                  <!-- Confirmée : le reçu. C'est la preuve qu'on demande quand
+                       quelqu'un conteste, des mois plus tard. -->
+                  <div
+                    v-if="cotisation.status === 'confirmed' && confirmeeDe(cotisation.id)"
+                    class="flex flex-col gap-2"
+                  >
+                    <template v-if="recus[confirmeeDe(cotisation.id)!.id]">
+                      <p class="text-sm text-ink-muted">
+                        Ce lien vaut preuve, et s’ouvre sans compte. Il expire au
+                        bout d’un an.
+                      </p>
+                      <div class="flex flex-col gap-2 sm:flex-row">
+                        <a
+                          :href="recus[confirmeeDe(cotisation.id)!.id]"
+                          target="_blank"
+                          rel="noopener"
+                          class="min-h-touch inline-flex flex-1 items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink"
+                          :data-testid="`lien-recu-${cotisation.id}`"
+                        >
+                          Ouvrir le reçu
+                        </a>
+                        <Button
+                          :label="copie ? 'Copié' : 'Copier le lien'"
+                          class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
+                          :data-testid="`bouton-copier-recu-${cotisation.id}`"
+                          @click="copier(recus[confirmeeDe(cotisation.id)!.id]!)"
+                        />
+                      </div>
+                    </template>
+
+                    <Button
+                      v-else
+                      :label="recuEnCours === confirmeeDe(cotisation.id)!.id ? 'Préparation…' : 'Obtenir mon reçu'"
+                      :disabled="recuEnCours !== null"
+                      class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+                      :data-testid="`bouton-recu-${cotisation.id}`"
+                      @click="obtenirRecu(confirmeeDe(cotisation.id)!.id)"
+                    />
                   </div>
 
                   <!-- « Contesté » sans le motif ne dit pas quoi corriger : on
