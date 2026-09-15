@@ -27,7 +27,7 @@ withDefaults(defineProps<{
     aria-busy="true"
     data-testid="loading-skeleton"
   >
-    <span class="sr-only">Chargement en cours</span>
+    <span class="sr-only">{{ $t('ui.LoadingSkeleton.chargement_en_cours') }}</span>
 
     <template v-if="variant === 'text'">
       <span

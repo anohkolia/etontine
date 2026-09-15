@@ -8,7 +8,7 @@ import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
-import { advances, contributions, ledgerEntries, memberships, penalties, rounds } from '../../server/db/schema.ts'
+import { advances, contributions, ledgerEntries, memberships, notifications, penalties, rounds } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -271,5 +271,60 @@ describe('contestations', () => {
     expect(() => ajouterMessage(db, disputeId, PRESIDENT, 'Encore un mot')).toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
+  })
+
+  /**
+   * Le fil prévient ceux qu'il concerne. Sans cela, une réponse restait lettre
+   * morte : le membre qui avait signalé ne savait pas qu'on lui avait répondu.
+   */
+  describe('qui est prévenu', () => {
+    const MEMBRE = 'b2000000-0000-4000-8000-000000000002'
+    const CENSEUR = 'b2000000-0000-4000-8000-000000000003'
+
+    async function bureauAvecCompte() {
+      await createTestUser(db, MEMBRE, '+2250707002222')
+      await createTestUser(db, CENSEUR, '+2250707003333')
+      const koffi = db.select().from(memberships).all().find(m => m.managedName === 'Koffi')!
+      const fatou = db.select().from(memberships).all().find(m => m.managedName === 'Fatou')!
+      db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, koffi.id)).run()
+      db.update(memberships).set({ userId: CENSEUR, role: 'auditor' }).where(eq(memberships.id, fatou.id)).run()
+    }
+
+    function notifiesDe(type: string) {
+      return db.select().from(notifications).all().filter(n => n.type === type).map(n => n.userId).sort()
+    }
+
+    it('une réponse prévient celui qui a signalé et le bureau qui tranche, pas son auteur', async () => {
+      await bureauAvecCompte()
+      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Je n’ai jamais reçu cette somme')
+
+      ajouterMessage(db, disputeId, PRESIDENT, 'On regarde ça')
+      // Le membre et le censeur, pas le président qui vient d'écrire.
+      expect(notifiesDe('contestation_reponse')).toEqual([MEMBRE, CENSEUR].sort())
+
+      db.delete(notifications).run()
+      ajouterMessage(db, disputeId, MEMBRE, 'Merci, j’attends')
+      // Le membre est l'auteur : président et censeur seulement.
+      expect(notifiesDe('contestation_reponse')).toEqual([PRESIDENT, CENSEUR].sort())
+    })
+
+    it('la conclusion prévient celui qui a signalé', async () => {
+      await bureauAvecCompte()
+      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Je n’ai jamais reçu cette somme')
+
+      resoudreContestation(db, disputeId, CENSEUR, 'Vérifié : le versement est au registre')
+      expect(notifiesDe('contestation_close')).toEqual([MEMBRE])
+    })
+
+    it('n’écrit aucun montant dans ces notifications', async () => {
+      await bureauAvecCompte()
+      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Il manque 25 000')
+      ajouterMessage(db, disputeId, PRESIDENT, 'Les 25 000 sont bien là')
+      resoudreContestation(db, disputeId, PRESIDENT, '25 000 confirmés')
+
+      for (const n of db.select().from(notifications).all()) {
+        expect(n.body).not.toMatch(/\d{2} ?\d{3}/)
+      }
+    })
   })
 })

@@ -15,6 +15,7 @@
  * détour plutôt que de laisser croire à un contrôle qui n'existe pas.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const session = useSessionStore()
 const route = useRoute()
@@ -70,14 +71,14 @@ async function choisirPiece(evenement: Event) {
   try {
     if (fichier.type === 'application/pdf') {
       if (fichier.size > PLAFOND_PDF_OCTETS) {
-        throw new Error('Ce PDF dépasse 2 Mo. Scanne la pièce en qualité plus basse.')
+        throw new Error(t('profil.identite.ce_pdf_depasse_2'))
       }
       retenirPiece(fichier)
       return
     }
 
     if (fichier.type !== 'image/jpeg' && fichier.type !== 'image/png') {
-      throw new Error('Formats acceptés : PDF, JPG, JPEG et PNG.')
+      throw new Error(t('profil.identite.formats_acceptes_pdf_jpg'))
     }
 
     retenirPiece(await compresser(fichier), fichier.name)
@@ -129,8 +130,8 @@ async function envoyer() {
     await session.charger(true)
 
     resultat.value = reponse.status === 'approved'
-      ? 'Identité vérifiée.'
-      : 'Dossier reçu. Il sera examiné avant validation.'
+      ? t('profil.identite.identite_verifiee')
+      : t('profil.identite.dossier_recu_il_sera')
 
     const redirection = route.query.redirect
     if (reponse.status === 'approved' && typeof redirection === 'string' && redirection.startsWith('/')) {
@@ -139,7 +140,7 @@ async function envoyer() {
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
   }
   finally {
     envoi.value = false
@@ -147,18 +148,17 @@ async function envoyer() {
 }
 
 useEnTete(() => ({
-  titre: 'Vérifier mon identité',
-  sousTitre: 'Palier 2',
-  retour: { to: '/app/profil', label: 'Mon profil' },
+  titre: t('profil.identite.verifier_mon_identite'),
+  sousTitre: t('profil.identite.palier_2'),
+  retour: { to: '/app/profil', label: t('commun.mon_profil') },
 }))
-useHead({ title: 'Vérifier mon identité — eTontine' })
+useHead({ title: t('profil.identite.verifier_mon_identite_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
     <p class="text-sm text-ink-muted">
-      Une pièce d’identité et un selfie. C’est ce qui permet de publier une
-      tontine : les membres doivent savoir à qui ils confient leur argent.
+      {{ $t('profil.identite.une_piece_d_identite') }}
     </p>
 
     <!-- Le résultat vit **hors** du formulaire : une approbation immédiate le
@@ -194,9 +194,8 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
           aria-hidden="true"
         />
         <span>
-          <strong class="font-semibold">Ton dossier est en cours d’examen.</strong>
-          Tu n’as rien à refaire. Tu recevras une notification dès qu’il aura
-          été regardé.
+          <strong class="font-semibold">{{ $t('profil.identite.ton_dossier_est_en') }}</strong>
+          {{ $t('profil.identite.tu_n_as_rien') }}
         </span>
       </p>
     </div>
@@ -216,8 +215,8 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
           aria-hidden="true"
         />
         <span>
-          <strong class="font-semibold">Ton dossier n’a pas été accepté.</strong>
-          {{ motifRefus }} Corrige, puis redépose tes pièces ci-dessous.
+          <strong class="font-semibold">{{ $t('profil.identite.ton_dossier_n_a') }}</strong>
+          {{ $t('profil.identite.p0_corrige_puis_redepose', { p0: motifRefus }) }}
         </span>
       </p>
 
@@ -230,9 +229,9 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="piece"
           >
-            Ma pièce d’identité
+            {{ $t('profil.identite.ma_piece_d_identite') }}
             <span class="text-sm font-normal text-ink-subtle">
-              CNI, passeport ou permis de conduire — PDF, JPG, JPEG ou PNG, 2 Mo maximum.
+              {{ $t('profil.identite.cni_passeport_ou_permis') }}
             </span>
             <input
               id="piece"
@@ -254,16 +253,15 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
               class="mt-0.5 shrink-0"
               aria-hidden="true"
             />
-            {{ nomPiece }} — {{ Math.max(1, Math.round(poidsPiece / 1024)) }} Ko
+            {{ $t('profil.identite.p0_p1_ko', { p0: nomPiece, p1: Math.max(1, Math.round(poidsPiece / 1024)) }) }}
           </p>
         </div>
 
         <div class="flex flex-col gap-2">
           <p class="text-sm font-medium text-ink-muted">
-            Mon selfie
+            {{ $t('profil.identite.mon_selfie') }}
             <span class="block font-normal text-ink-subtle">
-              Pris maintenant, à la caméra : c’est ce qui permet de comparer ton
-              visage à ta pièce.
+              {{ $t('profil.identite.pris_maintenant_a_la') }}
             </span>
           </p>
           <SelfieCamera
@@ -282,7 +280,7 @@ useHead({ title: 'Vérifier mon identité — eTontine' })
         </p>
         <Button
           type="submit"
-          :label="envoi ? 'Envoi…' : 'Envoyer mon dossier'"
+          :label="envoi ? $t('commun.envoi_en_cours') : $t('profil.identite.envoyer_mon_dossier')"
           :disabled="envoi || !complet"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-envoyer-identite"

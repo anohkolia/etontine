@@ -137,3 +137,15 @@ export function depasse(limite: Limite, effectif: number, ajout = 1): boolean {
 export function libelleLimite(limite: Limite): string {
   return limite === null ? 'illimité' : String(limite)
 }
+
+/**
+ * La référence à citer au règlement d'une demande.
+ *
+ * Dérivée de l'identifiant de la demande, courte et lisible à voix haute :
+ * c'est ce que le président écrit dans le motif de son envoi, et ce que
+ * l'administrateur retrouve dans le back-office pour rapprocher un paiement
+ * d'une demande. Calculée ici pour que les deux applications l'écrivent pareil.
+ */
+export function referenceDeReglement(demandeId: string): string {
+  return `ABO-${demandeId.replace(/-/g, '').slice(0, 6).toUpperCase()}`
+}

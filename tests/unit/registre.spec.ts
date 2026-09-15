@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appendLedger, verifyLedger } from '../../server/services/ledger.ts'
+import { appendLedger, readLedger, verifyLedger } from '../../server/services/ledger.ts'
 import { ledgerEntries, tontines } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
@@ -222,5 +222,42 @@ describe('registre — append-only (acceptation T06)', () => {
     const restantes = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
     expect(restantes).toHaveLength(2)
     expect(verifyLedger(db, T).valid).toBe(true)
+  })
+})
+
+describe('registre — pagination par curseur', () => {
+  function cinqEcritures() {
+    for (let i = 1; i <= 5; i++) {
+      appendLedger(db, { tontineId: T, type: 'contribution_declared', actorId: U, payload: { rang: i } })
+    }
+  }
+
+  it('rend les plus récentes d’abord, et un curseur tant qu’il en reste', () => {
+    cinqEcritures()
+    const page1 = readLedger(db, T, { limit: 2 })
+
+    expect(page1.items.map(e => e.position)).toEqual([5, 4])
+    expect(page1.nextCursor).toBe('4')
+  })
+
+  it('reprend juste sous le curseur, sans doublon ni trou', () => {
+    // Le curseur était accepté et jamais appliqué : chaque page rendait les
+    // mêmes écritures, et tout ce qui dépassait la première restait invisible.
+    cinqEcritures()
+    const page1 = readLedger(db, T, { limit: 2 })
+    const page2 = readLedger(db, T, { limit: 2, cursor: Number(page1.nextCursor) })
+    const page3 = readLedger(db, T, { limit: 2, cursor: Number(page2.nextCursor) })
+
+    expect(page2.items.map(e => e.position)).toEqual([3, 2])
+    expect(page3.items.map(e => e.position)).toEqual([1])
+    expect(page3.nextCursor).toBeNull()
+  })
+
+  it('combine le curseur et le filtre par type', () => {
+    cinqEcritures()
+    appendLedger(db, { tontineId: T, type: 'member_joined', actorId: U, payload: {} })
+
+    const page = readLedger(db, T, { limit: 10, type: 'contribution_declared', cursor: 3 })
+    expect(page.items.map(e => e.position)).toEqual([2, 1])
   })
 })

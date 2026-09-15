@@ -379,7 +379,9 @@ test('parcours 4 — verser le pot : déclarer puis accuser réception', async (
   await waitForHydration(page)
   await expect(page.getByTestId('liste-registre')).toContainText('Pot versé')
   await expect(page.getByTestId('liste-registre')).toContainText('Pot reçu')
-  await expect(page.getByTestId('liste-registre')).toContainText('Réglage modifié')
+  // Le pot incomplet assumé par le président s'écrit sous son nom, pas sous un
+  // « réglage modifié » générique : le registre dit ce qui s'est passé.
+  await expect(page.getByTestId('liste-registre')).toContainText('Pot incomplet assumé')
 
   await page.getByTestId('bouton-verifier-registre').click()
   await expect(page.getByTestId('registre-intact')).toBeVisible()

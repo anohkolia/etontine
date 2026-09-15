@@ -11,7 +11,10 @@
  * n'en masque aucune. En montrer une seule le laisserait croire qu'il est à
  * jour alors qu'il doit encore la moitié.
  */
+import { declareContributionInput } from '#shared/schemas'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -56,9 +59,19 @@ const etape = ref('1')
 const choisie = ref<string | null>(null)
 const info = ref<InfoPaiement | null>(null)
 
-const montantDeclare = ref(0)
-const canalDeclare = ref<'wave' | 'orange' | 'mtn' | 'moov' | 'cash'>('wave')
-const reference = ref('')
+/**
+ * La déclaration, validée par `declareContributionInput` — le schéma du
+ * serveur : un montant entier et positif, un canal connu, une référence de
+ * soixante-quatre caractères au plus. La preuve est ajoutée après dépôt.
+ */
+const formulaireDeclaration = useFormulaire(declareContributionInput, {
+  amount: 0,
+  channel: 'wave',
+  providerRef: undefined,
+})
+const [montantDeclare] = formulaireDeclaration.champ('amount')
+const [canalDeclare, canalDeclareAttrs] = formulaireDeclaration.champ('channel')
+const [reference, referenceAttrs] = formulaireDeclaration.champ('providerRef')
 const preuve = ref<File | null>(null)
 const poidsPreuve = ref<number | null>(null)
 const envoi = ref(false)
@@ -103,6 +116,8 @@ interface DeclarationEnAttente {
   channel: string
   source: 'member' | 'treasurer' | 'system'
   declaredAt: string
+  declaredBy: string
+  proofUrl: string | null
   memberAcknowledgedAt: string | null
   decision: 'pending' | 'confirmed' | 'rejected'
   decidedAt: string | null
@@ -166,6 +181,47 @@ async function obtenirRecu(declarationId: string) {
   }
 }
 
+/**
+ * Ma déclaration en attente sans capture, sur une cotisation donnée.
+ *
+ * Déclarée sans réseau, la capture n'était pas partie — et rien ne permettait
+ * de la joindre ensuite, alors que l'écran le promettait. Tant que le
+ * trésorier ne s'est pas prononcé, l'auteur peut la joindre, une fois.
+ */
+const session = useSessionStore()
+
+function sansPreuveDe(contributionId: string) {
+  return declarations.value.find(d =>
+    d.contributionId === contributionId
+    && d.decision === 'pending'
+    && d.declaredBy === session.user?.id
+    && !d.proofUrl,
+  ) ?? null
+}
+
+const preuveEnCours = ref<string | null>(null)
+
+async function joindrePreuve(declarationId: string, evenement: Event) {
+  const fichier = (evenement.target as HTMLInputElement).files?.[0]
+  if (!fichier) return
+  erreur.value = null
+  preuveEnCours.value = declarationId
+  try {
+    const compresse = await compresser(fichier)
+    const formulaire = new FormData()
+    formulaire.append('file', compresse)
+    const depot = await $fetch<{ url: string }>('/api/v1/uploads/proof', { method: 'POST', body: formulaire })
+    await $fetch(`/api/v1/declarations/${declarationId}/proof`, { method: 'POST', body: { proofUrl: depot.url } })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    preuveEnCours.value = null
+  }
+}
+
 function rejetDe(contributionId: string) {
   return declarations.value.find(d => d.contributionId === contributionId && d.decision === 'rejected')
     ?? null
@@ -212,7 +268,7 @@ const restantTotal = computed(() =>
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -247,8 +303,7 @@ async function charger() {
 async function choisir(id: string) {
   choisie.value = id
   info.value = await $fetch<InfoPaiement>(`/api/v1/contributions/${id}/payment-info`)
-  montantDeclare.value = info.value.expectedAmount
-  reference.value = ''
+  formulaireDeclaration.resetForm({ values: { amount: info.value.expectedAmount, channel: 'wave', providerRef: undefined } })
   etape.value = '2'
 }
 
@@ -273,6 +328,10 @@ async function declarer() {
 
   messageDeclaration.value = null
   erreur.value = null
+  // Une référence vide n'est pas une référence : on ne l'envoie pas.
+  if (!reference.value?.trim()) formulaireDeclaration.setFieldValue('providerRef', undefined, false)
+  const valeurs = await formulaireDeclaration.valider()
+  if (!valeurs) return
   envoi.value = true
 
   try {
@@ -291,8 +350,7 @@ async function declarer() {
       proofUrl = depot.url
     }
     else if (preuve.value && !enLigne.value) {
-      erreur.value = 'La capture ne peut pas être envoyée sans réseau. '
-        + 'Ta déclaration partira quand même — tu pourras joindre l’image plus tard.'
+      erreur.value = t('tontine.cotiser.la_capture_ne_peut')
     }
 
     // La clé d'idempotence est fabriquée **ici**, au moment de la saisie, et
@@ -302,11 +360,11 @@ async function declarer() {
       url: `/api/v1/contributions/${cotisationChoisie.value.id}/declare`,
       method: 'POST',
       idempotencyKey: crypto.randomUUID(),
-      libelle: `Déclaration de cotisation, tour ${tour.value?.index}`,
+      libelle: t('tontine.cotiser.declaration_de_cotisation_tour', { n: tour.value?.index }),
       body: {
-        amount: montantDeclare.value,
-        channel: canalDeclare.value,
-        providerRef: reference.value || undefined,
+        amount: valeurs.amount,
+        channel: valeurs.channel,
+        providerRef: valeurs.providerRef,
         proofUrl,
       },
     })
@@ -318,10 +376,10 @@ async function declarer() {
     const auto = (reponse as { autoConfirmee?: boolean } | undefined)?.autoConfirmee === true
 
     messageDeclaration.value = !partie
-      ? 'Pas de réseau : ta déclaration est gardée et partira toute seule à la reconnexion. Tu n’as rien à refaire.'
+      ? t('tontine.cotiser.pas_de_reseau_ta')
       : auto
-        ? 'Cotisation enregistrée et confirmée d’office : personne d’autre au bureau ne pouvait la vérifier. Le registre en garde la trace.'
-        : 'Déclaration enregistrée. Le trésorier va la confirmer.'
+        ? t('tontine.cotiser.cotisation_enregistree_et_confirmee')
+        : t('tontine.cotiser.declaration_enregistree_le_tresorier')
 
     demarrerVerrou()
     preuve.value = null
@@ -340,8 +398,8 @@ async function declarer() {
     // Une seconde déclaration sur une cotisation déjà déclarée : message
     // explicite, jamais un doublon silencieux.
     messageDeclaration.value = err.data?.error?.code === 'INVALID_TRANSITION'
-      ? 'Cette cotisation a déjà été déclarée. Attends la confirmation du trésorier.'
-      : (err.data?.error?.message ?? 'Impossible d’enregistrer la déclaration.')
+      ? t('tontine.cotiser.cette_cotisation_a_deja')
+      : (err.data?.error?.message ?? t('tontine.cotiser.impossible_d_enregistrer_la'))
   }
   finally {
     envoi.value = false
@@ -350,10 +408,10 @@ async function declarer() {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Cotiser',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.cotiser.cotiser'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Cotiser — eTontine' })
+useHead({ title: t('tontine.cotiser.cotiser_etontine') })
 </script>
 
 <template>
@@ -374,8 +432,8 @@ useHead({ title: 'Cotiser — eTontine' })
 
     <EmptyState
       v-else-if="etat === 'vide'"
-      title="Aucun tour ouvert"
-      description="Il n’y a rien à cotiser pour l’instant. Tu seras prévenu à l’ouverture du prochain tour."
+      :title="$t('tontine.cotiser.aucun_tour_ouvert')"
+      :description="$t('tontine.cotiser.il_n_y_a')"
       icon="lucide:calendar"
     />
 
@@ -392,13 +450,13 @@ useHead({ title: 'Cotiser — eTontine' })
       <Stepper v-model:value="etape">
         <StepList>
           <Step value="1">
-            Récapitulatif
+            {{ $t('tontine.cotiser.recapitulatif') }}
           </Step>
           <Step value="2">
-            Où envoyer
+            {{ $t('tontine.cotiser.ou_envoyer') }}
           </Step>
           <Step value="3">
-            Déclaration
+            {{ $t('tontine.cotiser.declaration') }}
           </Step>
         </StepList>
 
@@ -407,7 +465,7 @@ useHead({ title: 'Cotiser — eTontine' })
           <StepPanel value="1">
             <div class="flex flex-col gap-3">
               <p class="text-sm text-ink-muted">
-                Tour {{ tour?.index }} · à verser avant le {{ tour?.dueDate }}
+                {{ $t('tontine.cotiser.tour_p0_a_verser', { p0: tour?.index, p1: tour?.dueDate }) }}
               </p>
 
               <p
@@ -415,8 +473,7 @@ useHead({ title: 'Cotiser — eTontine' })
                 class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
                 data-testid="avertissement-parts-multiples"
               >
-                Tu as {{ cotisations.length }} parts dans cette tontine : il y a
-                donc {{ cotisations.length }} cotisations à verser ce tour-ci.
+                {{ $t('tontine.cotiser.tu_as_p0_parts', { p0: cotisations.length, p1: cotisations.length }) }}
               </p>
 
               <!-- Un versement enregistré pour moi, que je n'ai pas déclaré.
@@ -436,12 +493,12 @@ useHead({ title: 'Cotiser — eTontine' })
                     aria-hidden="true"
                   />
                   <span>
-                    Le bureau a enregistré un versement en espèces de
+                    {{ $t('tontine.cotiser.le_bureau_a_enregistre') }}
                     <AmountDisplay
                       :amount="declaration.amount"
                       size="sm"
                     />
-                    à ton nom. Est-ce exact ?
+                    {{ $t('tontine.cotiser.a_ton_nom_est') }}
                   </span>
                 </p>
 
@@ -450,16 +507,16 @@ useHead({ title: 'Cotiser — eTontine' })
                     class="flex flex-col gap-1.5 text-sm font-medium text-declared-ink"
                     :for="`motif-contestation-${declaration.id}`"
                   >
-                    Qu’est-ce qui ne va pas ?
+                    {{ $t('tontine.cotiser.qu_est_ce_qui') }}
                     <InputText
                       :id="`motif-contestation-${declaration.id}`"
                       v-model="motifContestation[declaration.id]"
-                      placeholder="Je n’ai rien remis ce mois-ci"
+                      :placeholder="$t('tontine.cotiser.je_n_ai_rien')"
                       :data-testid="`champ-motif-contestation-${declaration.id}`"
                     />
                   </label>
                   <Button
-                    :label="decisionEnCours === declaration.id ? 'Envoi…' : 'Envoyer la contestation'"
+                    :label="decisionEnCours === declaration.id ? $t('commun.envoi_en_cours') : $t('tontine.cotiser.envoyer_la_contestation')"
                     :disabled="decisionEnCours !== null
                       || (motifContestation[declaration.id]?.trim().length ?? 0) < 5"
                     class="bg-brand text-brand-ink hover:bg-brand-strong"
@@ -473,14 +530,14 @@ useHead({ title: 'Cotiser — eTontine' })
                   class="flex flex-col gap-2 sm:flex-row"
                 >
                   <Button
-                    :label="decisionEnCours === declaration.id ? 'Envoi…' : 'Oui, c’est exact'"
+                    :label="decisionEnCours === declaration.id ? $t('commun.envoi_en_cours') : $t('tontine.cotiser.oui_c_est_exact')"
                     :disabled="decisionEnCours !== null"
                     class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
                     :data-testid="`bouton-reconnaitre-${declaration.id}`"
                     @click="reconnaitre(declaration.id)"
                   />
                   <Button
-                    label="Non, ce n’est pas exact"
+                    :label="$t('tontine.cotiser.non_ce_n_est')"
                     :disabled="decisionEnCours !== null"
                     class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                     :data-testid="`bouton-ouvrir-contestation-${declaration.id}`"
@@ -502,7 +559,7 @@ useHead({ title: 'Cotiser — eTontine' })
                   <div class="flex items-center justify-between gap-3">
                     <div class="flex flex-col gap-1">
                       <span class="text-sm text-ink-muted">
-                        Part en position {{ cotisation.rotationPosition }}
+                        {{ $t('tontine.cotiser.part_en_position_p0', { p0: cotisation.rotationPosition }) }}
                       </span>
                       <AmountDisplay
                         :amount="cotisation.expectedAmount - cotisation.confirmedAmount"
@@ -518,7 +575,7 @@ useHead({ title: 'Cotiser — eTontine' })
                       />
                       <Button
                         v-if="cotisation.status === 'due' || cotisation.status === 'late'"
-                        label="Envoyer"
+                        :label="$t('tontine.cotiser.envoyer')"
                         class="bg-brand text-brand-ink hover:bg-brand-strong"
                         :data-testid="`bouton-envoyer-${cotisation.id}`"
                         @click="choisir(cotisation.id)"
@@ -534,8 +591,7 @@ useHead({ title: 'Cotiser — eTontine' })
                   >
                     <template v-if="recus[confirmeeDe(cotisation.id)!.id]">
                       <p class="text-sm text-ink-muted">
-                        Ce lien vaut preuve, et s’ouvre sans compte. Il expire au
-                        bout d’un an.
+                        {{ $t('tontine.cotiser.ce_lien_vaut_preuve') }}
                       </p>
                       <div class="flex flex-col gap-2 sm:flex-row">
                         <a
@@ -545,10 +601,10 @@ useHead({ title: 'Cotiser — eTontine' })
                           class="min-h-touch inline-flex flex-1 items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink"
                           :data-testid="`lien-recu-${cotisation.id}`"
                         >
-                          Ouvrir le reçu
+                          {{ $t('tontine.cotiser.ouvrir_le_recu') }}
                         </a>
                         <Button
-                          :label="copie ? 'Copié' : 'Copier le lien'"
+                          :label="copie ? $t('commun.copie') : $t('commun.copier_le_lien')"
                           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                           :data-testid="`bouton-copier-recu-${cotisation.id}`"
                           @click="copier(recus[confirmeeDe(cotisation.id)!.id]!)"
@@ -558,13 +614,49 @@ useHead({ title: 'Cotiser — eTontine' })
 
                     <Button
                       v-else
-                      :label="recuEnCours === confirmeeDe(cotisation.id)!.id ? 'Préparation…' : 'Obtenir mon reçu'"
+                      :label="recuEnCours === confirmeeDe(cotisation.id)!.id ? $t('commun.preparation_en_cours') : $t('tontine.cotiser.obtenir_mon_recu')"
                       :disabled="recuEnCours !== null"
                       class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                       :data-testid="`bouton-recu-${cotisation.id}`"
                       @click="obtenirRecu(confirmeeDe(cotisation.id)!.id)"
                     />
                   </div>
+
+                  <!-- Déclarée sans capture — hors réseau, ou sans y penser :
+                       on peut la joindre tant que le trésorier n'a pas tranché. -->
+                  <label
+                    v-if="cotisation.status === 'declared' && sansPreuveDe(cotisation.id)"
+                    class="flex min-h-touch cursor-pointer items-center gap-2 text-sm font-semibold text-brand underline underline-offset-4"
+                    :for="`preuve-tardive-${cotisation.id}`"
+                  >
+                    <Icon
+                      name="lucide:paperclip"
+                      size="1rem"
+                      aria-hidden="true"
+                    />
+                    {{ preuveEnCours === sansPreuveDe(cotisation.id)!.id ? $t('tontine.cotiser.envoi_de_la_capture') : $t('tontine.cotiser.joindre_la_capture_de') }}
+                    <input
+                      :id="`preuve-tardive-${cotisation.id}`"
+                      type="file"
+                      accept="image/*"
+                      class="sr-only"
+                      :disabled="preuveEnCours !== null"
+                      :data-testid="`champ-preuve-tardive-${cotisation.id}`"
+                      @change="joindrePreuve(sansPreuveDe(cotisation.id)!.id, $event)"
+                    >
+                  </label>
+                  <p
+                    v-else-if="cotisation.status === 'declared' && declarations.find(d => d.contributionId === cotisation.id && d.decision === 'pending')?.proofUrl"
+                    class="flex items-center gap-2 text-sm text-ink-muted"
+                    :data-testid="`preuve-jointe-${cotisation.id}`"
+                  >
+                    <Icon
+                      name="lucide:paperclip"
+                      size="1rem"
+                      aria-hidden="true"
+                    />
+                    {{ $t('tontine.cotiser.capture_jointe') }}
+                  </p>
 
                   <!-- « Contesté » sans le motif ne dit pas quoi corriger : on
                        renvoie la même chose, et on se fait rejeter à nouveau. -->
@@ -580,7 +672,7 @@ useHead({ title: 'Cotiser — eTontine' })
                       aria-hidden="true"
                     />
                     <span>
-                      <strong class="font-semibold">Ta déclaration a été rejetée.</strong>
+                      <strong class="font-semibold">{{ $t('tontine.cotiser.ta_declaration_a_ete') }}</strong>
                       {{ rejetDe(cotisation.id)?.rejectionReason }}
                     </span>
                   </p>
@@ -588,7 +680,7 @@ useHead({ title: 'Cotiser — eTontine' })
               </ul>
 
               <p class="text-sm text-ink-muted">
-                Total restant à verser :
+                {{ $t('tontine.cotiser.total_restant_a_verser') }}
                 <AmountDisplay :amount="restantTotal" />
               </p>
             </div>
@@ -605,7 +697,7 @@ useHead({ title: 'Cotiser — eTontine' })
               />
 
               <Button
-                label="J’ai envoyé"
+                :label="$t('tontine.cotiser.j_ai_envoye')"
                 class="bg-brand text-brand-ink hover:bg-brand-strong"
                 data-testid="bouton-jai-envoye"
                 @click="etape = '3'"
@@ -617,44 +709,45 @@ useHead({ title: 'Cotiser — eTontine' })
           <StepPanel value="3">
             <div class="flex flex-col gap-4">
               <p class="text-base text-ink">
-                As-tu bien envoyé le montant depuis ton téléphone ?
+                {{ $t('tontine.cotiser.as_tu_bien_envoye') }}
               </p>
               <p class="text-sm text-ink-muted">
-                Déclare ton envoi : le trésorier le confirmera ensuite. Tant
-                qu’il ne l’a pas fait, ta cotisation reste au statut
-                « Déclaré ».
+                {{ $t('tontine.cotiser.declare_ton_envoi_le') }}
               </p>
 
               <label
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 for="montant-declare"
               >
-                Montant envoyé (FCFA)
+                {{ $t('tontine.cotiser.montant_envoye_fcfa') }}
                 <InputText
                   id="montant-declare"
                   :value="montantDeclare"
                   inputmode="numeric"
+                  :aria-invalid="Boolean(formulaireDeclaration.erreur('amount'))"
                   data-testid="champ-montant-declare"
                   @input="montantDeclare = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
                 />
+                <ErreurChamp :message="formulaireDeclaration.erreur('amount')" />
               </label>
 
               <label
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 for="canal-declare"
               >
-                Par quel moyen ?
+                {{ $t('tontine.cotiser.par_quel_moyen') }}
                 <select
                   id="canal-declare"
                   v-model="canalDeclare"
+                  v-bind="canalDeclareAttrs"
                   class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-base text-ink"
                   data-testid="champ-canal-declare"
                 >
-                  <option value="wave">Wave</option>
-                  <option value="orange">Orange Money</option>
-                  <option value="mtn">MTN MoMo</option>
-                  <option value="moov">Moov Money</option>
-                  <option value="cash">Espèces</option>
+                  <option value="wave">{{ $t('tontine.cotiser.wave') }}</option>
+                  <option value="orange">{{ $t('tontine.cotiser.orange_money') }}</option>
+                  <option value="mtn">{{ $t('tontine.cotiser.mtn_momo') }}</option>
+                  <option value="moov">{{ $t('tontine.cotiser.moov_money') }}</option>
+                  <option value="cash">{{ $t('tontine.cotiser.especes') }}</option>
                 </select>
               </label>
 
@@ -662,19 +755,23 @@ useHead({ title: 'Cotiser — eTontine' })
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 for="reference-transaction"
               >
-                Référence de la transaction (facultatif)
+                {{ $t('tontine.cotiser.reference_de_la_transaction') }}
                 <InputText
                   id="reference-transaction"
                   v-model="reference"
+                  v-bind="referenceAttrs"
+                  maxlength="64"
+                  :aria-invalid="Boolean(formulaireDeclaration.erreur('providerRef'))"
                   data-testid="champ-reference-transaction"
                 />
+                <ErreurChamp :message="formulaireDeclaration.erreur('providerRef')" />
               </label>
 
               <label
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 for="preuve"
               >
-                Capture du paiement (facultatif)
+                {{ $t('tontine.cotiser.capture_du_paiement_facultatif') }}
                 <input
                   id="preuve"
                   type="file"
@@ -688,15 +785,15 @@ useHead({ title: 'Cotiser — eTontine' })
                   class="text-sm font-normal text-ink-subtle"
                   data-testid="poids-preuve"
                 >
-                  Image compressée à {{ Math.round(poidsPreuve / 1024) }} Ko avant envoi.
+                  {{ $t('tontine.cotiser.image_compressee_a_p0', { p0: Math.round(poidsPreuve / 1024) }) }}
                 </span>
               </label>
 
               <Button
                 :label="envoi
-                  ? 'Envoi…'
-                  : (verrou > 0 ? `Déjà déclaré (${verrou} s)` : 'Déclarer mon envoi')"
-                :disabled="envoi || verrou > 0 || montantDeclare <= 0"
+                  ? $t('commun.envoi_en_cours')
+                  : (verrou > 0 ? $t('tontine.cotiser.deja_declare_s', { s: verrou }) : $t('tontine.cotiser.declarer_mon_envoi'))"
+                :disabled="envoi || verrou > 0 || (montantDeclare ?? 0) <= 0"
                 class="bg-brand text-brand-ink hover:bg-brand-strong"
                 data-testid="bouton-declarer"
                 @click="declarer"

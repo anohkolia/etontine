@@ -16,6 +16,7 @@
  * le hors-ligne, et un HTML figé porterait la barre à un visiteur déconnecté.
  */
 definePageMeta({ layout: false })
+const { t } = useI18n()
 
 const session = useSessionStore()
 onMounted(() => session.charger())
@@ -26,58 +27,45 @@ onMounted(() => session.charger())
  * par défaut — c'est ce que voit un visiteur, et c'est ce qui est mis en cache.
  */
 const retour = computed(() => session.connecte
-  ? { to: '/app', label: 'Mes tontines' }
-  : { to: '/', label: 'Retour à l’accueil' })
+  ? { to: '/app', label: t('commun.mes_tontines') }
+  : { to: '/', label: t('commun.retour_accueil') })
 
 useHead({
-  title: 'Aide — eTontine',
+  title: t('public.aide.aide_etontine'),
   meta: [{
     name: 'description',
-    content: 'Comment fonctionne eTontine : cotiser, confirmer, verser le pot.',
+    content: t('public.aide.comment_fonctionne_etontine_cotiser'),
   }],
 })
 
 const questions = [
   {
-    q: 'L’application garde-t-elle mon argent ?',
-    r: 'Non, jamais. Tu envoies directement sur le numéro de collecte de '
-      + 'l’organisateur, avec ton application de paiement habituelle. '
-      + 'L’application sert à déclarer ton envoi et à tenir le registre du groupe.',
+    q: t('public.aide.l_application_garde_t'),
+    r: t('public.aide.non_jamais_tu_envoies'),
   },
   {
-    q: 'Quelle différence entre « déclaré » et « confirmé » ?',
-    r: 'Déclaré veut dire que tu as annoncé ton envoi. Confirmé veut dire que '
-      + 'le trésorier l’a retrouvé sur son compte. Tant que ce n’est pas '
-      + 'confirmé, ta cotisation n’est pas comptée dans le pot.',
+    q: t('public.aide.quelle_difference_entre_declare'),
+    r: t('public.aide.declare_veut_dire_que'),
   },
   {
-    q: 'J’ai deux parts. Pourquoi deux cotisations ?',
-    r: 'Une part, c’est une place dans la rotation. Avec deux parts, tu prends '
-      + 'la main deux fois sur le cycle, et tu cotises donc deux fois par tour.',
+    q: t('public.aide.j_ai_deux_parts'),
+    r: t('public.aide.une_part_c_est'),
   },
   {
-    q: 'Je n’ai pas de réseau. Ma déclaration est-elle perdue ?',
-    r: 'Non. Elle est gardée sur ton téléphone et partira toute seule dès que '
-      + 'le réseau revient. Tu n’as rien à refaire, et elle ne partira pas en double.',
+    q: t('public.aide.je_n_ai_pas'),
+    r: t('public.aide.non_elle_est_gardee'),
   },
   {
-    q: 'Comment savoir que j’envoie au bon numéro ?',
-    r: 'L’écran « où envoyer » affiche toujours le nom du titulaire du compte. '
-      + 'Vérifie que ce nom s’affiche bien dans ton application de paiement '
-      + 'avant de valider. Si le numéro a changé récemment, un avertissement '
-      + 'apparaît : appelle le bureau avant d’envoyer.',
+    q: t('public.aide.comment_savoir_que_j'),
+    r: t('public.aide.l_ecran_ou_envoyer'),
   },
   {
-    q: 'Le registre peut-il être modifié après coup ?',
-    r: 'Non. Chaque écriture est liée à la précédente par une empreinte : '
-      + 'modifier ou supprimer une ligne casse la chaîne, et le contrôle du '
-      + 'registre le signale. N’importe quel membre peut lancer ce contrôle.',
+    q: t('public.aide.le_registre_peut_il'),
+    r: t('public.aide.non_chaque_ecriture_est'),
   },
   {
-    q: 'Une erreur a été enregistrée. Que faire ?',
-    r: 'Rien ne s’efface au registre. Ouvre une contestation depuis l’écriture '
-      + 'concernée : le bureau doit y répondre, et la correction s’ajoute à '
-      + 'côté. La trace de l’erreur reste visible de tous.',
+    q: t('public.aide.une_erreur_a_ete'),
+    r: t('public.aide.rien_ne_s_efface'),
   },
 ]
 </script>
@@ -115,10 +103,10 @@ const questions = [
           {{ retour.label }}
         </NuxtLink>
         <h1 class="mt-2 text-2xl font-bold">
-          Aide
+          {{ $t('public.aide.aide') }}
         </h1>
         <p class="mt-1 text-night-ink/75">
-          Les questions qui reviennent le plus souvent.
+          {{ $t('public.aide.les_questions_qui_reviennent') }}
         </p>
       </div>
     </header>

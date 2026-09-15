@@ -8,6 +8,7 @@
  * s'inscrire pour découvrir un engagement qu'on refusera peut-être.
  */
 definePageMeta({ layout: false })
+const { t } = useI18n()
 
 const route = useRoute()
 const token = route.params.token as string
@@ -74,8 +75,8 @@ async function rejoindre() {
     )
     adhesion.value = 'faite'
     messageAdhesion.value = resultat.status === 'active'
-      ? 'Tu fais partie de cette tontine.'
-      : 'Ta demande est envoyée. Le président doit l’accepter.'
+      ? t('public.join.tu_fais_partie_de')
+      : t('public.join.ta_demande_est_envoyee')
   }
   catch (e) {
     adhesion.value = 'repos'
@@ -83,14 +84,14 @@ async function rejoindre() {
     if (err.data?.error?.code === 'KYC_REQUIRED') {
       return navigateTo({ path: '/app/profil', query: { redirect: route.fullPath, palier: '1' } })
     }
-    messageAdhesion.value = err.data?.error?.message ?? 'Impossible de rejoindre pour l’instant.'
+    messageAdhesion.value = err.data?.error?.message ?? t('public.join.impossible_de_rejoindre_pour')
   }
 }
 
 onMounted(() => session.charger())
 
 useHead(() => ({
-  title: apercu.value ? `Rejoindre ${apercu.value.name} — eTontine` : 'Invitation — eTontine',
+  title: apercu.value ? `Rejoindre ${apercu.value.name} — eTontine` : t('public.join.invitation_etontine'),
 }))
 </script>
 
@@ -111,8 +112,8 @@ useHead(() => ({
            un bouton de reprise — ce sont deux situations différentes. -->
       <EmptyState
         v-else-if="error && error.statusCode === 404"
-        title="Ce lien n’est plus valable"
-        description="Il a peut-être expiré, ou déjà servi au maximum de fois prévu. Demande un nouveau lien à l’organisateur."
+        :title="$t('public.join.ce_lien_n_est')"
+        :description="$t('public.join.il_a_peut_etre')"
         icon="lucide:link-2-off"
       />
 
@@ -125,7 +126,7 @@ useHead(() => ({
       <template v-else-if="apercu">
         <header class="flex flex-col gap-2">
           <p class="text-sm text-ink-muted">
-            Tu es invité à rejoindre
+            {{ $t('public.join.tu_es_invite_a') }}
           </p>
           <h1
             class="text-2xl font-bold text-ink"
@@ -146,7 +147,7 @@ useHead(() => ({
         <dl class="flex flex-col gap-3 card-surface p-4">
           <div class="flex items-baseline justify-between gap-3">
             <dt class="text-sm text-ink-muted">
-              Le président
+              {{ $t('public.join.le_president') }}
             </dt>
             <dd
               class="font-medium text-ink"
@@ -157,7 +158,7 @@ useHead(() => ({
           </div>
           <div class="flex items-baseline justify-between gap-3">
             <dt class="text-sm text-ink-muted">
-              Montant d’une part
+              {{ $t('public.join.montant_d_une_part') }}
             </dt>
             <dd data-testid="montant">
               <AmountDisplay
@@ -168,23 +169,23 @@ useHead(() => ({
           </div>
           <div class="flex items-baseline justify-between gap-3">
             <dt class="text-sm text-ink-muted">
-              Fréquence
+              {{ $t('public.join.frequence') }}
             </dt>
             <dd
               class="font-medium text-ink"
               data-testid="frequence"
             >
               {{ {
-                daily: 'Chaque jour',
-                weekly: 'Chaque semaine',
-                biweekly: 'Tous les quinze jours',
-                monthly: 'Chaque mois',
+                daily: $t('public.join.chaque_jour'),
+                weekly: $t('public.join.chaque_semaine'),
+                biweekly: $t('public.join.tous_les_quinze_jours'),
+                monthly: $t('public.join.chaque_mois'),
               }[apercu.frequency] }}
             </dd>
           </div>
           <div class="flex items-baseline justify-between gap-3">
             <dt class="text-sm text-ink-muted">
-              Membres
+              {{ $t('public.join.membres') }}
             </dt>
             <dd
               class="font-medium text-ink"
@@ -209,8 +210,7 @@ useHead(() => ({
           class="card-surface p-4 text-sm text-ink-muted"
           data-testid="engagement-indisponible"
         >
-          Les parts ne sont pas encore attribuées : le montant total de
-          l’engagement sera connu au démarrage.
+          {{ $t('public.join.les_parts_ne_sont') }}
         </p>
 
         <p
@@ -236,13 +236,10 @@ useHead(() => ({
             aria-hidden="true"
           />
           <span v-if="dejaDemarree">
-            Cette tontine a déjà commencé : l’ordre de passage est fixé et elle
-            n’accueille plus de nouveaux membres. Si le bureau t’a déjà inscrit,
-            tu peux quand même confirmer ton compte ici.
+            {{ $t('public.join.cette_tontine_a_deja') }}
           </span>
           <span v-else>
-            Le groupe est complet. Demande au président s’il peut te faire une
-            place avant de continuer.
+            {{ $t('public.join.le_groupe_est_complet') }}
           </span>
         </p>
 
@@ -255,10 +252,10 @@ useHead(() => ({
           <Button
             v-if="adhesion !== 'faite'"
             :label="!session.chargee
-              ? 'Un instant…'
+              ? $t('public.join.un_instant')
               : (adhesion === 'envoi'
-                ? 'Envoi…'
-                : (session.connecte ? 'Rejoindre cette tontine' : 'Me connecter pour rejoindre'))"
+                ? $t('commun.envoi_en_cours')
+                : (session.connecte ? $t('public.join.rejoindre_cette_tontine') : $t('public.join.me_connecter_pour_rejoindre')))"
             :disabled="adhesion === 'envoi' || !session.chargee"
             class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
             data-testid="bouton-rejoindre"
@@ -270,7 +267,7 @@ useHead(() => ({
             class="min-h-touch flex w-full items-center justify-center rounded-control bg-brand px-5 font-semibold text-brand-ink"
             data-testid="lien-application"
           >
-            Aller à mes tontines
+            {{ $t('public.join.aller_a_mes_tontines') }}
           </NuxtLink>
         </div>
       </template>

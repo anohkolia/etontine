@@ -18,7 +18,7 @@ import tailwindcss from '@tailwindcss/vite'
  * interdit — et ce serait bien plus dangereux que le partage.
  */
 export default defineNuxtConfig({
-  modules: ['@nuxt/eslint', '@nuxt/icon', '@primevue/nuxt-module'],
+  modules: ['@nuxt/eslint', '@nuxt/icon', '@nuxtjs/i18n', '@primevue/nuxt-module'],
 
   // Les composants et composables du design system sont réutilisés, pas
   // recopiés : une seule définition de <StatusBadge> et de useMoney().
@@ -74,6 +74,21 @@ export default defineNuxtConfig({
   typescript: { strict: true, typeCheck: false },
 
   eslint: { config: { stylistic: true } },
+
+  /**
+   * Les composants réutilisés du design system lisent leurs mots dans le
+   * fichier de langue de l'application des membres — `<StatusBadge>`,
+   * `<ErrorState>`, `<OfflineBanner>`. Le back-office charge donc le même
+   * fichier : une seule liste de mots, deux applications qui les lisent.
+   */
+  i18n: {
+    restructureDir: fileURLToPath(new URL('../i18n', import.meta.url)),
+    locales: [{ code: 'fr', language: 'fr-CI', name: 'Français', file: 'fr.json' }],
+    defaultLocale: 'fr',
+    strategy: 'no_prefix',
+    detectBrowserLanguage: false,
+    compilation: { strictMessage: false },
+  },
 
   icon: {
     provider: 'none',

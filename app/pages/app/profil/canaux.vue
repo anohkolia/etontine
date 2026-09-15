@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { paymentChannel } from '#shared/schemas'
+import { collectionChannelInput } from '#shared/schemas'
 import type { z } from 'zod'
 import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
 
@@ -29,6 +30,8 @@ import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
  *    peut déclarer le numéro de n'importe qui.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
+const { canal: motDuCanal } = useLibelle()
 
 const { format: formatTel, extraire, estComplet } = usePhoneMask()
 
@@ -50,14 +53,40 @@ const erreur = ref<string | null>(null)
 /** Formulaire d'ajout. Replié tant qu'on n'a pas demandé à ajouter. */
 const ajoutOuvert = ref(false)
 const enCours = ref(false)
-const form = reactive({
-  provider: 'wave' as (typeof OPERATEURS)[number],
-  saisieNumero: '',
+/**
+ * Le formulaire est validé par `collectionChannelInput`, le schéma que le
+ * serveur applique : même règle sur le numéro, le titulaire et le lien.
+ *
+ * Le numéro est saisi au format local, masqué à l'écran, et posé dans le
+ * formulaire tel que tapé : c'est le schéma qui le normalise en E.164 à
+ * l'envoi, comme il le ferait côté serveur.
+ *
+ * Le lien de paiement — celui que Wave donne à un commerçant — était prévu
+ * par le modèle et affiché à l'écran « où envoyer » sans qu'aucun formulaire
+ * permette de le saisir. Facultatif ; vide, il n'est pas envoyé du tout.
+ */
+const formulaire = useFormulaire(collectionChannelInput, {
+  provider: 'wave',
+  msisdn: '',
   holderName: '',
+  paymentLinkUrl: undefined,
+})
+const [provider] = formulaire.champ('provider')
+const [holderName, holderNameAttrs] = formulaire.champ('holderName')
+const form = reactive({
+  saisieNumero: '',
+  paymentLinkUrl: '',
 })
 const numeroAffiche = computed(() => formatTel(form.saisieNumero))
+
+watch(() => form.saisieNumero, v => formulaire.setFieldValue('msisdn', v))
+watch(() => form.paymentLinkUrl, v => formulaire.setFieldValue('paymentLinkUrl', v.trim() || undefined))
+
+const lienValide = computed(() =>
+  form.paymentLinkUrl.trim() === '' || /^https:\/\/\S+$/.test(form.paymentLinkUrl.trim()),
+)
 const formValide = computed(() =>
-  estComplet(form.saisieNumero) && form.holderName.trim().length >= 3,
+  estComplet(form.saisieNumero) && (holderName.value ?? '').trim().length >= 3 && lienValide.value,
 )
 
 /** Vérification en cours : l'identifiant du canal, et le code saisi. */
@@ -77,7 +106,7 @@ onBeforeUnmount(() => clearInterval(minuterie))
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 function presentation(provider: string) {
@@ -98,19 +127,18 @@ async function charger() {
 
 async function ajouter() {
   erreur.value = null
+  const valeurs = await formulaire.valider()
+  if (!valeurs) return
   enCours.value = true
   try {
     const { id } = await $fetch<{ id: string }>('/api/v1/me/channels', {
       method: 'POST',
-      body: {
-        provider: form.provider,
-        msisdn: form.saisieNumero,
-        holderName: form.holderName.trim(),
-      },
+      body: valeurs,
     })
     ajoutOuvert.value = false
     form.saisieNumero = ''
-    form.holderName = ''
+    form.paymentLinkUrl = ''
+    formulaire.resetForm({ values: { provider: 'wave', msisdn: '', holderName: '', paymentLinkUrl: undefined } })
     await charger()
     // On enchaîne sur la vérification : un canal non vérifié ne sert à rien,
     // et repartir le chercher dans la liste est une étape de plus pour rien.
@@ -202,11 +230,11 @@ const auMoinsUnVerifie = computed(() => canaux.value.some(c => c.verifiedAt !== 
 onMounted(charger)
 
 useEnTete(() => ({
-  titre: 'Mes numéros de collecte',
-  sousTitre: 'Là où les membres envoient leurs cotisations',
-  retour: { to: '/app/profil', label: 'Mon profil' },
+  titre: t('profil.canaux.mes_numeros_de_collecte'),
+  sousTitre: t('profil.canaux.la_ou_les_membres'),
+  retour: { to: '/app/profil', label: t('commun.mon_profil') },
 }))
-useHead({ title: 'Mes numéros de collecte — eTontine' })
+useHead({ title: t('profil.canaux.mes_numeros_de_collecte_2') })
 </script>
 
 <template>
@@ -235,7 +263,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Revenir à ma tontine
+        {{ $t('profil.canaux.revenir_a_ma_tontine') }}
       </NuxtLink>
 
       <p
@@ -262,11 +290,10 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
       >
         <div class="flex flex-col gap-1">
           <h2 class="font-semibold text-ink">
-            Vérifie ce numéro
+            {{ $t('profil.canaux.verifie_ce_numero') }}
           </h2>
           <p class="text-sm text-ink-muted">
-            Un code à six chiffres vient de partir <strong class="text-ink">sur le numéro
-              de collecte lui-même</strong>. C’est ce qui prouve qu’il t’appartient.
+            {{ $t('profil.canaux.un_code_a_six') }} <strong class="text-ink">{{ $t('profil.canaux.sur_le_numero_de') }}</strong>{{ $t('profil.canaux.c_est_ce_qui') }}
           </p>
         </div>
 
@@ -282,12 +309,12 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
           class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
           data-testid="code-dev-canal"
         >
-          Développement — code : <strong>{{ verification.devCode }}</strong>
+          {{ $t('profil.canaux.developpement_code') }} <strong>{{ verification.devCode }}</strong>
         </p>
 
         <div class="flex flex-col gap-2">
           <Button
-            :label="enCours ? 'Vérification…' : 'Valider le code'"
+            :label="enCours ? $t('commun.verification_en_cours') : $t('profil.canaux.valider_le_code')"
             :disabled="verification.code.length !== 6 || enCours"
             class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
             data-testid="bouton-valider-canal"
@@ -301,15 +328,15 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
             @click="demanderCode(verification.canalId)"
           >
             {{ secondesAvantRenvoi > 0
-              ? `Renvoyer le code dans ${secondesAvantRenvoi} s`
-              : 'Renvoyer le code' }}
+              ? $t('profil.canaux.renvoyer_le_code_dans', { s: secondesAvantRenvoi })
+              : $t('commun.renvoyer_le_code') }}
           </button>
           <button
             type="button"
             class="min-h-touch text-sm text-ink-muted underline underline-offset-4"
             @click="verification = null"
           >
-            Plus tard
+            {{ $t('profil.canaux.plus_tard') }}
           </button>
         </div>
       </section>
@@ -317,8 +344,8 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
       <template v-else>
         <EmptyState
           v-if="canaux.length === 0 && !ajoutOuvert"
-          title="Aucun numéro de collecte"
-          description="C’est le numéro sur lequel tes membres enverront leurs cotisations. Il te faut au moins un numéro vérifié pour créer une tontine."
+          :title="$t('profil.canaux.aucun_numero_de_collecte')"
+          :description="$t('profil.canaux.c_est_le_numero')"
           icon="lucide:smartphone"
         >
           <template #action>
@@ -333,7 +360,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                 size="1rem"
                 aria-hidden="true"
               />
-              Ajouter un numéro
+              {{ $t('profil.canaux.ajouter_un_numero') }}
             </button>
           </template>
         </EmptyState>
@@ -371,7 +398,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                   size="0.875rem"
                   aria-hidden="true"
                 />
-                Vérifié
+                {{ $t('profil.canaux.verifie') }}
               </span>
               <span
                 v-else
@@ -383,7 +410,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                   size="0.875rem"
                   aria-hidden="true"
                 />
-                À vérifier
+                {{ $t('profil.canaux.a_verifier') }}
               </span>
             </div>
 
@@ -391,8 +418,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
               v-if="!canal.verifiedAt"
               class="text-sm text-ink-muted"
             >
-              Tant qu’il n’est pas vérifié, ce numéro ne peut pas recevoir les
-              cotisations d’une tontine.
+              {{ $t('profil.canaux.tant_qu_il_n') }}
             </p>
 
             <div class="flex flex-col gap-2 sm:flex-row">
@@ -404,7 +430,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                 :data-testid="`bouton-verifier-${canal.id}`"
                 @click="demanderCode(canal.id)"
               >
-                Vérifier par SMS
+                {{ $t('profil.canaux.verifier_par_sms') }}
               </button>
               <button
                 type="button"
@@ -417,7 +443,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                   size="1rem"
                   aria-hidden="true"
                 />
-                Retirer
+                {{ $t('profil.canaux.retirer') }}
               </button>
             </div>
           </li>
@@ -430,24 +456,24 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
           data-testid="formulaire-canal"
         >
           <h2 class="font-semibold text-ink">
-            Nouveau numéro de collecte
+            {{ $t('profil.canaux.nouveau_numero_de_collecte') }}
           </h2>
 
           <fieldset class="flex flex-col gap-2">
             <legend class="pb-1 text-sm font-medium text-ink-muted">
-              Service de paiement
+              {{ $t('profil.canaux.service_de_paiement') }}
             </legend>
             <div class="flex flex-wrap gap-2">
               <label
                 v-for="operateur in OPERATEURS"
                 :key="operateur"
                 class="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border px-3 text-sm font-semibold transition-colors"
-                :class="form.provider === operateur
+                :class="provider === operateur
                   ? 'border-brand bg-brand-surface text-brand-strong'
                   : 'border-line bg-surface text-ink-muted'"
               >
                 <input
-                  v-model="form.provider"
+                  v-model="provider"
                   type="radio"
                   :value="operateur"
                   class="sr-only"
@@ -458,7 +484,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                   size="1rem"
                   aria-hidden="true"
                 />
-                {{ presentation(operateur).label }}
+                {{ motDuCanal(operateur, presentation(operateur).label) }}
               </label>
             </div>
           </fieldset>
@@ -467,7 +493,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="numero-collecte"
           >
-            Numéro qui recevra les cotisations
+            {{ $t('profil.canaux.numero_qui_recevra_les') }}
             <span class="flex items-stretch gap-2">
               <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface-muted px-3 text-base font-semibold text-ink">
                 +225
@@ -478,34 +504,64 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
                 inputmode="tel"
                 placeholder="07 07 12 34 56"
                 class="text-lg tracking-wider tabular-nums"
+                :aria-invalid="Boolean(formulaire.erreur('msisdn'))"
                 data-testid="champ-numero-collecte"
                 @input="(e: Event) => form.saisieNumero = extraire((e.target as HTMLInputElement).value)"
               />
             </span>
+            <ErreurChamp :message="formulaire.erreur('msisdn')" />
           </label>
 
           <label
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="titulaire"
           >
-            Nom du titulaire du compte
+            {{ $t('profil.canaux.nom_du_titulaire_du') }}
             <InputText
               id="titulaire"
-              v-model="form.holderName"
-              placeholder="Aya Koné"
+              v-model="holderName"
+              v-bind="holderNameAttrs"
+              :placeholder="$t('profil.canaux.aya_kone')"
+              :aria-invalid="Boolean(formulaire.erreur('holderName'))"
               data-testid="champ-titulaire"
             />
+            <ErreurChamp :message="formulaire.erreur('holderName')" />
             <!-- Obligatoire, et on dit pourquoi : c'est ce nom que le membre
                  compare à ce qu'affiche son application avant de valider. -->
             <span class="text-sm font-normal text-ink-subtle">
-              Écris-le exactement comme il apparaît dans ton application de
-              paiement. C’est ce nom que tes membres vérifieront avant d’envoyer.
+              {{ $t('profil.canaux.ecris_le_exactement_comme') }}
+            </span>
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="lien-paiement"
+          >
+            {{ $t('profil.canaux.lien_de_paiement_facultatif') }}
+            <InputText
+              id="lien-paiement"
+              v-model="form.paymentLinkUrl"
+              type="url"
+              inputmode="url"
+              :placeholder="$t('profil.canaux.https_pay_wave_com')"
+              data-testid="champ-lien-paiement"
+            />
+            <span class="text-sm font-normal text-ink-subtle">
+              {{ $t('profil.canaux.si_ton_application_te') }}
+            </span>
+            <span
+              v-if="!lienValide"
+              class="text-sm font-normal text-disputed-ink"
+              role="alert"
+              data-testid="erreur-lien-paiement"
+            >
+              {{ $t('profil.canaux.le_lien_doit_commencer') }}
             </span>
           </label>
 
           <div class="flex flex-col gap-2">
             <Button
-              :label="enCours ? 'Enregistrement…' : 'Ajouter et vérifier'"
+              :label="enCours ? $t('profil.canaux.enregistrement') : $t('profil.canaux.ajouter_et_verifier')"
               :disabled="!formValide || enCours"
               class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
               data-testid="bouton-ajouter-canal"
@@ -516,7 +572,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
               class="min-h-touch text-sm text-ink-muted underline underline-offset-4"
               @click="ajoutOuvert = false"
             >
-              Annuler
+              {{ $t('profil.canaux.annuler') }}
             </button>
           </div>
         </section>
@@ -533,7 +589,7 @@ useHead({ title: 'Mes numéros de collecte — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Ajouter un numéro
+          {{ $t('profil.canaux.ajouter_un_numero') }}
         </button>
       </template>
     </template>

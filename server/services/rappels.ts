@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, notificationPreferences, rounds, shares, tontines, users,
@@ -98,6 +98,9 @@ export function envoyerRappels(db: Db, maintenant: Date = new Date()): RappelEnv
 
     if (!JOURS_DE_RAPPEL.includes(joursAvant)) continue
 
+    // Un membre déclaré défaillant n'est plus relancé automatiquement
+    // (docs/data-model.md §2.2) : ce qu'il doit est au registre, et le
+    // rappeler chaque semaine n'y changerait rien.
     const aRelancer = db
       .select({ membershipId: contributions.membershipId, userId: memberships.userId })
       .from(contributions)
@@ -105,6 +108,7 @@ export function envoyerRappels(db: Db, maintenant: Date = new Date()): RappelEnv
       .where(and(
         eq(contributions.roundId, round.id),
         inArray(contributions.status, ['due', 'late']),
+        ne(memberships.status, 'defaulted'),
       ))
       .all()
 

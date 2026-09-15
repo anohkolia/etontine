@@ -4,6 +4,7 @@ import type { useDb } from '../db/index.ts'
 import { otpRequests, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
 import { isDevOrTest } from '../utils/env.ts'
+import { envoyerMessage, texteCode } from './sms.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -124,19 +125,13 @@ export async function requestOtp(
 }
 
 /**
- * Envoi du code.
+ * Envoi du code, par le fournisseur configuré (`server/services/sms.ts`).
  *
- * Aucun opérateur SMS n'est branché à ce stade : le code est écrit dans les
- * journaux du serveur. Le point d'entrée unique est ici, pour que le
- * branchement d'un fournisseur ne touche qu'une fonction.
+ * En production, un fournisseur absent fait échouer la demande : un code qui
+ * n'est pas parti ne doit pas être annoncé comme envoyé.
  */
 async function livrerCode(phone: string, code: string, canal: 'sms' | 'voice'): Promise<void> {
-  if (isDevOrTest()) {
-    console.info(`[otp] ${canal} vers ${phone} : ${code}`)
-    return
-  }
-  // TODO(T-hors-périmètre) : brancher l'opérateur SMS / vocal.
-  console.info(`[otp] ${canal} vers ${phone} : envoi non configuré`)
+  await envoyerMessage({ to: phone, message: texteCode(code, canal), channel: canal })
 }
 
 export interface OtpVerifyResult {
@@ -151,6 +146,24 @@ export interface OtpVerifyResult {
  * la base de comptes fantômes en saisissant des numéros au hasard.
  */
 export async function verifyOtp(db: Db, phone: string, code: string): Promise<OtpVerifyResult> {
+  consommerCode(db, phone, code)
+
+  const [existant] = db.select().from(users).where(eq(users.phone, phone)).limit(1).all()
+  if (existant) return { userId: existant.id, isNewUser: false }
+
+  const userId = randomUUID()
+  db.insert(users).values({ id: userId, phone, kycLevel: 0 }).run()
+  return { userId, isNewUser: true }
+}
+
+/**
+ * Vérifie un code et le consomme, **sans rien créer**.
+ *
+ * C'est la brique commune de la connexion et du changement de numéro : dans
+ * le second cas, le compte existe déjà et c'est un autre numéro qu'on prouve.
+ * Lever l'erreur ici plutôt que renvoyer faux garde un seul message par cas.
+ */
+export function consommerCode(db: Db, phone: string, code: string): void {
   const [demande] = db
     .select()
     .from(otpRequests)
@@ -184,13 +197,6 @@ export async function verifyOtp(db: Db, phone: string, code: string): Promise<Ot
     .set({ consumedAt: new Date() })
     .where(eq(otpRequests.id, demande.id))
     .run()
-
-  const [existant] = db.select().from(users).where(eq(users.phone, phone)).limit(1).all()
-  if (existant) return { userId: existant.id, isNewUser: false }
-
-  const userId = randomUUID()
-  db.insert(users).values({ id: userId, phone, kycLevel: 0 }).run()
-  return { userId, isNewUser: true }
 }
 
 /** Nombre d'échecs sur la dernière demande en cours — pilote l'offre d'appel vocal. */

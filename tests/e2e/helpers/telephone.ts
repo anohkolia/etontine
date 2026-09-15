@@ -10,9 +10,16 @@
  */
 let compteur = 0
 
+/**
+ * L'indice du processus Playwright entre dans le numéro : deux tests lancés
+ * dans la même milliseconde par deux processus partaient du même compteur et
+ * tombaient sur le même numéro — puis sur la limitation de débit, à tort.
+ */
+const PROCESSUS = Number(process.env.TEST_WORKER_INDEX ?? 0) % 10
+
 export function numeroDeTest(): string {
   compteur++
-  const graine = (Date.now() % 100_000) * 100 + (compteur % 100)
+  const graine = (Date.now() % 10_000) * 1000 + PROCESSUS * 100 + (compteur % 100)
   return `07${String(graine).padStart(8, '0').slice(-8)}`
 }
 

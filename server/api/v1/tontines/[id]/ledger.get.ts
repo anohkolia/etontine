@@ -23,5 +23,6 @@ export default defineEventHandler(async (event) => {
     roundId: typeof q.roundId === 'string' ? q.roundId : undefined,
     type: typeof q.type === 'string' ? q.type as LedgerType : undefined,
     limit: q.limit ? Number(q.limit) : undefined,
+    cursor: typeof q.cursor === 'string' && /^\d+$/.test(q.cursor) ? Number(q.cursor) : undefined,
   })
 })

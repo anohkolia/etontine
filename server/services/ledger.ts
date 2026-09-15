@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, lt } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { ledgerEntries } from '../db/schema.ts'
 import type { LedgerEntry, LedgerType } from '../db/schema.ts'
@@ -193,6 +193,11 @@ export function readLedger(
 
   if (options.roundId) conditions.push(eq(ledgerEntries.roundId, options.roundId))
   if (options.type) conditions.push(eq(ledgerEntries.type, options.type))
+  // Le curseur est la position de la dernière écriture rendue : la page
+  // suivante commence juste en dessous. Il était accepté et jamais appliqué —
+  // un registre de plus de cent écritures perdait tout ce qui précédait, et
+  // une tontine de douze membres y arrive au quatrième tour.
+  if (options.cursor !== undefined) conditions.push(lt(ledgerEntries.position, options.cursor))
 
   const lignes = db
     .select()

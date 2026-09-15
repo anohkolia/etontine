@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
-import { contributions, memberships, rounds, shares, tontines, users } from '../db/schema.ts'
+import { contributions, memberships, payouts, rounds, shares, tontines, users } from '../db/schema.ts'
 import type { MembershipRole } from '../../shared/schemas/index.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
 import { appendLedger } from './ledger.ts'
+import { notifier, notifierTontine } from './notifications.ts'
 import { genererGraine, melangerAvecGraine } from './rotation.ts'
 
 type Db = ReturnType<typeof useDb>
@@ -238,9 +239,244 @@ export function definirRotation(
   return { mode: input.mode, seed: graine, order: ordre }
 }
 
-/** Change le rôle d'un membre dans la tontine. Le rôle est par tontine. */
-export function definirRole(db: Db, membershipId: string, role: MembershipRole) {
+/** Le nom affichable d'une adhésion : le compte s'il existe, la saisie du bureau sinon. */
+function nomDe(db: Db, m: typeof memberships.$inferSelect): string {
+  if (m.userId) {
+    const [u] = db.select().from(users).where(eq(users.id, m.userId)).limit(1).all()
+    const complet = [u?.firstName, u?.lastName].filter(Boolean).join(' ')
+    if (complet) return complet
+  }
+  return m.managedName ?? 'Membre'
+}
+
+const LIBELLE_ROLE: Record<MembershipRole, string> = {
+  president: 'président',
+  treasurer: 'trésorier',
+  auditor: 'censeur',
+  member: 'membre',
+}
+
+/**
+ * Change le rôle d'un membre dans la tontine. Le rôle est par tontine.
+ *
+ * La route existait et acceptait `role` depuis le début, mais aucun écran ne
+ * l'envoyait : chaque tontine gardait un bureau d'une seule personne, et toute
+ * la matrice de permissions — confirmation par le trésorier, contre-validation
+ * par le censeur — restait lettre morte.
+ *
+ * Deux règles, vérifiées ici et non par l'écran :
+ * - le président ne se rétrograde pas par ce chemin : on **transfère** la
+ *   présidence, ce qui est un autre geste, avec son écriture au registre ;
+ * - `role: 'president'` sur un autre membre **est** ce transfert.
+ *
+ * Un trésorier ou un censeur peut être nommé **avant** d'avoir l'application :
+ * « Koffi sera trésorier, il installe l'application demain » est le cas
+ * courant. Tant qu'il n'a pas de compte, il ne confirme rien, et le repli
+ * « bureau d'une seule personne » (§2.4) ne le compte pas — il ne regarde que
+ * les adhésions qui portent un compte. Le rôle prend effet au rattachement.
+ */
+export function definirRole(
+  db: Db,
+  tontineId: string,
+  membershipId: string,
+  role: MembershipRole,
+  acteurId: string,
+) {
+  const [m] = db
+    .select()
+    .from(memberships)
+    .where(and(eq(memberships.id, membershipId), eq(memberships.tontineId, tontineId)))
+    .limit(1)
+    .all()
+  if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
+
+  if (role === 'president') return transfererPresidence(db, tontineId, membershipId, acteurId)
+
+  if (m.role === role) return
+
+  if (m.status !== 'active') {
+    throw apiError('FORBIDDEN', 'Seul un membre actif peut recevoir un rôle.', { field: 'role' })
+  }
+
+  if (m.role === 'president') {
+    throw apiError(
+      'FORBIDDEN',
+      'Le président ne peut pas se rétrograder. Passe d’abord la présidence à quelqu’un d’autre.',
+      { field: 'role' },
+    )
+  }
+
   db.update(memberships).set({ role }).where(eq(memberships.id, membershipId)).run()
+
+  appendLedger(db, {
+    tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: {
+      changement: 'role_modifie',
+      membershipId,
+      name: nomDe(db, m),
+      de: m.role,
+      vers: role,
+    },
+  })
+
+  if (m.userId) {
+    notifier(db, m.userId, {
+      type: 'role_modifie',
+      tontineId,
+      title: 'Ton rôle a changé',
+      body: `Tu es maintenant ${LIBELLE_ROLE[role]} de ta tontine.`,
+      url: `/app/tontine/${tontineId}`,
+    })
+  }
+}
+
+/**
+ * Passe la présidence à un autre membre.
+ *
+ * Sans ce geste, le président était prisonnier de sa tontine : `retirerMembre`
+ * le refuse — à raison, le groupe perdrait son seul rôle capable de confirmer
+ * et de clore — et rien ne permettait de désigner un successeur.
+ *
+ * Le successeur doit avoir un compte et être actif. L'ancien président devient
+ * simple membre : ses parts, ses cotisations et sa place dans la rotation ne
+ * bougent pas, un rôle n'est pas une part. Tout le groupe est prévenu — c'est
+ * la personne à qui l'on envoie de l'argent qui change.
+ */
+export function transfererPresidence(
+  db: Db,
+  tontineId: string,
+  versMembershipId: string,
+  acteurId: string,
+) {
+  const [cible] = db
+    .select()
+    .from(memberships)
+    .where(and(eq(memberships.id, versMembershipId), eq(memberships.tontineId, tontineId)))
+    .limit(1)
+    .all()
+  if (!cible) throw apiError('NOT_FOUND', 'Membre introuvable.')
+
+  if (cible.role === 'president') return
+
+  if (cible.status !== 'active') {
+    throw apiError('FORBIDDEN', 'Seul un membre actif peut devenir président.', { field: 'role' })
+  }
+
+  if (!cible.userId) {
+    throw apiError(
+      'FORBIDDEN',
+      'Ce membre n’a pas encore de compte : il ne pourrait pas présider. Passe la présidence quand il aura rejoint.',
+      { field: 'role' },
+    )
+  }
+
+  const [actuel] = db
+    .select()
+    .from(memberships)
+    .where(and(
+      eq(memberships.tontineId, tontineId),
+      eq(memberships.role, 'president'),
+      eq(memberships.status, 'active'),
+    ))
+    .limit(1)
+    .all()
+
+  if (actuel) {
+    db.update(memberships).set({ role: 'member' }).where(eq(memberships.id, actuel.id)).run()
+  }
+  db.update(memberships).set({ role: 'president' }).where(eq(memberships.id, cible.id)).run()
+
+  appendLedger(db, {
+    tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: {
+      changement: 'presidence_transferee',
+      de: actuel ? { membershipId: actuel.id, name: nomDe(db, actuel) } : null,
+      vers: { membershipId: cible.id, name: nomDe(db, cible) },
+    },
+  })
+
+  notifierTontine(db, tontineId, {
+    type: 'presidence_transferee',
+    title: 'La présidence a changé de mains',
+    body: `${nomDe(db, cible)} préside désormais la tontine.`,
+    url: `/app/tontine/${tontineId}/membres`,
+  })
+}
+
+/**
+ * Déclare un membre défaillant — docs/data-model.md §2.2.
+ *
+ * Posé **à la main par le président**, et seulement après un tour où le
+ * membre a déjà pris la main : quelqu'un qui a reçu le pot puis cesse de
+ * cotiser doit le groupe, et c'est cela que le statut consigne. Avant d'avoir
+ * touché, un membre qui ne paie plus est un retardataire, pas un défaillant.
+ *
+ * Le statut gèle les rappels automatiques — relancer chaque semaine quelqu'un
+ * qu'on a déjà déclaré défaillant n'apporte rien — et **n'entraîne aucune
+ * publication** : le groupe n'est pas notifié, seul le registre en garde la
+ * trace, avec ce qui reste dû.
+ */
+export function declarerDefaillant(db: Db, membershipId: string, acteurId: string) {
+  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+  if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
+
+  if (m.role === 'president') {
+    throw apiError('FORBIDDEN', 'Le président ne peut pas être déclaré défaillant.', { field: 'status' })
+  }
+
+  assertTransition('membership', m.status, 'defaulted')
+
+  if (!aDejaPrisLaMain(db, membershipId)) {
+    throw apiError(
+      'FORBIDDEN',
+      'Ce membre n’a pas encore pris la main sur un tour : un retard n’est pas une défaillance.',
+      { field: 'status' },
+    )
+  }
+
+  const du = resteDu(db, membershipId)
+
+  db.update(memberships).set({ status: 'defaulted' }).where(eq(memberships.id, membershipId)).run()
+
+  appendLedger(db, {
+    tontineId: m.tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'membre_defaillant', membershipId, name: nomDe(db, m), resteDu: du },
+  })
+
+  return { membershipId, resteDu: du }
+}
+
+/**
+ * Le membre a-t-il déjà reçu le pot ?
+ *
+ * Un tour clos dont il était bénéficiaire, ou un versement au moins déclaré à
+ * son nom : dans les deux cas l'argent est parti vers lui.
+ */
+export function aDejaPrisLaMain(db: Db, membershipId: string): boolean {
+  const sesParts = db.select({ id: shares.id }).from(shares).where(eq(shares.membershipId, membershipId)).all()
+  if (sesParts.length === 0) return false
+
+  const sesTours = db
+    .select({ id: rounds.id, status: rounds.status })
+    .from(rounds)
+    .where(inArray(rounds.beneficiaryShareId, sesParts.map(p => p.id)))
+    .all()
+
+  if (sesTours.some(t => t.status === 'closed')) return true
+
+  const versements = db
+    .select({ status: payouts.status })
+    .from(payouts)
+    .where(eq(payouts.beneficiaryMembershipId, membershipId))
+    .all()
+
+  return versements.some(v => v.status === 'declared' || v.status === 'acknowledged')
 }
 
 /**

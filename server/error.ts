@@ -14,7 +14,9 @@ import type { NitroErrorHandler } from 'nitropack'
  */
 const handler: NitroErrorHandler = (error, event) => {
   const estApi = event.path?.startsWith('/api/')
-  if (!estApi) return // les pages gardent la page d'erreur de Nuxt
+  // Les pages passent au gestionnaire suivant de la liste — celui de Nuxt, qui
+  // rend `app/error.vue`. Voir le crochet `nitro:config` de nuxt.config.ts.
+  if (!estApi) return
 
   const statut = error.statusCode ?? 500
   const data = error.data as { error?: unknown } | undefined

@@ -3,6 +3,9 @@ import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, rounds, shares, tontines, users,
 } from '../db/schema.ts'
+import { apiError } from '../utils/errors.ts'
+import { appendLedger } from './ledger.ts'
+import { notifier } from './notifications.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -139,5 +142,89 @@ export function exporterDonnees(db: Db, userId: string) {
     },
     adhesions,
     cotisations: mesCotisations,
+  }
+}
+
+/**
+ * Changement de numéro de téléphone — en deux temps.
+ *
+ * Le numéro est l'identifiant du compte, et c'est aussi là que le pot arrive :
+ * on ne le change pas d'un clic. Un code est envoyé **sur le nouveau numéro**
+ * — c'est lui qu'il faut prouver, l'ancien peut être perdu avec la SIM — puis
+ * `phone_changed_at` est posé : les versements vers ce membre sont gelés
+ * quarante-huit heures (règle 22, côté bénéficiaire), et l'écran de versement
+ * le signale au trésorier. Chaque tontine du membre en garde la trace au
+ * registre, sans le numéro en clair.
+ */
+export function demanderChangementNumero(db: Db, userId: string, nouveauNumero: string): void {
+  const [actuel] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  if (!actuel) throw apiError('NOT_FOUND', 'Compte introuvable.')
+
+  if (actuel.phone === nouveauNumero) {
+    throw apiError('VALIDATION_ERROR', 'C’est déjà ton numéro.', { field: 'phone' })
+  }
+
+  // Dire qu'un numéro est pris révèle qu'un compte existe — ici c'est
+  // inévitable et acceptable : l'appelant est connecté, et il ne peut de toute
+  // façon pas prendre un numéro qui n'est pas le sien.
+  const [pris] = db.select({ id: users.id }).from(users).where(eq(users.phone, nouveauNumero)).limit(1).all()
+  if (pris) {
+    throw apiError('VALIDATION_ERROR', 'Ce numéro est déjà rattaché à un autre compte.', { field: 'phone' })
+  }
+}
+
+export function appliquerChangementNumero(db: Db, userId: string, nouveauNumero: string): void {
+  demanderChangementNumero(db, userId, nouveauNumero)
+
+  const [actuel] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  const ancien = actuel!.phone
+
+  db.update(users)
+    .set({ phone: nouveauNumero, phoneChangedAt: new Date() })
+    .where(eq(users.id, userId))
+    .run()
+
+  // Chaque tontine où le membre est actif l'apprend au registre — les quatre
+  // derniers chiffres, jamais le numéro entier — et le bureau est prévenu :
+  // c'est peut-être vers ce numéro que le prochain pot part.
+  const adhesions = db
+    .select({ tontineId: memberships.tontineId })
+    .from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.status, 'active')))
+    .all()
+
+  for (const { tontineId } of adhesions) {
+    appendLedger(db, {
+      tontineId,
+      type: 'settings_changed',
+      actorId: userId,
+      payload: {
+        changement: 'numero_change',
+        membreUserId: userId,
+        ancienFin: ancien.slice(-4),
+        nouveauFin: nouveauNumero.slice(-4),
+      },
+    })
+
+    const bureau = db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(and(
+        eq(memberships.tontineId, tontineId),
+        eq(memberships.status, 'active'),
+        inArray(memberships.role, ['president', 'treasurer']),
+      ))
+      .all()
+
+    for (const { userId: destinataire } of bureau) {
+      if (!destinataire || destinataire === userId) continue
+      notifier(db, destinataire, {
+        type: 'numero_membre_change',
+        tontineId,
+        title: 'Un membre a changé de numéro',
+        body: 'Vérifie le numéro avant le prochain versement : il est gelé quarante-huit heures.',
+        url: `/app/tontine/${tontineId}/membres`,
+      })
+    }
   }
 }

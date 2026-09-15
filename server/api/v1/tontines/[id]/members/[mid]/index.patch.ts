@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { memberUpdateInput } from '../../../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../../../db/index.ts'
 import { memberships, tontines } from '../../../../../../db/schema.ts'
-import { attribuerParts, definirRole } from '../../../../../../services/membres.ts'
+import { attribuerParts, declarerDefaillant, definirRole } from '../../../../../../services/membres.ts'
 import { approuverAdhesion, refuserAdhesion } from '../../../../../../services/invitations.ts'
 import { requireMembership } from '../../../../../../utils/auth.ts'
 import { apiError, validationError } from '../../../../../../utils/errors.ts'
@@ -37,7 +37,11 @@ export default defineEventHandler(async (event) => {
 
   if (!membre) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
-  if (parsed.data.role) definirRole(db, membershipId, parsed.data.role)
+  if (parsed.data.role) definirRole(db, tontineId, membershipId, parsed.data.role, user.id)
+
+  if (parsed.data.status === 'defaulted') {
+    return declarerDefaillant(db, membershipId, user.id)
+  }
 
   if (parsed.data.status === 'active') {
     // L'approbation attribue les parts elle-même : le nombre voyage avec

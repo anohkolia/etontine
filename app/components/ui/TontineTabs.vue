@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { MembershipRole } from '#shared/schemas'
+
+const { t } = useI18n()
+
 /**
  * Navigation entre les écrans d'une même tontine.
  *
@@ -14,12 +18,26 @@
  * (règle 12) : il masque des onglets, il n'autorise rien. Un membre qui
  * forcerait l'adresse de `/confirmations` se ferait renvoyer par le serveur.
  */
-const props = defineProps<{ tontineId: string }>()
+const props = defineProps<{
+  tontineId: string
+  /**
+   * Le rôle tel que le serveur vient de le dire, quand l'écran l'a sous la
+   * main. Le cache de session peut être en retard d'une nomination : sans ce
+   * rattrapage, un trésorier fraîchement nommé ne voyait ses onglets qu'après
+   * un rechargement complet.
+   */
+  role?: MembershipRole | null
+}>()
 
 const session = useSessionStore()
 const route = useRoute()
 
-const role = computed(() => session.roleDans(props.tontineId))
+const role = computed(() => props.role ?? session.roleDans(props.tontineId))
+
+watch(() => props.role, (recu) => {
+  if (recu && recu !== session.roleDans(props.tontineId)) session.charger(true)
+}, { immediate: true })
+
 const bureau = computed(() => role.value === 'president' || role.value === 'treasurer')
 
 const onglets = computed(() => {
@@ -27,23 +45,35 @@ const onglets = computed(() => {
   const communs = [
     // Le détail vient en premier : c'est l'écran qui répond aux deux questions
     // qu'on se pose en ouvrant une tontine — où en est le pot, quand je passe.
-    { to: base, label: 'La tontine', icon: 'lucide:layout-dashboard' },
-    { to: `${base}/cotiser`, label: 'Cotiser', icon: 'lucide:hand-coins' },
-    { to: `${base}/membres`, label: 'Membres', icon: 'lucide:users' },
-    { to: `${base}/registre`, label: 'Registre', icon: 'lucide:scroll-text' },
+    { to: base, label: t('commun.retour_tontine'), icon: 'lucide:layout-dashboard' },
+    { to: `${base}/cotiser`, label: t('ui.TontineTabs.cotiser'), icon: 'lucide:hand-coins' },
+    { to: `${base}/membres`, label: t('ui.TontineTabs.membres'), icon: 'lucide:users' },
+    { to: `${base}/registre`, label: t('ui.TontineTabs.registre'), icon: 'lucide:scroll-text' },
+    // Mon point de vue sur le cycle : ce que j'ai cotisé, ce que j'ai reçu,
+    // et les reçus des tours passés — que « Cotiser » ne montre plus une fois
+    // le tour clos.
+    { to: `${base}/historique`, label: t('ui.TontineTabs.historique'), icon: 'lucide:history' },
   ]
+
+  // Le censeur n'est pas du bureau qui encaisse et confirme, mais c'est lui
+  // qui rouvre une cotisation rejetée et tranche les contestations : sans cet
+  // onglet, il n'avait aucun chemin vers l'écran où ces gestes l'attendent.
+  if (role.value === 'auditor') {
+    return [...communs, { to: `${base}/impayes`, label: t('ui.TontineTabs.impayes'), icon: 'lucide:triangle-alert' }]
+  }
+
   if (!bureau.value) return communs
 
   const duBureau = [
     ...communs,
-    { to: `${base}/confirmations`, label: 'Confirmer', icon: 'lucide:check-check' },
-    { to: `${base}/impayes`, label: 'Impayés', icon: 'lucide:triangle-alert' },
-    { to: `${base}/relances`, label: 'Relancer', icon: 'lucide:message-circle' },
-    { to: `${base}/versement`, label: 'Verser', icon: 'lucide:package' },
+    { to: `${base}/confirmations`, label: t('ui.TontineTabs.confirmer'), icon: 'lucide:check-check' },
+    { to: `${base}/impayes`, label: t('ui.TontineTabs.impayes'), icon: 'lucide:triangle-alert' },
+    { to: `${base}/relances`, label: t('ui.TontineTabs.relancer'), icon: 'lucide:message-circle' },
+    { to: `${base}/versement`, label: t('ui.TontineTabs.verser'), icon: 'lucide:package' },
   ]
   if (role.value !== 'president') return duBureau
 
-  return [...duBureau, { to: `${base}/reglages`, label: 'Réglages', icon: 'lucide:settings' }]
+  return [...duBureau, { to: `${base}/reglages`, label: t('ui.TontineTabs.reglages'), icon: 'lucide:settings' }]
 })
 </script>
 
@@ -53,7 +83,7 @@ const onglets = computed(() => {
        clic supplémentaire. -->
   <nav
     class="-mx-4 overflow-x-auto px-4"
-    aria-label="Écrans de la tontine"
+    :aria-label="$t('ui.TontineTabs.ecrans_de_la_tontine')"
     data-testid="onglets-tontine"
   >
     <ul class="flex w-max gap-2">

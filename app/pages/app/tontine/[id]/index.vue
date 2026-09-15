@@ -15,6 +15,7 @@
  * serveur a tout sous la main, le client n'additionne rien (règle 2).
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -72,10 +73,10 @@ interface Tour {
 }
 
 const FREQUENCE: Record<Detail['frequency'], string> = {
-  daily: 'chaque jour',
-  weekly: 'chaque semaine',
-  biweekly: 'tous les quinze jours',
-  monthly: 'chaque mois',
+  daily: t('tontine.index.chaque_jour'),
+  weekly: t('tontine.index.chaque_semaine'),
+  biweekly: t('tontine.index.tous_les_quinze_jours'),
+  monthly: t('tontine.index.chaque_mois'),
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -103,8 +104,30 @@ async function charger() {
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
     etat.value = 'erreur'
+  }
+}
+
+/**
+ * Archiver une tontine terminée la sort du tableau de bord — pas du registre.
+ * Sans ce geste, les cycles finis s'empilaient à l'accueil pour toujours.
+ */
+const archivageEnCours = ref(false)
+
+async function archiver() {
+  archivageEnCours.value = true
+  try {
+    await $fetch<{ ok: true }>(`/api/v1/tontines/${tontineId}/archive`, { method: 'POST' })
+    await navigateTo('/app')
+  }
+  catch (e) {
+    erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
+      ?? t('commun.serveur_injoignable')
+    etat.value = 'erreur'
+  }
+  finally {
+    archivageEnCours.value = false
   }
 }
 
@@ -113,16 +136,19 @@ onMounted(charger)
 useEnTete(() => ({
   titre: tontine.value
     ? `${tontine.value.emoji ? `${tontine.value.emoji} ` : ''}${tontine.value.name}`
-    : 'Tontine',
+    : t('tontine.index.tontine'),
   sousTitre: tontine.value?.locality ?? undefined,
-  retour: { to: '/app', label: 'Mes tontines' },
+  retour: { to: '/app', label: t('commun.mes_tontines') },
 }))
-useHead({ title: 'Ma tontine — eTontine' })
+useHead({ title: t('tontine.index.ma_tontine_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <TontineTabs :tontine-id="tontineId" />
+    <TontineTabs
+      :tontine-id="tontineId"
+      :role="tontine?.myRole"
+    />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -151,7 +177,7 @@ useHead({ title: 'Ma tontine — eTontine' })
           />
         </div>
         <p class="text-sm text-ink-muted">
-          Cette tontine n’est pas encore publiée. Tes membres ne la voient pas.
+          {{ $t('tontine.index.cette_tontine_n_est') }}
         </p>
 
         <ul
@@ -174,13 +200,16 @@ useHead({ title: 'Ma tontine — eTontine' })
           </li>
         </ul>
 
+        <!-- `?id=` désigne **ce** brouillon : sans lui, le wizard reprenait
+             celui que le navigateur avait gardé — vidé après chaque
+             publication — et ouvrait une seconde tontine. -->
         <NuxtLink
           v-if="estPresident"
-          to="/app/tontine/create"
+          :to="`/app/tontine/create?id=${tontineId}`"
           class="min-h-touch inline-flex items-center justify-center rounded-control bg-brand px-5 font-semibold text-brand-ink"
           data-testid="lien-reprendre-brouillon"
         >
-          Reprendre la configuration
+          {{ $t('tontine.index.reprendre_la_configuration') }}
         </NuxtLink>
       </section>
 
@@ -192,7 +221,7 @@ useHead({ title: 'Ma tontine — eTontine' })
       >
         <div class="flex items-start justify-between gap-3">
           <p class="text-sm text-ink-muted">
-            Tour {{ tontine.currentRound.index }}
+            {{ $t('tontine.index.tour_p0', { p0: tontine.currentRound.index }) }}
           </p>
           <StatusBadge
             kind="round"
@@ -213,7 +242,7 @@ useHead({ title: 'Ma tontine — eTontine' })
             class="shrink-0"
             aria-hidden="true"
           />
-          Échéance {{ formatRelativeDay(tontine.currentRound.dueDate) }}
+          {{ $t('tontine.index.echeance_p0', { p0: formatRelativeDay(tontine.currentRound.dueDate) }) }}
         </p>
       </section>
 
@@ -228,9 +257,47 @@ useHead({ title: 'Ma tontine — eTontine' })
           :status="tontine.status"
           compact
         />
-        <p class="text-sm text-ink-muted">
-          Aucun tour n’est ouvert pour l’instant. Tu seras prévenu à l’ouverture
-          du prochain.
+        <p
+          v-if="tontine.status === 'open'"
+          class="text-sm text-ink-muted"
+        >
+          {{ $t('tontine.index.la_tontine_n_a') }}
+          <strong class="font-semibold text-ink">{{ formatDate(tontine.startDate) }}</strong>{{ $t('tontine.index.tu_seras_prevenu_au') }}
+        </p>
+        <!-- Un cycle fini ne promet pas de « prochain tour » : il n'y en aura
+             pas. Ce qui reste, c'est le registre, les reçus et le procès-verbal. -->
+        <template v-else-if="tontine.status === 'closed' || tontine.status === 'archived'">
+          <p
+            class="text-sm text-ink-muted"
+            data-testid="tontine-terminee"
+          >
+            {{ $t('tontine.index.cette_tontine_est_terminee', { p0: tontine.rounds.length }) }}
+          </p>
+          <NuxtLink
+            :to="`/app/tontine/${tontineId}/registre`"
+            class="min-h-touch inline-flex items-center gap-2 text-sm font-semibold text-brand"
+          >
+            <Icon
+              name="lucide:scroll-text"
+              size="1rem"
+              aria-hidden="true"
+            />
+            {{ $t('tontine.index.voir_le_registre_et') }}
+          </NuxtLink>
+          <Button
+            v-if="estPresident && tontine.status === 'closed'"
+            :label="archivageEnCours ? $t('tontine.index.archivage') : $t('tontine.index.archiver_cette_tontine')"
+            :disabled="archivageEnCours"
+            class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+            data-testid="bouton-archiver"
+            @click="archiver"
+          />
+        </template>
+        <p
+          v-else
+          class="text-sm text-ink-muted"
+        >
+          {{ $t('tontine.index.aucun_tour_n_est') }}
         </p>
       </section>
 
@@ -242,7 +309,7 @@ useHead({ title: 'Ma tontine — eTontine' })
       >
         <div class="flex items-center justify-between gap-3">
           <span class="flex flex-col">
-            <span class="text-xs tracking-wide text-ink-muted uppercase">Ce que je dois</span>
+            <span class="text-xs tracking-wide text-ink-muted uppercase">{{ $t('tontine.index.ce_que_je_dois') }}</span>
             <AmountDisplay
               :amount="tontine.myRemaining"
               size="xl"
@@ -268,7 +335,7 @@ useHead({ title: 'Ma tontine — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Cotiser
+          {{ $t('tontine.index.cotiser') }}
         </NuxtLink>
         <p
           v-else
@@ -280,7 +347,7 @@ useHead({ title: 'Ma tontine — eTontine' })
             class="shrink-0"
             aria-hidden="true"
           />
-          Tu es à jour sur ce tour.
+          {{ $t('tontine.index.tu_es_a_jour') }}
         </p>
       </section>
 
@@ -290,7 +357,7 @@ useHead({ title: 'Ma tontine — eTontine' })
         data-testid="bloc-reglages"
       >
         <SectionTitle>
-          Comment marche cette tontine
+          {{ $t('tontine.index.comment_marche_cette_tontine') }}
           <template #action>
             <NuxtLink
               v-if="estPresident"
@@ -303,7 +370,7 @@ useHead({ title: 'Ma tontine — eTontine' })
                 size="1rem"
                 aria-hidden="true"
               />
-              Réglages
+              {{ $t('tontine.index.reglages') }}
             </NuxtLink>
           </template>
         </SectionTitle>
@@ -318,7 +385,7 @@ useHead({ title: 'Ma tontine — eTontine' })
         <dl class="flex flex-col gap-2 text-sm">
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Une part
+              {{ $t('tontine.index.une_part') }}
             </dt>
             <dd>
               <AmountDisplay
@@ -330,7 +397,7 @@ useHead({ title: 'Ma tontine — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Parts au total
+              {{ $t('tontine.index.parts_au_total') }}
             </dt>
             <dd class="tabular font-medium text-ink">
               {{ tontine.totalShares }}
@@ -338,7 +405,7 @@ useHead({ title: 'Ma tontine — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Membres actifs
+              {{ $t('tontine.index.membres_actifs') }}
             </dt>
             <dd class="tabular font-medium text-ink">
               {{ tontine.activeMembers }}
@@ -346,7 +413,7 @@ useHead({ title: 'Ma tontine — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Pot d’un tour
+              {{ $t('tontine.index.pot_d_un_tour') }}
             </dt>
             <dd>
               <AmountDisplay
@@ -357,15 +424,15 @@ useHead({ title: 'Ma tontine — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Ordre de passage
+              {{ $t('tontine.index.ordre_de_passage') }}
             </dt>
             <dd class="font-medium text-ink">
-              {{ tontine.rotationMode === 'draw' ? 'Tirage au sort' : 'Ordre fixe' }}
+              {{ tontine.rotationMode === 'draw' ? $t('tontine.index.tirage_au_sort') : $t('tontine.index.ordre_fixe') }}
             </dd>
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Démarrage
+              {{ $t('tontine.index.demarrage') }}
             </dt>
             <dd class="font-medium text-ink">
               {{ formatDate(tontine.startDate) }}
@@ -380,7 +447,7 @@ useHead({ title: 'Ma tontine — eTontine' })
         class="flex flex-col gap-3"
         data-testid="calendrier-tours"
       >
-        <SectionTitle>Ordre de passage</SectionTitle>
+        <SectionTitle>{{ $t('tontine.index.ordre_de_passage') }}</SectionTitle>
 
         <ul class="flex flex-col gap-2">
           <li
@@ -405,7 +472,7 @@ useHead({ title: 'Ma tontine — eTontine' })
                 <span
                   v-if="estMonTour(tour)"
                   class="font-bold text-brand-strong"
-                >· c’est toi</span>
+                >{{ $t('tontine.index.c_est_toi') }}</span>
               </span>
               <span class="tabular text-sm text-ink-muted">
                 {{ formatDate(tour.dueDate) }}
@@ -436,7 +503,7 @@ useHead({ title: 'Ma tontine — eTontine' })
           class="shrink-0"
           aria-hidden="true"
         />
-        Le pot de ce tour te revient : vérifie le montant avant l’envoi
+        {{ $t('tontine.index.le_pot_de_ce') }}
       </NuxtLink>
 
       <!-- Actions du bureau, groupées : elles ne concernent pas tout le monde. -->
@@ -453,7 +520,7 @@ useHead({ title: 'Ma tontine — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Confirmer des cotisations
+          {{ $t('tontine.index.confirmer_des_cotisations') }}
         </NuxtLink>
         <NuxtLink
           :to="`/app/tontine/${tontineId}/versement`"
@@ -464,7 +531,7 @@ useHead({ title: 'Ma tontine — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Verser le pot
+          {{ $t('tontine.index.verser_le_pot') }}
         </NuxtLink>
       </div>
     </template>

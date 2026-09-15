@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n()
+
 /**
  * Landing publique, pré-rendue pour le SEO (`routeRules` dans nuxt.config.ts).
  *
@@ -26,13 +28,12 @@
  * facturée à la donnée.
  */
 useHead({
-  title: 'eTontine — la tontine de votre groupe, tenue au clair',
+  title: t('public.landing.etontine_la_tontine_de'),
   meta: [
     {
       name: 'description',
       content:
-        'Cotisations déclarées, confirmées par le trésorier, et un registre que '
-        + 'tout le monde peut lire. eTontine ne détient jamais votre argent.',
+        t('public.landing.cotisations_declarees_confirmees_par'),
     },
   ],
 })
@@ -43,9 +44,9 @@ useHead({
  * le budget de poids fait échouer le build s'il est dépassé.
  */
 const FAITS = [
-  { valeur: '0 FCFA', legende: 'détenu par l’application' },
-  { valeur: '100 %', legende: 'des écritures vérifiables' },
-  { valeur: '< 250 Ko', legende: 'au premier chargement' },
+  { valeur: t('public.landing.0_fcfa'), legende: t('public.landing.detenu_par_l_application') },
+  { valeur: '100 %', legende: t('public.landing.des_ecritures_verifiables') },
+  { valeur: t('public.landing.250_ko'), legende: t('public.landing.au_premier_chargement') },
 ] as const
 </script>
 
@@ -53,21 +54,21 @@ const FAITS = [
   <div class="min-h-dvh">
     <header class="gradient-trust rounded-b-[2.5rem] px-5 pt-6 pb-14 text-night-ink">
       <nav class="mx-auto flex max-w-5xl items-center justify-between gap-3">
-        <span class="text-base font-bold">eTontine</span>
+        <span class="text-base font-bold">{{ $t('public.landing.etontine') }}</span>
         <div class="flex items-center gap-2">
           <NuxtLink
             to="/tarifs"
             class="min-h-touch inline-flex items-center px-3 text-sm font-semibold text-night-ink/85 hover:text-night-ink"
             data-testid="lien-tarifs"
           >
-            Tarifs
+            {{ $t('public.landing.tarifs') }}
           </NuxtLink>
           <NuxtLink
             to="/login"
             class="min-h-touch inline-flex items-center rounded-full bg-night-ink/15 px-4 text-sm font-semibold transition-colors hover:bg-night-ink/25"
             data-testid="lien-connexion"
           >
-            Se connecter
+            {{ $t('public.landing.se_connecter') }}
           </NuxtLink>
         </div>
       </nav>
@@ -75,17 +76,15 @@ const FAITS = [
       <div class="mx-auto mt-12 max-w-5xl md:grid md:grid-cols-2 md:items-center md:gap-10">
         <div>
           <p class="inline-flex rounded-full bg-night-ink/15 px-3 py-1 text-xs font-semibold">
-            Faite pour la Côte d’Ivoire 🇨🇮
+            {{ $t('public.landing.faite_pour_la_cote') }}
           </p>
 
           <h1 class="mt-4 text-4xl leading-tight font-bold md:text-5xl">
-            La tontine de votre groupe, tenue au clair.
+            {{ $t('public.landing.la_tontine_de_votre') }}
           </h1>
 
           <p class="mt-4 max-w-md leading-relaxed text-night-ink/80">
-            Chaque cotisation est déclarée, confirmée par le trésorier, et
-            inscrite dans un registre que tout le monde peut lire. Votre argent,
-            lui, ne passe jamais par nous.
+            {{ $t('public.landing.chaque_cotisation_est_declaree') }}
           </p>
 
           <!-- Règle 13 : l'action primaire est atteignable au pouce, sans défiler. -->
@@ -95,14 +94,14 @@ const FAITS = [
               class="min-h-touch inline-flex items-center justify-center rounded-full bg-brand px-6 font-semibold text-brand-ink shadow-float transition-transform hover:scale-[1.02] motion-reduce:transform-none"
               data-testid="lien-application"
             >
-              Ouvrir mon application
+              {{ $t('public.landing.ouvrir_mon_application') }}
             </NuxtLink>
             <NuxtLink
               to="/aide"
               class="min-h-touch inline-flex items-center justify-center rounded-full border border-night-ink/30 px-6 font-semibold transition-colors hover:bg-night-ink/10"
               data-testid="lien-aide"
             >
-              Comment ça marche
+              {{ $t('public.landing.comment_ca_marche') }}
             </NuxtLink>
           </div>
 
@@ -130,35 +129,35 @@ const FAITS = [
             aria-hidden="true"
           >
             <p class="text-[11px] tracking-wide text-ink-muted uppercase">
-              Exemple — Tontine du marché
+              {{ $t('public.landing.exemple_tontine_du_marche') }}
             </p>
             <p class="amount text-2xl font-bold">
-              175 000 FCFA
+              {{ $t('public.landing.175_000_fcfa') }}
             </p>
             <div class="mt-2 h-2 overflow-hidden rounded-full bg-surface-sunken">
               <div class="gradient-pot h-full w-[70%] rounded-full" />
             </div>
             <p class="mt-1 text-xs text-ink-muted">
-              7 cotisations confirmées sur 10
+              {{ $t('public.landing.7_cotisations_confirmees_sur') }}
             </p>
 
             <ul class="mt-4 flex flex-col gap-2 text-xs">
               <li class="flex items-center justify-between gap-2">
-                <span class="font-semibold">Aya K.</span>
-                <span class="rounded-full bg-confirmed-surface px-2 py-0.5 font-semibold text-confirmed-ink">Confirmé</span>
+                <span class="font-semibold">{{ $t('public.landing.aya_k') }}</span>
+                <span class="rounded-full bg-confirmed-surface px-2 py-0.5 font-semibold text-confirmed-ink">{{ $t('public.landing.confirme') }}</span>
               </li>
               <li class="flex items-center justify-between gap-2">
-                <span class="font-semibold">Mariam T.</span>
-                <span class="rounded-full bg-declared-surface px-2 py-0.5 font-semibold text-declared-ink">Déclaré</span>
+                <span class="font-semibold">{{ $t('public.landing.mariam_t') }}</span>
+                <span class="rounded-full bg-declared-surface px-2 py-0.5 font-semibold text-declared-ink">{{ $t('public.landing.declare') }}</span>
               </li>
               <li class="flex items-center justify-between gap-2">
-                <span class="font-semibold">Fatou B.</span>
-                <span class="rounded-full bg-late-surface px-2 py-0.5 font-semibold text-late-ink">En retard</span>
+                <span class="font-semibold">{{ $t('public.landing.fatou_b') }}</span>
+                <span class="rounded-full bg-late-surface px-2 py-0.5 font-semibold text-late-ink">{{ $t('public.landing.en_retard') }}</span>
               </li>
             </ul>
 
             <p class="gradient-brand mt-4 rounded-control px-3 py-2.5 text-center text-xs font-bold text-brand-ink">
-              Déclarer ma cotisation
+              {{ $t('public.landing.declarer_ma_cotisation') }}
             </p>
           </div>
         </div>
@@ -168,10 +167,10 @@ const FAITS = [
     <main class="mx-auto max-w-5xl px-5 py-14">
       <section>
         <h2 class="text-2xl font-bold text-ink">
-          Pensée pour le terrain
+          {{ $t('public.landing.pensee_pour_le_terrain') }}
         </h2>
         <p class="mt-1 text-ink-muted">
-          Légère en données, rapide en 3G, lisible sans savoir lire un tableau.
+          {{ $t('public.landing.legere_en_donnees_rapide') }}
         </p>
 
         <ul class="mt-6 grid gap-3 sm:grid-cols-3">
@@ -202,12 +201,10 @@ const FAITS = [
               </svg>
             </span>
             <h3 class="mt-3 text-base font-bold text-ink">
-              Votre argent ne passe pas par nous
+              {{ $t('public.landing.votre_argent_ne_passe') }}
             </h3>
             <p class="mt-1 text-sm leading-relaxed text-ink-muted">
-              Vous envoyez directement sur le numéro de l’organisateur, avec
-              votre application de paiement habituelle. eTontine enregistre,
-              elle ne collecte pas.
+              {{ $t('public.landing.vous_envoyez_directement_sur') }}
             </p>
           </li>
 
@@ -227,12 +224,10 @@ const FAITS = [
               </svg>
             </span>
             <h3 class="mt-3 text-base font-bold text-ink">
-              Un registre que tout le monde lit
+              {{ $t('public.landing.un_registre_que_tout') }}
             </h3>
             <p class="mt-1 text-sm leading-relaxed text-ink-muted">
-              Chaque cotisation confirmée y est inscrite, et personne ne peut
-              l’effacer. N’importe quel membre peut vérifier que rien n’a été
-              retouché.
+              {{ $t('public.landing.chaque_cotisation_confirmee_y') }}
             </p>
           </li>
 
@@ -253,11 +248,10 @@ const FAITS = [
               </svg>
             </span>
             <h3 class="mt-3 text-base font-bold text-ink">
-              L’ordre de passage, sans soupçon
+              {{ $t('public.landing.l_ordre_de_passage') }}
             </h3>
             <p class="mt-1 text-sm leading-relaxed text-ink-muted">
-              Le tirage au sort est fait par le serveur, avec sa preuve inscrite
-              au registre. Chacun peut la rejouer et retrouver le même ordre.
+              {{ $t('public.landing.le_tirage_au_sort') }}
             </p>
           </li>
         </ul>
@@ -266,18 +260,17 @@ const FAITS = [
       <section class="mt-14 card-surface flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 class="text-lg font-bold text-ink">
-            Vous avez reçu un lien d’invitation ?
+            {{ $t('public.landing.vous_avez_recu_un') }}
           </h2>
           <p class="mt-1 text-sm text-ink-muted">
-            Ouvrez-le : vous verrez le nom de la tontine, le président, le
-            montant et la durée avant de décider quoi que ce soit.
+            {{ $t('public.landing.ouvrez_le_vous_verrez') }}
           </p>
         </div>
         <NuxtLink
           to="/aide"
           class="min-h-touch inline-flex shrink-0 items-center justify-center rounded-full border border-line-strong px-6 font-semibold text-ink"
         >
-          Comprendre d’abord
+          {{ $t('public.landing.comprendre_d_abord') }}
         </NuxtLink>
       </section>
     </main>
@@ -288,18 +281,37 @@ const FAITS = [
           to="/tarifs"
           class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
         >
-          Tarifs
+          {{ $t('public.landing.tarifs') }}
         </NuxtLink>
         <NuxtLink
           to="/aide"
           class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
         >
-          Aide
+          {{ $t('public.landing.aide') }}
+        </NuxtLink>
+        <NuxtLink
+          to="/legal/cgu"
+          class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
+          data-testid="lien-cgu"
+        >
+          {{ $t('public.landing.conditions') }}
+        </NuxtLink>
+        <NuxtLink
+          to="/legal/confidentialite"
+          class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
+          data-testid="lien-confidentialite"
+        >
+          {{ $t('public.landing.confidentialite') }}
+        </NuxtLink>
+        <NuxtLink
+          to="/legal/mentions"
+          class="min-h-touch inline-flex items-center text-brand underline underline-offset-4"
+        >
+          {{ $t('public.landing.mentions_legales') }}
         </NuxtLink>
       </nav>
       <p>
-        eTontine — Abidjan, Côte d’Ivoire. L’application ne détient jamais les
-        fonds : elle enregistre ce que le groupe déclare et confirme.
+        {{ $t('public.landing.etontine_abidjan_cote_d') }}
       </p>
     </footer>
   </div>

@@ -7,10 +7,16 @@
  * l'endroit où le bureau vérifie que la rotation correspond à ce qui a été
  * convenu de vive voix.
  */
+import type { MembershipRoleId } from '#shared/constants/roles'
+import { MEMBERSHIP_ROLE, ROLES_NOMMABLES } from '#shared/constants/roles'
+import { managedMemberInput } from '#shared/schemas'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
+const session = useSessionStore()
 
 interface Membre {
   id: string
@@ -43,15 +49,117 @@ const tontine = ref<{
   expectedPot: number
   shareAmount: number
   frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly'
+  startDate: string
+  /** Ce qui empêche de démarrer — calculé par le serveur, affiché avant le clic. */
+  startBlockers: Array<{ champ: string, message: string }>
 } | null>(null)
+const { formatDate } = useDate()
 const erreur = ref<string | null>(null)
 
-const nouveauNom = ref('')
-const nouveauNumero = ref('')
-const nouvellesParts = ref(1)
+/**
+ * L'ajout d'un membre géré, validé par `managedMemberInput` — le schéma du
+ * serveur : trois lettres de nom, un numéro ivoirien, une à cinq parts.
+ * L'erreur s'affiche sous le champ, avant l'envoi.
+ */
+const ajout = useFormulaire(managedMemberInput, { name: '', phone: '', shares: 1 })
+const [nouveauNom, nouveauNomAttrs] = ajout.champ('name')
+const [nouveauNumero, nouveauNumeroAttrs] = ajout.champ('phone')
+const [nouvellesParts] = ajout.champ('shares')
 const ajoutEnCours = ref(false)
 
 const estPresident = computed(() => tontine.value?.myRole === 'president')
+
+/**
+ * Le bureau se nomme ici, et nulle part ailleurs.
+ *
+ * La route acceptait `role` depuis le début sans qu'aucun écran ne l'envoie :
+ * chaque tontine gardait un bureau d'une seule personne, le trésorier ne
+ * confirmait rien et le censeur n'existait pas. Toute la séparation des
+ * pouvoirs (data-model §3) tenait sur un champ que personne ne remplissait.
+ *
+ * La présidence ne se donne pas par le même menu : c'est un transfert, avec sa
+ * confirmation, parce que la personne à qui l'on envoie de l'argent change.
+ */
+const ROLES = MEMBERSHIP_ROLE
+const { role: motDuRole, roleDescription } = useLibelle()
+const roleChoisi = ref<Record<string, MembershipRoleId>>({})
+const presidenceOuverte = ref<string | null>(null)
+const defaillanceOuverte = ref<string | null>(null)
+
+function roleDe(membre: Membre): MembershipRoleId {
+  return roleChoisi.value[membre.id] ?? membre.role
+}
+
+async function nommer(membre: Membre) {
+  const role = roleDe(membre)
+  if (role === membre.role) return
+  erreur.value = null
+  decisionEnCours.value = membre.id
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membre.id}`, {
+      method: 'PATCH',
+      body: { role },
+    })
+    const { [membre.id]: _retire, ...reste } = roleChoisi.value
+    roleChoisi.value = reste
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
+
+async function passerPresidence(membreId: string) {
+  erreur.value = null
+  decisionEnCours.value = membreId
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membreId}`, {
+      method: 'PATCH',
+      body: { role: 'president' },
+    })
+    presidenceOuverte.value = null
+    // Mon propre rôle vient de changer : le cache de session doit le savoir,
+    // sinon les onglets du bureau restent affichés à un simple membre.
+    await session.charger(true)
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
+
+/**
+ * Déclarer un membre défaillant — data-model §2.2.
+ *
+ * Le serveur n'accepte le statut qu'après un tour où le membre a pris la main ;
+ * l'écran ne propose le geste que sur une tontine lancée, et dit ce qui reste
+ * dû avant qu'on le pose. Aucun montant ne part en notification : rien n'est
+ * publié, seul le registre en garde la trace.
+ */
+async function declarerDefaillant(membreId: string) {
+  erreur.value = null
+  decisionEnCours.value = membreId
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membreId}`, {
+      method: 'PATCH',
+      body: { status: 'defaulted' },
+    })
+    defaillanceOuverte.value = null
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    decisionEnCours.value = null
+  }
+}
 
 /**
  * Les adhésions arrivées par lien, en attente de l'accord du président.
@@ -174,15 +282,20 @@ async function creerLien() {
     erreur.value = message(e)
   }
 }
+/**
+ * Le serveur dit ce qui bloque le démarrage — le nombre de membres, une date
+ * de départ déjà passée — et l'écran le répète avant le clic plutôt qu'après.
+ */
+const blocagesDemarrage = computed(() => tontine.value?.startBlockers ?? [])
 const peutDemarrer = computed(() =>
   estPresident.value
   && tontine.value?.status === 'open'
-  && membres.value.filter(m => m.status === 'active').length >= 3,
+  && blocagesDemarrage.value.length === 0,
 )
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -206,15 +319,15 @@ async function charger() {
 
 async function ajouter() {
   erreur.value = null
+  const valeurs = await ajout.valider()
+  if (!valeurs) return
   ajoutEnCours.value = true
   try {
     await $fetch(`/api/v1/tontines/${tontineId}/members`, {
       method: 'POST',
-      body: { name: nouveauNom.value, phone: nouveauNumero.value, shares: nouvellesParts.value },
+      body: valeurs,
     })
-    nouveauNom.value = ''
-    nouveauNumero.value = ''
-    nouvellesParts.value = 1
+    ajout.resetForm({ values: { name: '', phone: '', shares: 1 } })
     await charger()
   }
   catch (e) {
@@ -252,15 +365,18 @@ async function demarrer() {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Membres',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.membres.membres'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Membres — eTontine' })
+useHead({ title: t('tontine.membres.membres_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <TontineTabs :tontine-id="tontineId" />
+    <TontineTabs
+      :tontine-id="tontineId"
+      :role="(tontine?.myRole as MembershipRoleId | undefined)"
+    />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -278,8 +394,8 @@ useHead({ title: 'Membres — eTontine' })
       <!-- Liste de cartes empilées : jamais de DataTable sous `md` (règle 11). -->
       <EmptyState
         v-if="membres.length === 0"
-        title="Aucun membre pour l’instant"
-        description="Ajoute les membres de ta tontine, ou envoie-leur le lien d’invitation."
+        :title="$t('tontine.membres.aucun_membre_pour_l')"
+        :description="$t('tontine.membres.ajoute_les_membres_de')"
         icon="lucide:users"
       />
 
@@ -309,8 +425,15 @@ useHead({ title: 'Membres — eTontine' })
 
             <div class="flex min-w-0 flex-1 flex-col gap-1">
               <span class="truncate font-semibold text-ink">
-                {{ membre.name ?? 'Membre inscrit' }}
+                {{ membre.name ?? $t('tontine.membres.membre_inscrit') }}
               </span>
+              <!-- Le rôle est écrit, pas déduit : c'est ce qui dit à qui l'on
+                   envoie l'argent et qui confirme. -->
+              <span
+                v-if="membre.role !== 'member'"
+                class="text-xs font-semibold tracking-wide text-brand-strong uppercase"
+                :data-testid="`role-${membre.id}`"
+              >{{ motDuRole(membre.role, ROLES[membre.role].label) }}</span>
               <span
                 v-if="membre.phone"
                 class="tabular truncate text-sm text-ink-muted"
@@ -322,10 +445,9 @@ useHead({ title: 'Membres — eTontine' })
                 class="text-sm text-ink-muted"
                 :data-testid="`parts-${membre.id}`"
               >
-                {{ membre.shares }} part{{ membre.shares > 1 ? 's' : '' }}
+                {{ $t('tontine.membres.p0_part_p1', { p0: membre.shares, p1: membre.shares > 1 ? 's' : '' }) }}
                 <template v-if="membre.positions.length > 0">
-                  · position{{ membre.positions.length > 1 ? 's' : '' }}
-                  {{ membre.positions.join(' et ') }}
+                  {{ $t('tontine.membres.position_p0_p1', { p0: membre.positions.length > 1 ? 's' : '', p1: membre.positions.join(` ${$t('tontine.membres.et')} `) }) }}
                 </template>
               </span>
             </div>
@@ -339,12 +461,126 @@ useHead({ title: 'Membres — eTontine' })
 
               <Button
                 v-if="estPresident && membre.status === 'active' && membre.role !== 'president'"
-                :label="sortieOuverte === membre.id ? 'Annuler' : 'Faire sortir'"
+                :label="sortieOuverte === membre.id ? $t('commun.annuler') : $t('tontine.membres.faire_sortir')"
                 class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-sortie-${membre.id}`"
                 @click="sortieOuverte = sortieOuverte === membre.id ? null : membre.id"
               />
             </div>
+          </li>
+
+          <!-- Le bureau : rôle, présidence, défaillance. Réservé au président,
+               sur les membres actifs qui ne sont pas lui. -->
+          <li
+            v-if="estPresident && membre.status === 'active' && membre.role !== 'president'"
+            class="-mt-1 flex flex-col gap-3 rounded-b-card border border-t-0 border-line bg-surface-muted px-3 pt-3 pb-3"
+            :data-testid="`bureau-${membre.id}`"
+          >
+            <div class="flex flex-wrap items-end gap-2">
+              <label
+                class="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-ink-muted"
+                :for="`role-${membre.id}`"
+              >
+                {{ $t('tontine.membres.role_dans_la_tontine') }}
+                <select
+                  :id="`role-${membre.id}`"
+                  :value="roleDe(membre)"
+                  class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+                  :data-testid="`champ-role-${membre.id}`"
+                  @change="roleChoisi[membre.id] = ($event.target as HTMLSelectElement).value as MembershipRoleId"
+                >
+                  <option
+                    v-for="r in ROLES_NOMMABLES"
+                    :key="r"
+                    :value="r"
+                  >
+                    {{ motDuRole(r, ROLES[r].label) }}
+                  </option>
+                </select>
+              </label>
+              <Button
+                :label="decisionEnCours === membre.id ? $t('commun.envoi_en_cours') : $t('tontine.membres.nommer')"
+                :disabled="decisionEnCours !== null || roleDe(membre) === membre.role"
+                class="bg-brand text-sm text-brand-ink hover:bg-brand-strong"
+                :data-testid="`bouton-nommer-${membre.id}`"
+                @click="nommer(membre)"
+              />
+            </div>
+            <p class="text-xs text-ink-muted">
+              {{ roleDescription(roleDe(membre), ROLES[roleDe(membre)].description) }}
+              <!-- Le rôle se donne avant le compte — « il installe demain » —
+                   mais ne s'exerce qu'avec lui : on le dit. -->
+              <template v-if="!membre.userId">
+                {{ $t('tontine.membres.sans_compte_il_ne') }}
+              </template>
+            </p>
+
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-if="membre.userId"
+                type="button"
+                class="min-h-touch text-left text-sm text-brand underline underline-offset-4"
+                :data-testid="`bouton-presidence-${membre.id}`"
+                @click="presidenceOuverte = presidenceOuverte === membre.id ? null : membre.id"
+              >
+                {{ presidenceOuverte === membre.id ? $t('commun.annuler') : $t('tontine.membres.lui_passer_la_presidence') }}
+              </button>
+              <button
+                v-if="tontine?.status === 'running'"
+                type="button"
+                class="min-h-touch text-left text-sm text-disputed-ink underline underline-offset-4"
+                :data-testid="`bouton-defaillance-${membre.id}`"
+                @click="defaillanceOuverte = defaillanceOuverte === membre.id ? null : membre.id"
+              >
+                {{ defaillanceOuverte === membre.id ? $t('commun.annuler') : $t('tontine.membres.declarer_defaillant') }}
+              </button>
+            </div>
+          </li>
+
+          <li
+            v-if="presidenceOuverte === membre.id"
+            class="flex flex-col gap-3 rounded-card border border-declared-ink/20 bg-declared-surface p-4"
+            :data-testid="`confirmation-presidence-${membre.id}`"
+          >
+            <p class="text-sm text-declared-ink">
+              {{ $t('tontine.membres.p0_deviendra_president_c', { p0: membre.name ?? $t('tontine.membres.ce_membre') }) }}
+            </p>
+            <Button
+              :label="decisionEnCours === membre.id ? $t('tontine.membres.transfert') : $t('tontine.membres.confirmer_le_transfert')"
+              :disabled="decisionEnCours !== null"
+              class="bg-brand text-brand-ink hover:bg-brand-strong"
+              :data-testid="`bouton-confirmer-presidence-${membre.id}`"
+              @click="passerPresidence(membre.id)"
+            />
+          </li>
+
+          <li
+            v-if="defaillanceOuverte === membre.id"
+            class="flex flex-col gap-3 rounded-card border border-disputed-ink/20 bg-disputed-surface p-4"
+            :data-testid="`confirmation-defaillance-${membre.id}`"
+          >
+            <p class="text-sm text-disputed-ink">
+              {{ $t('tontine.membres.un_membre_defaillant_a') }}
+              <template v-if="membre.resteDu > 0">
+                {{ $t('tontine.membres.ce_qu_il_doit') }}
+                <AmountDisplay
+                  :amount="membre.resteDu"
+                  size="sm"
+                />
+                {{ $t('tontine.membres.sera_inscrit_au_registre') }}
+              </template>
+              <template v-else>
+                {{ $t('tontine.membres.le_registre_en_gardera') }}
+              </template>
+              {{ $t('tontine.membres.rien_n_est_publie') }}
+            </p>
+            <Button
+              :label="decisionEnCours === membre.id ? $t('commun.envoi_en_cours') : $t('tontine.membres.declarer_defaillant')"
+              :disabled="decisionEnCours !== null"
+              class="bg-disputed-ink text-surface"
+              :data-testid="`bouton-confirmer-defaillance-${membre.id}`"
+              @click="declarerDefaillant(membre.id)"
+            />
           </li>
 
           <!-- Ce qu'une sortie laisse derrière elle, dit avant de la faire.
@@ -356,22 +592,20 @@ useHead({ title: 'Membres — eTontine' })
           >
             <p class="text-sm text-disputed-ink">
               <template v-if="membre.resteDu > 0">
-                {{ membre.name ?? 'Ce membre' }} doit encore
+                {{ $t('tontine.membres.p0_doit_encore', { p0: membre.name ?? $t('tontine.membres.ce_membre') }) }}
                 <AmountDisplay
                   :amount="membre.resteDu"
                   size="sm"
                 />
-                sur les tours en cours. Le montant sera inscrit au registre avec
-                son départ.
+                {{ $t('tontine.membres.sur_les_tours_en') }}
               </template>
               <template v-else>
-                {{ membre.name ?? 'Ce membre' }} ne doit rien sur les tours en
-                cours. Son départ sera inscrit au registre.
+                {{ $t('tontine.membres.p0_ne_doit_rien', { p0: membre.name ?? $t('tontine.membres.ce_membre') }) }}
               </template>
             </p>
 
             <Button
-              :label="decisionEnCours === membre.id ? 'Sortie…' : 'Confirmer la sortie'"
+              :label="decisionEnCours === membre.id ? $t('tontine.membres.sortie') : $t('tontine.membres.confirmer_la_sortie')"
               :disabled="decisionEnCours !== null"
               class="bg-brand text-brand-ink hover:bg-brand-strong"
               :data-testid="`bouton-confirmer-sortie-${membre.id}`"
@@ -386,7 +620,7 @@ useHead({ title: 'Membres — eTontine' })
         class="text-sm text-ink-muted"
         data-testid="total-parts"
       >
-        {{ tontine.totalShares }} parts au total · pot attendu par tour :
+        {{ $t('tontine.membres.p0_parts_au_total', { p0: tontine.totalShares }) }}
         <AmountDisplay :amount="tontine.expectedPot" />
       </p>
 
@@ -397,11 +631,10 @@ useHead({ title: 'Membres — eTontine' })
         data-testid="section-adhesions"
       >
         <h2 class="font-semibold text-ink">
-          Demandes d’adhésion
+          {{ $t('tontine.membres.demandes_d_adhesion') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Ces personnes ont ouvert ton lien d’invitation. Tant que tu n’as pas
-          donné ton accord, elles ne cotisent pas et ne prennent pas la main.
+          {{ $t('tontine.membres.ces_personnes_ont_ouvert') }}
         </p>
 
         <ul class="flex flex-col gap-3">
@@ -412,7 +645,7 @@ useHead({ title: 'Membres — eTontine' })
             :data-testid="`adhesion-${membre.id}`"
           >
             <span class="font-semibold text-ink">
-              {{ membre.name ?? 'Membre inscrit' }}
+              {{ membre.name ?? $t('tontine.membres.membre_inscrit') }}
             </span>
             <span
               v-if="membre.phone"
@@ -423,7 +656,7 @@ useHead({ title: 'Membres — eTontine' })
               class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
               :for="`parts-adhesion-${membre.id}`"
             >
-              Nombre de parts
+              {{ $t('tontine.membres.nombre_de_parts') }}
               <InputText
                 :id="`parts-adhesion-${membre.id}`"
                 :value="partsDe(membre.id)"
@@ -436,14 +669,14 @@ useHead({ title: 'Membres — eTontine' })
 
             <div class="flex flex-col gap-2 sm:flex-row">
               <Button
-                :label="decisionEnCours === membre.id ? 'Enregistrement…' : 'Approuver'"
+                :label="decisionEnCours === membre.id ? $t('tontine.membres.enregistrement') : $t('tontine.membres.approuver')"
                 :disabled="decisionEnCours !== null"
                 class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
                 :data-testid="`bouton-approuver-${membre.id}`"
                 @click="decider(membre.id, 'active')"
               />
               <Button
-                label="Refuser"
+                :label="$t('tontine.membres.refuser')"
                 :disabled="decisionEnCours !== null"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                 :data-testid="`bouton-refuser-${membre.id}`"
@@ -460,58 +693,64 @@ useHead({ title: 'Membres — eTontine' })
         class="flex flex-col gap-3 card-surface p-4"
       >
         <h2 class="font-semibold text-ink">
-          Ajouter un membre
+          {{ $t('tontine.membres.ajouter_un_membre') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Pour quelqu’un qui n’a pas encore l’application. Il recevra un SMS de
-          confirmation.
+          {{ $t('tontine.membres.pour_quelqu_un_qui') }}
         </p>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="nom-membre"
         >
-          Nom
+          {{ $t('tontine.membres.nom') }}
           <InputText
             id="nom-membre"
             v-model="nouveauNom"
+            v-bind="nouveauNomAttrs"
+            :aria-invalid="Boolean(ajout.erreur('name'))"
             data-testid="champ-nom-membre"
           />
+          <ErreurChamp :message="ajout.erreur('name')" />
         </label>
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="numero-membre"
         >
-          Numéro
+          {{ $t('tontine.membres.numero') }}
           <InputText
             id="numero-membre"
             v-model="nouveauNumero"
+            v-bind="nouveauNumeroAttrs"
             inputmode="tel"
             placeholder="07 07 12 34 56"
+            :aria-invalid="Boolean(ajout.erreur('phone'))"
             data-testid="champ-numero-membre"
           />
+          <ErreurChamp :message="ajout.erreur('phone')" />
         </label>
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="parts-membre"
         >
-          Nombre de parts
+          {{ $t('tontine.membres.nombre_de_parts') }}
           <InputText
             id="parts-membre"
             :value="nouvellesParts"
             inputmode="numeric"
+            :aria-invalid="Boolean(ajout.erreur('shares'))"
             data-testid="champ-parts-membre"
             @input="nouvellesParts = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 1"
           />
+          <ErreurChamp :message="ajout.erreur('shares')" />
           <span class="text-sm font-normal text-ink-subtle">
-            Deux parts = deux positions dans la rotation, deux cotisations par
-            tour, et deux fois où il prend la main.
+            {{ $t('tontine.membres.deux_parts_deux_positions') }}
           </span>
         </label>
 
         <Button
-          :label="ajoutEnCours ? 'Ajout…' : 'Ajouter'"
-          :disabled="ajoutEnCours || nouveauNom.length < 3 || nouveauNumero.length < 8"
+          :label="ajoutEnCours ? $t('tontine.membres.ajout') : $t('tontine.membres.ajouter')"
+          :disabled="ajoutEnCours || (nouveauNom ?? '').length < 3 || (nouveauNumero ?? '').length < 8"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-ajouter-membre"
           @click="ajouter"
@@ -524,12 +763,12 @@ useHead({ title: 'Membres — eTontine' })
         class="flex flex-col gap-3 card-surface p-4"
       >
         <h2 class="font-semibold text-ink">
-          Inviter
+          {{ $t('tontine.membres.inviter') }}
         </h2>
 
         <Button
           v-if="!invitation"
-          label="Créer un lien d’invitation"
+          :label="$t('tontine.membres.creer_un_lien_d')"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
           data-testid="bouton-creer-lien"
           @click="creerLien"
@@ -560,11 +799,10 @@ useHead({ title: 'Membres — eTontine' })
         data-testid="section-ordre"
       >
         <h2 class="font-semibold text-ink">
-          Ordre de passage
+          {{ $t('tontine.membres.ordre_de_passage') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          L’ordre convenu entre vous se pose ici. Le tirage au sort n’est qu’une
-          autre façon de trancher, pas la seule.
+          {{ $t('tontine.membres.l_ordre_convenu_entre') }}
         </p>
 
         <ul class="flex flex-col gap-2">
@@ -583,7 +821,7 @@ useHead({ title: 'Membres — eTontine' })
             <Button
               :disabled="index === 0"
               class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
-              :aria-label="`Faire monter ${part.nom}`"
+              :aria-label="$t('tontine.membres.faire_monter', { nom: part.nom })"
               :data-testid="`monter-${part.shareId}`"
               @click="deplacer(index, -1)"
             >
@@ -596,7 +834,7 @@ useHead({ title: 'Membres — eTontine' })
             <Button
               :disabled="index === ordre.length - 1"
               class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
-              :aria-label="`Faire descendre ${part.nom}`"
+              :aria-label="$t('tontine.membres.faire_descendre', { nom: part.nom })"
               :data-testid="`descendre-${part.shareId}`"
               @click="deplacer(index, 1)"
             >
@@ -611,7 +849,7 @@ useHead({ title: 'Membres — eTontine' })
 
         <Button
           v-if="ordreModifie"
-          :label="ordreEnCours ? 'Enregistrement…' : 'Enregistrer cet ordre'"
+          :label="ordreEnCours ? $t('tontine.membres.enregistrement') : $t('tontine.membres.enregistrer_cet_ordre')"
           :disabled="ordreEnCours"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-enregistrer-ordre"
@@ -623,21 +861,66 @@ useHead({ title: 'Membres — eTontine' })
         v-if="estPresident && tontine?.status === 'open'"
         class="mt-auto flex flex-col gap-2 pt-2"
       >
+        <!-- La date du premier tour, dite avant de démarrer : c'est d'elle
+             que toutes les échéances découlent, et elle a pu passer pendant
+             que le groupe se remplissait. -->
+        <p
+          class="flex items-center gap-2 rounded-control bg-surface-muted p-3 text-sm text-ink-muted"
+          data-testid="date-premier-tour"
+        >
+          <Icon
+            name="lucide:calendar"
+            size="1rem"
+            class="shrink-0"
+            aria-hidden="true"
+          />
+          <span>
+            {{ $t('tontine.membres.premier_tour_le') }} <strong class="font-semibold text-ink">{{ formatDate(tontine.startDate) }}</strong>
+          </span>
+          <NuxtLink
+            :to="`/app/tontine/${tontineId}/reglages`"
+            class="ml-auto min-h-touch inline-flex items-center font-semibold text-brand"
+            data-testid="lien-changer-date"
+          >
+            {{ $t('tontine.membres.changer') }}
+          </NuxtLink>
+        </p>
+
+        <ul
+          v-if="blocagesDemarrage.length > 0"
+          class="flex flex-col gap-2"
+          data-testid="blocages-demarrage"
+        >
+          <li
+            v-for="blocage in blocagesDemarrage"
+            :key="blocage.champ"
+            class="flex items-start gap-2 rounded-control bg-late-surface p-3 text-sm text-late-ink"
+          >
+            <Icon
+              name="lucide:triangle-alert"
+              size="1rem"
+              class="mt-0.5 shrink-0"
+              aria-hidden="true"
+            />
+            {{ blocage.message }}
+          </li>
+        </ul>
+
         <Button
-          label="Tirer l’ordre au sort"
+          :label="$t('tontine.membres.tirer_l_ordre_au')"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
           data-testid="bouton-tirage"
           @click="tirerAuSort"
         />
         <Button
-          label="Démarrer la tontine"
+          :label="$t('tontine.membres.demarrer_la_tontine')"
           :disabled="!peutDemarrer"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-demarrer"
           @click="demarrer"
         />
         <p class="text-sm text-ink-subtle">
-          Au démarrage, l’ordre de passage est figé et tous les tours sont créés.
+          {{ $t('tontine.membres.au_demarrage_l_ordre') }}
         </p>
       </div>
     </template>

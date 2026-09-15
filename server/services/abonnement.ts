@@ -3,10 +3,7 @@ import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { memberships, subscriptionRequests, tontines, users } from '../db/schema.ts'
 import type { SubscriptionRequest, User } from '../db/schema.ts'
-import {
-  PALIER_PAR_ID,
-  depasse,
-} from '../../shared/constants/abonnement.ts'
+import { PALIER_PAR_ID, depasse, referenceDeReglement } from '../../shared/constants/abonnement.ts'
 import type {
   Limite,
   Palier,
@@ -210,6 +207,8 @@ export interface EtatAbonnement {
   auDessus: boolean
   demandeEnCours: {
     id: string
+    /** À citer au règlement, pour que l'administrateur rapproche le paiement. */
+    reference: string
     tier: string
     periodicity: PlanPeriodicity
     priceFcfa: number
@@ -268,6 +267,7 @@ export function etatAbonnement(db: Db, user: User, maintenant = new Date()): Eta
     demandeEnCours: demande
       ? {
           id: demande.id,
+          reference: referenceDeReglement(demande.id),
           tier: demande.tier,
           periodicity: demande.periodicity,
           priceFcfa: demande.priceFcfa,

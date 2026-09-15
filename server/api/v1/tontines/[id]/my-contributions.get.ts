@@ -75,6 +75,7 @@ export default defineEventHandler(async (event) => {
           source: paymentDeclarations.source,
           declaredAt: paymentDeclarations.declaredAt,
           declaredBy: paymentDeclarations.declaredBy,
+          proofUrl: paymentDeclarations.proofUrl,
           memberAcknowledgedAt: paymentDeclarations.memberAcknowledgedAt,
           decision: paymentDeclarations.decision,
           decidedAt: paymentDeclarations.decidedAt,

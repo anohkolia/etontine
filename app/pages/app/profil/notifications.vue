@@ -11,6 +11,7 @@
  * réveillée et l'application désinstallée le lendemain.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 interface Reglage {
   pushEnabled: boolean
@@ -42,11 +43,11 @@ const erreur = ref<string | null>(null)
 const { etat: etatPush, erreur: erreurPush, enCours: pushEnCours, rafraichir: rafraichirPush, activer } = usePush()
 
 const MESSAGE_PUSH: Record<string, string> = {
-  'indisponible': 'Ce navigateur ne sait pas recevoir de notifications. Elles restent consultables ici.',
-  'non-configure': 'Les notifications ne sont pas encore activées sur ce serveur. Elles restent consultables ici.',
-  'refuse': 'Tu as refusé les notifications pour ce site. Il faut les réautoriser dans les réglages du navigateur.',
-  'inactif': 'Cet appareil ne reçoit pas encore les notifications.',
-  'actif': 'Cet appareil reçoit les notifications.',
+  'indisponible': t('profil.notifications.ce_navigateur_ne_sait'),
+  'non-configure': t('profil.notifications.les_notifications_ne_sont'),
+  'refuse': t('profil.notifications.tu_as_refuse_les'),
+  'inactif': t('profil.notifications.cet_appareil_ne_recoit'),
+  'actif': t('profil.notifications.cet_appareil_recoit_les'),
 }
 
 const DEFAUT: Reglage = {
@@ -73,7 +74,7 @@ async function charger() {
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
     etat.value = 'erreur'
   }
 }
@@ -91,11 +92,11 @@ onMounted(async () => {
   await rafraichirPush()
 })
 useEnTete(() => ({
-  titre: 'Notifications',
-  sousTitre: 'Ce que tu reçois, et quand',
-  retour: { to: '/app/profil', label: 'Mon profil' },
+  titre: t('profil.notifications.notifications'),
+  sousTitre: t('profil.notifications.ce_que_tu_recois'),
+  retour: { to: '/app/profil', label: t('commun.mon_profil') },
 }))
-useHead({ title: 'Notifications — eTontine' })
+useHead({ title: t('profil.notifications.notifications_etontine') })
 </script>
 
 <template>
@@ -119,7 +120,7 @@ useHead({ title: 'Notifications — eTontine' })
         data-testid="section-push"
       >
         <h2 class="font-semibold text-ink">
-          Sur cet appareil
+          {{ $t('profil.notifications.sur_cet_appareil') }}
         </h2>
 
         <p
@@ -137,7 +138,7 @@ useHead({ title: 'Notifications — eTontine' })
 
         <Button
           v-if="etatPush === 'inactif'"
-          :label="pushEnCours ? 'Activation…' : 'Activer sur cet appareil'"
+          :label="pushEnCours ? $t('profil.notifications.activation') : $t('profil.notifications.activer_sur_cet_appareil')"
           :disabled="pushEnCours"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-activer-push"
@@ -156,7 +157,7 @@ useHead({ title: 'Notifications — eTontine' })
       <!-- Réglages généraux -->
       <section class="flex flex-col gap-3 card-surface p-4">
         <h2 class="font-semibold text-ink">
-          Pour toutes mes tontines
+          {{ $t('profil.notifications.pour_toutes_mes_tontines') }}
         </h2>
 
         <label class="flex min-h-touch items-start gap-3 text-sm">
@@ -168,19 +169,19 @@ useHead({ title: 'Notifications — eTontine' })
             @change="enregistrer(null, { remindersEnabled: ($event.target as HTMLInputElement).checked })"
           >
           <span>
-            <span class="font-medium text-ink">Rappels de cotisation</span>
+            <span class="font-medium text-ink">{{ $t('profil.notifications.rappels_de_cotisation') }}</span>
             <span class="block text-ink-muted">
-              Deux rappels par tour : deux jours avant, puis le jour même.
+              {{ $t('profil.notifications.deux_rappels_par_tour') }}
             </span>
           </span>
         </label>
 
         <fieldset class="flex flex-col gap-2 border-t border-line pt-3">
           <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Ne pas me déranger
+            {{ $t('profil.notifications.ne_pas_me_deranger') }}
           </legend>
           <p class="text-sm text-ink-subtle">
-            Aucune notification pendant cette plage. Elle peut traverser minuit.
+            {{ $t('profil.notifications.aucune_notification_pendant_cette') }}
           </p>
 
           <div class="flex flex-wrap items-center gap-3">
@@ -188,7 +189,7 @@ useHead({ title: 'Notifications — eTontine' })
               class="flex flex-col gap-1.5 text-sm text-ink-muted"
               for="silence-debut"
             >
-              De
+              {{ $t('profil.notifications.de') }}
               <input
                 id="silence-debut"
                 type="time"
@@ -222,10 +223,10 @@ useHead({ title: 'Notifications — eTontine' })
         class="flex flex-col gap-3"
       >
         <h2 class="font-semibold text-ink">
-          Par tontine
+          {{ $t('profil.notifications.par_tontine') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Un réglage propre à une tontine l’emporte sur le réglage général.
+          {{ $t('profil.notifications.un_reglage_propre_a') }}
         </p>
 
         <ul class="flex flex-col gap-2">
@@ -244,7 +245,7 @@ useHead({ title: 'Notifications — eTontine' })
                 :data-testid="`bascule-${entree.tontineId}`"
                 @change="enregistrer(entree.tontineId, { remindersEnabled: ($event.target as HTMLInputElement).checked })"
               >
-              Rappels
+              {{ $t('profil.notifications.rappels') }}
             </label>
           </li>
         </ul>

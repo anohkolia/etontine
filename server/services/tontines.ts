@@ -7,7 +7,9 @@ import {
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
 import { canauxDeTontine, rattacherCanal } from './canaux.ts'
+import { appendLedger } from './ledger.ts'
 import { attribuerParts } from './membres.ts'
+import { notifierTontine } from './notifications.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -250,4 +252,101 @@ export function tourCourant(db: Db, tontineId: string) {
     .all()
 
   return tour ?? null
+}
+
+/**
+ * Annule une tontine publiée qui n'a pas démarré : `open → archived`.
+ *
+ * Une tontine publiée qui ne démarre jamais — le groupe ne s'est pas réuni,
+ * le président a changé d'avis — restait `open` pour toujours, et avec elle
+ * une place comptée au quota d'abonnement. Aucune route ne la fermait.
+ *
+ * Rien n'a été cotisé, rien n'est dû : il n'y a pas de tour. L'annulation
+ * s'écrit au registre avec son motif, et chaque membre est prévenu — quelqu'un
+ * qui attendait le démarrage doit savoir qu'il n'aura pas lieu. Une tontine en
+ * cours ne s'annule pas : elle va au bout de son cycle, la table d'états le
+ * garantit.
+ */
+export function annulerTontine(db: Db, tontineId: string, acteurId: string, motif: string) {
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
+
+  if (tontine.status === 'draft') {
+    throw apiError('INVALID_TRANSITION', 'Un brouillon ne s’annule pas : il se supprime.', { field: 'status' })
+  }
+  assertTransition('tontine', tontine.status, 'archived')
+
+  if (tontine.status !== 'open') {
+    throw apiError('INVALID_TRANSITION', 'Seule une tontine publiée et non démarrée peut être annulée.', { field: 'status' })
+  }
+
+  db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId)).run()
+
+  appendLedger(db, {
+    tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'annulation', motif },
+  })
+
+  // Le nom de la tontine n'entre pas dans le texte : un nom peut contenir un
+  // nombre, et la garde de la règle 21 le prendrait pour un montant.
+  notifierTontine(db, tontineId, {
+    type: 'tontine_annulee',
+    title: 'Tontine annulée',
+    body: 'Une tontine que tu avais rejointe a été annulée avant son démarrage. Rien n’était dû.',
+    url: '/app',
+  }, { sauf: [acteurId] })
+}
+
+/**
+ * Archive une tontine terminée : `closed → archived`.
+ *
+ * Le cycle est fini, chacun a pris la main. Archiver la sort du tableau de
+ * bord — pas du registre, qui reste lisible et exportable — pour que la liste
+ * ne s'allonge pas d'année en année. Le geste est du président, et il s'écrit.
+ */
+export function archiverTontine(db: Db, tontineId: string, acteurId: string) {
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
+
+  if (tontine.status !== 'closed') {
+    throw apiError('INVALID_TRANSITION', 'Seule une tontine terminée peut être archivée.', { field: 'status' })
+  }
+  assertTransition('tontine', tontine.status, 'archived')
+
+  db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId)).run()
+
+  appendLedger(db, {
+    tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'archivage' },
+  })
+}
+
+/**
+ * Supprime un brouillon.
+ *
+ * Un brouillon n'a ni tour, ni cotisation, ni écriture au registre qui vaille :
+ * il n'existe que pour son auteur. Le garder « archivé » encombrerait la base
+ * de tontines qui n'ont jamais existé pour personne. Les clés étrangères sont
+ * en cascade : adhésions, parts et rattachements de canaux partent avec lui.
+ *
+ * Tout autre état est refusé : dès qu'une tontine est publiée, d'autres
+ * personnes la voient, et sa fin doit s'écrire — c'est `annulerTontine`.
+ */
+export function supprimerBrouillon(db: Db, tontineId: string) {
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
+
+  if (tontine.status !== 'draft') {
+    throw apiError(
+      'INVALID_TRANSITION',
+      'Seul un brouillon se supprime. Une tontine publiée s’annule, une tontine terminée s’archive.',
+      { field: 'status' },
+    )
+  }
+
+  db.delete(tontines).where(eq(tontines.id, tontineId)).run()
 }

@@ -2,6 +2,8 @@
 import type { PlanPeriodicity } from '#shared/constants/abonnement'
 import { AVANTAGES_COMMUNS, MOIS_OFFERTS, PALIERS, libelleLimite } from '#shared/constants/abonnement'
 
+const { t } = useI18n()
+
 /**
  * Grille tarifaire publique, pré-rendue pour le SEO.
  *
@@ -23,11 +25,10 @@ import { AVANTAGES_COMMUNS, MOIS_OFFERTS, PALIERS, libelleLimite } from '#shared
  * seule page, souvent atteinte sur une connexion facturée à la donnée.
  */
 useHead({
-  title: 'Tarifs — eTontine',
+  title: t('public.tarifs.tarifs_etontine'),
   meta: [{
     name: 'description',
-    content: 'Trois paliers, au forfait. Le registre, les preuves et les reçus '
-      + 'restent gratuits à tous les paliers.',
+    content: t('public.tarifs.trois_paliers_au_forfait'),
   }],
 })
 
@@ -42,37 +43,24 @@ function prix(palier: (typeof PALIERS)[number]): number {
 
 const QUESTIONS = [
   {
-    q: 'Qui paie l’abonnement ?',
-    r: 'Le président, de sa poche. On ne touche jamais à la caisse du groupe : '
-      + 'l’application ne détient pas les fonds de la tontine, et ne propose '
-      + 'aucun moyen de les faire payer à sa place.',
+    q: t('public.tarifs.qui_paie_l_abonnement'),
+    r: t('public.tarifs.le_president_de_sa'),
   },
   {
-    q: 'Prenez-vous un pourcentage sur les cotisations ?',
-    r: 'Jamais. C’est un forfait, quel que soit le montant qui circule dans '
-      + 'vos tontines. Nous ne voyons pas passer votre argent : il va '
-      + 'directement du membre au numéro de collecte du président.',
+    q: t('public.tarifs.prenez_vous_un_pourcentage'),
+    r: t('public.tarifs.jamais_c_est_un'),
   },
   {
-    q: 'Que perd-on en restant au palier gratuit ?',
-    r: 'Rien de ce qui protège le groupe. Le registre complet, les preuves de '
-      + 'paiement, les reçus vérifiables, le contrôle d’intégrité et le '
-      + 'procès-verbal de fin de cycle sont inclus partout. Le palier gratuit '
-      + 'limite le nombre de tontines menées en même temps et la taille du groupe.',
+    q: t('public.tarifs.que_perd_on_en'),
+    r: t('public.tarifs.rien_de_ce_qui'),
   },
   {
-    q: 'Que se passe-t-il si j’atteins la limite ?',
-    r: 'Vos tontines en cours continuent normalement, jusqu’au bout du cycle. '
-      + 'Rien n’est bloqué ni effacé. Vous ne pouvez simplement pas en ouvrir '
-      + 'une nouvelle, ni dépasser le nombre de membres, tant que vous êtes '
-      + 'au-dessus de la limite.',
+    q: t('public.tarifs.que_se_passe_t'),
+    r: t('public.tarifs.vos_tontines_en_cours'),
   },
   {
-    q: 'Comment se paie l’abonnement ?',
-    r: 'À la main, au mois ou à l’année. Il n’y a pas de prélèvement '
-      + 'automatique : sur les moyens de paiement disponibles ici, un '
-      + 'prélèvement récurrent n’est pas fiable, et nous préférons ne rien '
-      + 'promettre que nous ne tenons pas.',
+    q: t('public.tarifs.comment_se_paie_l'),
+    r: t('public.tarifs.a_la_main_au'),
   },
 ] as const
 </script>
@@ -85,25 +73,23 @@ const QUESTIONS = [
           to="/"
           class="text-base font-bold"
         >
-          eTontine
+          {{ $t('public.tarifs.etontine') }}
         </NuxtLink>
         <NuxtLink
           to="/login"
           class="min-h-touch inline-flex items-center rounded-full bg-night-ink/15 px-4 text-sm font-semibold transition-colors hover:bg-night-ink/25"
           data-testid="lien-connexion"
         >
-          Se connecter
+          {{ $t('public.tarifs.se_connecter') }}
         </NuxtLink>
       </nav>
 
       <div class="mx-auto mt-10 max-w-2xl text-center">
         <h1 class="text-3xl font-bold md:text-4xl">
-          Un forfait, jamais un pourcentage
+          {{ $t('public.tarifs.un_forfait_jamais_un') }}
         </h1>
         <p class="mt-3 leading-relaxed text-night-ink/80">
-          Ce que vous payez, c’est le confort d’organiser plusieurs groupes.
-          Jamais la confiance : le registre et les preuves restent gratuits à
-          tous les paliers.
+          {{ $t('public.tarifs.ce_que_vous_payez') }}
         </p>
       </div>
     </header>
@@ -117,7 +103,7 @@ const QUESTIONS = [
         data-testid="avantages-communs"
       >
         <h2 class="text-lg font-bold text-ink">
-          Inclus à tous les paliers, gratuit compris
+          {{ $t('public.tarifs.inclus_a_tous_les') }}
         </h2>
         <ul class="mt-3 grid gap-2 sm:grid-cols-2">
           <li
@@ -147,13 +133,13 @@ const QUESTIONS = [
            d'écran, pas seulement peint. -->
       <fieldset class="mt-10 flex flex-col items-center gap-2">
         <legend class="sr-only">
-          Périodicité de paiement
+          {{ $t('public.tarifs.periodicite_de_paiement') }}
         </legend>
         <div class="inline-flex rounded-full border border-line bg-surface p-1">
           <label
             v-for="choix in [
-              { clef: 'monthly' as const, libelle: 'Au mois' },
-              { clef: 'yearly' as const, libelle: 'À l’année' },
+              { clef: 'monthly' as const, libelle: $t('commun.au_mois') },
+              { clef: 'yearly' as const, libelle: $t('commun.a_l_annee') },
             ]"
             :key="choix.clef"
             class="min-h-touch inline-flex cursor-pointer items-center rounded-full px-5 text-sm font-semibold"
@@ -177,7 +163,7 @@ const QUESTIONS = [
           </label>
         </div>
         <p class="text-sm text-ink-muted">
-          À l’année, {{ MOIS_OFFERTS }} mois sont offerts.
+          {{ $t('public.tarifs.a_l_annee_p0', { p0: MOIS_OFFERTS }) }}
         </p>
       </fieldset>
 
@@ -201,26 +187,26 @@ const QUESTIONS = [
               class="amount mt-1 text-2xl font-bold text-ink"
               :data-testid="`prix-${palier.id}`"
             >
-              {{ palier.prixMensuel === 0 ? 'Gratuit' : format(prix(palier)) }}
+              {{ palier.prixMensuel === 0 ? $t('public.tarifs.gratuit') : format(prix(palier)) }}
             </p>
             <p
               v-if="palier.prixMensuel > 0"
               class="text-sm text-ink-muted"
             >
-              {{ periodicite === 'yearly' ? 'par an' : 'par mois' }}, payé par le président
+              {{ $t('public.tarifs.p0_paye_par_le', { p0: periodicite === 'yearly' ? $t('commun.par_an') : $t('commun.par_mois') }) }}
             </p>
             <p
               v-else
               class="text-sm text-ink-muted"
             >
-              sans limite de durée
+              {{ $t('public.tarifs.sans_limite_de_duree') }}
             </p>
           </div>
 
           <dl class="flex flex-col gap-2 border-y border-line py-3 text-sm">
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-ink-muted">
-                Tontines en cours
+                {{ $t('public.tarifs.tontines_en_cours') }}
               </dt>
               <dd
                 class="font-semibold text-ink"
@@ -231,7 +217,7 @@ const QUESTIONS = [
             </div>
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-ink-muted">
-                Membres par tontine
+                {{ $t('public.tarifs.membres_par_tontine') }}
               </dt>
               <dd
                 class="font-semibold text-ink"
@@ -268,18 +254,18 @@ const QUESTIONS = [
             to="/app/abonnement"
             class="min-h-touch mt-auto inline-flex items-center justify-center rounded-full px-5 text-sm font-semibold"
             :class="palier.id === 'free'
-              ? 'border border-line-strong text-ink hover:bg-surface-muted'
+              ? $t('public.tarifs.border_border_line_strong')
               : 'bg-brand text-brand-ink hover:bg-brand-strong'"
             :data-testid="`choisir-${palier.id}`"
           >
-            {{ palier.id === 'free' ? 'Commencer sans payer' : `Passer au palier ${palier.nom}` }}
+            {{ palier.id === 'free' ? $t('public.tarifs.commencer_sans_payer') : `Passer au palier ${palier.nom}` }}
           </NuxtLink>
         </li>
       </ul>
 
       <section class="mt-12">
         <h2 class="text-2xl font-bold text-ink">
-          Les questions qu’on nous pose
+          {{ $t('public.tarifs.les_questions_qu_on') }}
         </h2>
         <dl class="mt-5 flex flex-col gap-3">
           <div
@@ -301,13 +287,12 @@ const QUESTIONS = [
         to="/"
         class="min-h-touch mt-8 inline-flex items-center gap-2 text-sm text-brand underline underline-offset-4"
       >
-        Retour à l’accueil
+        {{ $t('public.tarifs.retour_a_l_accueil') }}
       </NuxtLink>
     </main>
 
     <footer class="border-t border-line px-5 py-8 text-center text-xs text-ink-muted">
-      eTontine — Abidjan, Côte d’Ivoire. L’application ne détient jamais les
-      fonds : elle enregistre ce que le groupe déclare et confirme.
+      {{ $t('public.tarifs.etontine_abidjan_cote_d') }}
     </footer>
   </div>
 </template>

@@ -22,15 +22,19 @@ test('sans pièce d’identité, l’option « tontine ouverte » est grisée ma
   await expect(page.getByTestId('acces-prive')).toBeEnabled()
 })
 
-test('avec la pièce d’identité vérifiée, l’option ouverte devient choisissable', async ({ page }) => {
+test('avec la pièce d’identité vérifiée, l’option ouverte reste annoncée mais pas encore choisissable', async ({ page }) => {
   await seConnecter(page)
   await verifierIdentite(page)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
 
-  await expect(page.getByTestId('acces-ouvert')).toBeEnabled()
+  // Le palier ne manque plus : son explication disparaît. Mais la page de
+  // découverte publique n'existe pas encore, et l'option le dit au lieu de
+  // laisser cocher une promesse vide.
   await expect(page.getByTestId('explication-kyc')).toBeHidden()
+  await expect(page.getByTestId('acces-ouvert')).toBeDisabled()
+  await expect(page.getByTestId('explication-decouverte')).toContainText('Bientôt')
 })
 
 test('le simulateur se met à jour à chaque frappe', async ({ page }) => {

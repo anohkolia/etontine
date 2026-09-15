@@ -13,6 +13,7 @@
  * accepté d'écrire, il n'a rien à filtrer.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const { formatDate } = useDate()
 const { rafraichirCompteur } = useNotifications()
@@ -56,7 +57,7 @@ async function charger() {
       return
     }
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
     etat.value = 'erreur'
   }
 }
@@ -72,7 +73,7 @@ async function chargerSuite() {
     suite.value = reponse.nextCursor
   }
   catch {
-    erreur.value = 'Impossible de charger la suite.'
+    erreur.value = t('notifications.impossible_de_charger_la')
   }
   finally {
     chargeSuite.value = false
@@ -81,10 +82,10 @@ async function chargerSuite() {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Notifications',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('notifications.notifications'),
+  retour: { to: '/app', label: t('commun.mes_tontines') },
 }))
-useHead({ title: 'Notifications — eTontine' })
+useHead({ title: t('notifications.notifications_etontine') })
 </script>
 
 <template>
@@ -103,15 +104,15 @@ useHead({ title: 'Notifications — eTontine' })
 
     <EmptyState
       v-else-if="etat === 'hors-ligne'"
-      title="Pas de réseau"
-      description="Tes notifications reviendront dès que la connexion sera revenue."
+      :title="$t('notifications.pas_de_reseau')"
+      :description="$t('notifications.tes_notifications_reviendront_des')"
       icon="lucide:mail"
     />
 
     <EmptyState
       v-else-if="etat === 'vide'"
-      title="Aucune notification"
-      description="Ce qui se passe dans tes tontines apparaîtra ici : cotisations confirmées, pot versé, changement de numéro de collecte."
+      :title="$t('notifications.aucune_notification')"
+      :description="$t('notifications.ce_qui_se_passe')"
       icon="lucide:mail"
     />
 
@@ -139,7 +140,7 @@ useHead({ title: 'Notifications — eTontine' })
           </span>
 
           <component
-            :is="notification.url ? 'NuxtLink' : 'div'"
+            :is="notification.url ? $t('notifications.nuxtlink') : 'div'"
             :to="notification.url ?? undefined"
             class="flex min-w-0 flex-1 flex-col gap-1"
           >
@@ -148,7 +149,7 @@ useHead({ title: 'Notifications — eTontine' })
               <span
                 v-if="!notification.readAt"
                 class="text-xs font-semibold text-brand-strong"
-              >· nouveau</span>
+              >{{ $t('notifications.nouveau') }}</span>
             </span>
             <span class="text-sm text-ink-muted">{{ notification.body }}</span>
             <span class="tabular text-sm text-ink-subtle">
@@ -160,7 +161,7 @@ useHead({ title: 'Notifications — eTontine' })
 
       <Button
         v-if="suite"
-        :label="chargeSuite ? 'Chargement…' : 'Voir les plus anciennes'"
+        :label="chargeSuite ? $t('notifications.chargement') : $t('notifications.voir_les_plus_anciennes')"
         :disabled="chargeSuite"
         class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
         data-testid="bouton-notifications-suite"

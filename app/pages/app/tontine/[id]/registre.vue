@@ -16,6 +16,7 @@ import type { z } from 'zod'
 import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
 
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -31,20 +32,20 @@ interface Ecriture {
 }
 
 const LIBELLE: Record<string, string> = {
-  contribution_declared: 'Cotisation déclarée',
-  contribution_confirmed: 'Cotisation confirmée',
-  contribution_rejected: 'Cotisation rejetée',
-  penalty_applied: 'Amende appliquée',
-  penalty_waived: 'Amende annulée',
-  payout_declared: 'Pot versé',
-  payout_acknowledged: 'Pot reçu',
-  member_joined: 'Membre arrivé',
-  member_left: 'Membre parti',
-  rotation_changed: 'Ordre de passage fixé',
-  settings_changed: 'Réglage modifié',
-  reversal: 'Annulation',
-  declaration_escalated: 'Déclaration en souffrance',
-  cash_unconfirmed: 'Espèces non reconnues',
+  contribution_declared: t('tontine.registre.cotisation_declaree'),
+  contribution_confirmed: t('tontine.registre.cotisation_confirmee'),
+  contribution_rejected: t('tontine.registre.cotisation_rejetee'),
+  penalty_applied: t('tontine.registre.amende_appliquee'),
+  penalty_waived: t('tontine.registre.amende_annulee'),
+  payout_declared: t('tontine.registre.pot_verse'),
+  payout_acknowledged: t('tontine.registre.pot_recu'),
+  member_joined: t('tontine.registre.membre_arrive'),
+  member_left: t('tontine.registre.membre_parti'),
+  rotation_changed: t('tontine.registre.ordre_de_passage_fixe'),
+  settings_changed: t('tontine.registre.reglage_modifie'),
+  reversal: t('tontine.registre.annulation'),
+  declaration_escalated: t('tontine.registre.declaration_en_souffrance'),
+  cash_unconfirmed: t('tontine.registre.especes_non_reconnues'),
 }
 
 const ICONE: Record<string, string> = {
@@ -71,8 +72,60 @@ function estAutoConfirmee(e: Ecriture): boolean {
   return e.type === 'contribution_confirmed' && e.payload.autoConfirmee === true
 }
 
+/**
+ * Un « réglage modifié » ne dit rien : c'est le `changement` du contenu qui
+ * dit s'il s'agit d'un démarrage, d'une nomination, d'une annulation. Sans
+ * cette table, la moitié des faits marquants de la vie d'une tontine se
+ * lisaient sous le même mot.
+ */
+const CHANGEMENT: Record<string, string> = {
+  demarrage: t('tontine.registre.tontine_demarree'),
+  canal_de_collecte: t('tontine.registre.numero_de_collecte_change'),
+  role_modifie: t('tontine.registre.role_modifie'),
+  presidence_transferee: t('tontine.registre.presidence_transferee'),
+  membre_defaillant: t('tontine.registre.membre_declare_defaillant'),
+  annulation: t('tontine.registre.tontine_annulee'),
+  archivage: t('tontine.registre.tontine_archivee'),
+  cloture_tontine: t('tontine.registre.tontine_terminee'),
+  cloture_sans_accuse: t('tontine.registre.tour_clos_sans_accuse'),
+  pot_incomplet_assume: t('tontine.registre.pot_incomplet_assume'),
+  cotisation_rouverte: t('tontine.registre.cotisation_rouverte'),
+  date_demarrage: t('tontine.registre.date_de_demarrage_changee'),
+  numero_change: t('tontine.registre.numero_de_telephone_change'),
+}
+
 function libelleDe(e: Ecriture): string {
-  return estAutoConfirmee(e) ? 'Cotisation confirmée d’office' : (LIBELLE[e.type] ?? e.type)
+  if (estAutoConfirmee(e)) return t('tontine.registre.cotisation_confirmee_d_office')
+  if (e.type === 'settings_changed') {
+    const changement = e.payload.changement
+    if (typeof changement === 'string' && CHANGEMENT[changement]) return CHANGEMENT[changement]!
+  }
+  return LIBELLE[e.type] ?? e.type
+}
+
+/** Ce qu'une écriture de réglage a de plus à dire : qui, vers quoi, pourquoi. */
+function detailDe(e: Ecriture): string | null {
+  if (e.type !== 'settings_changed') return null
+  const p = e.payload as Record<string, unknown>
+  switch (p.changement) {
+    case 'role_modifie':
+      return typeof p.name === 'string' ? `${p.name} : ${ROLE_FR[String(p.de)] ?? p.de} → ${ROLE_FR[String(p.vers)] ?? p.vers}` : null
+    case 'presidence_transferee': {
+      const vers = p.vers as { name?: string } | null
+      return vers?.name ? t('tontine.registre.preside_desormais', { nom: vers.name }) : null
+    }
+    case 'membre_defaillant':
+      return typeof p.name === 'string' ? p.name : null
+    case 'annulation':
+    case 'cloture_sans_accuse':
+      return typeof p.motif === 'string' ? `Motif : ${p.motif}` : null
+    default:
+      return null
+  }
+}
+
+const ROLE_FR: Record<string, string> = {
+  president: t('tontine.registre.president'), treasurer: t('tontine.registre.tresorier'), auditor: 'censeur', member: 'membre',
 }
 
 function iconeDe(e: Ecriture): string {
@@ -105,10 +158,11 @@ async function signaler(entryId: string) {
     signalementOuvert.value = null
     messageSignalement.value = ''
     signalementEnvoye.value = entryId
+    await chargerLitiges()
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
   }
   finally {
     signalementEnCours.value = false
@@ -119,6 +173,103 @@ const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const ecritures = ref<Ecriture[]>([])
 const erreur = ref<string | null>(null)
 const filtreType = ref('')
+
+/**
+ * Pagination par curseur. L'écran se contentait des cent premières écritures :
+ * une tontine de douze membres les dépasse au quatrième tour, et tout ce qui
+ * précédait devenait introuvable — précisément ce qu'on vient chercher dans un
+ * registre.
+ */
+const suite = ref<string | null>(null)
+const suiteEnCours = ref(false)
+
+async function chargerSuite() {
+  if (!suite.value) return
+  suiteEnCours.value = true
+  try {
+    const reponse = await $fetch<{ items: Ecriture[], nextCursor: string | null }>(
+      `/api/v1/tontines/${tontineId}/ledger?limit=50&cursor=${suite.value}`,
+    )
+    ecritures.value = [...ecritures.value, ...reponse.items]
+    suite.value = reponse.nextCursor
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    suiteEnCours.value = false
+  }
+}
+
+/**
+ * Les contestations, lisibles et répondables par **tout membre**.
+ *
+ * Elles ne s'affichaient que sur l'écran des impayés, que la navigation
+ * réserve au bureau : le membre qui avait signalé une erreur ne voyait ni les
+ * réponses ni la conclusion, et la notification le renvoyait ici — sur un
+ * écran qui ne montrait rien. Président et censeur tranchent ; les autres
+ * répondent.
+ */
+interface Litige {
+  dispute: { id: string, status: 'open' | 'resolved', resolution: string | null, ledgerEntryId: string }
+  entryType: string
+  entryPosition: number
+  messages: Array<{ id: string, body: string, auteur: string, createdAt: string }>
+}
+
+const litiges = ref<Litige[]>([])
+const monRole = ref<string | null>(null)
+const peutTrancher = computed(() => monRole.value === 'president' || monRole.value === 'auditor')
+const reponse = ref<Record<string, string>>({})
+const resolution = ref<Record<string, string>>({})
+const litigeEnCours = ref<string | null>(null)
+
+async function chargerLitiges() {
+  try {
+    const donnees = await $fetch<{ myRole: string, litiges: Litige[] }>(`/api/v1/tontines/${tontineId}/disputes`)
+    litiges.value = donnees.litiges
+    monRole.value = donnees.myRole
+  }
+  catch {
+    // Les contestations sont un complément : leur absence n'empêche pas de
+    // lire le registre, et l'erreur principale est déjà traitée par `charger`.
+  }
+}
+
+async function repondre(disputeId: string) {
+  litigeEnCours.value = disputeId
+  try {
+    await $fetch(`/api/v1/disputes/${disputeId}/messages`, {
+      method: 'POST',
+      body: { message: reponse.value[disputeId]?.trim() },
+    })
+    reponse.value[disputeId] = ''
+    await chargerLitiges()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    litigeEnCours.value = null
+  }
+}
+
+async function clore(disputeId: string) {
+  litigeEnCours.value = disputeId
+  try {
+    await $fetch(`/api/v1/disputes/${disputeId}/resolve`, {
+      method: 'POST',
+      body: { resolution: resolution.value[disputeId]?.trim() },
+    })
+    await chargerLitiges()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    litigeEnCours.value = null
+  }
+}
 const verification = ref<{ valid: boolean, brokenAt?: number, reason?: string } | null>(null)
 const verificationEnCours = ref(false)
 
@@ -132,7 +283,7 @@ const visibles = computed(() =>
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 /**
@@ -165,10 +316,12 @@ async function charger() {
     // La pagination est écrite dans l'adresse plutôt que passée en `query` :
     // l'inférence des routes typées de Nuxt part en récursion infinie quand un
     // littéral de gabarit rencontre un second argument d'options.
-    const chemin = `/api/v1/tontines/${tontineId}/ledger?limit=100`
-    const reponse = await $fetch<{ items: Ecriture[] }>(chemin)
-    ecritures.value = reponse.items
+    const chemin = `/api/v1/tontines/${tontineId}/ledger?limit=50`
+    const page = await $fetch<{ items: Ecriture[], nextCursor: string | null }>(chemin)
+    ecritures.value = page.items
+    suite.value = page.nextCursor
     etat.value = 'contenu'
+    await chargerLitiges()
   }
   catch (e) {
     erreur.value = message(e)
@@ -195,10 +348,10 @@ async function verifier() {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Registre',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.registre.registre'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Registre — eTontine' })
+useHead({ title: t('tontine.registre.registre_etontine') })
 </script>
 
 <template>
@@ -219,8 +372,8 @@ useHead({ title: 'Registre — eTontine' })
 
     <EmptyState
       v-else-if="ecritures.length === 0"
-      title="Le registre est vide"
-      description="Les écritures apparaîtront ici dès la première cotisation."
+      :title="$t('tontine.registre.le_registre_est_vide')"
+      :description="$t('tontine.registre.les_ecritures_apparaitront_ici')"
       icon="lucide:book-open"
     />
 
@@ -228,15 +381,14 @@ useHead({ title: 'Registre — eTontine' })
       <!-- Contrôle d'intégrité, ouvert à tous -->
       <section class="flex flex-col gap-2 card-surface p-4">
         <h2 class="font-semibold text-ink">
-          Contrôle du registre
+          {{ $t('tontine.registre.controle_du_registre') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Chaque écriture est chaînée à la précédente. Le contrôle vérifie qu’aucune
-          n’a été modifiée ni supprimée après coup.
+          {{ $t('tontine.registre.chaque_ecriture_est_chainee') }}
         </p>
 
         <Button
-          :label="verificationEnCours ? 'Vérification…' : 'Vérifier le registre'"
+          :label="verificationEnCours ? $t('commun.verification_en_cours') : $t('tontine.registre.verifier_le_registre')"
           :disabled="verificationEnCours"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
           data-testid="bouton-verifier-registre"
@@ -255,7 +407,7 @@ useHead({ title: 'Registre — eTontine' })
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Le registre est intact. Aucune écriture n’a été modifiée.
+          {{ $t('tontine.registre.le_registre_est_intact') }}
         </p>
         <p
           v-else-if="verification"
@@ -278,7 +430,7 @@ useHead({ title: 'Registre — eTontine' })
         class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
         for="filtre-type"
       >
-        Filtrer par type
+        {{ $t('tontine.registre.filtrer_par_type') }}
         <select
           id="filtre-type"
           v-model="filtreType"
@@ -286,7 +438,7 @@ useHead({ title: 'Registre — eTontine' })
           data-testid="filtre-type"
         >
           <option value="">
-            Tout le registre
+            {{ $t('tontine.registre.tout_le_registre') }}
           </option>
           <option
             v-for="type in typesPresents"
@@ -324,7 +476,14 @@ useHead({ title: 'Registre — eTontine' })
               {{ libelleDe(ecriture) }}
             </span>
             <span class="tabular text-sm text-ink-muted">
-              {{ formatDate(ecriture.serverTimestamp) }} · écriture n° {{ ecriture.position }}
+              {{ $t('tontine.registre.p0_ecriture_n_p1', { p0: formatDate(ecriture.serverTimestamp), p1: ecriture.position }) }}
+            </span>
+            <span
+              v-if="detailDe(ecriture)"
+              class="text-sm text-ink-muted"
+              :data-testid="`detail-${ecriture.position}`"
+            >
+              {{ detailDe(ecriture) }}
             </span>
             <!-- Dit pourquoi, sinon « d'office » ressemble à un passe-droit. -->
             <span
@@ -332,7 +491,7 @@ useHead({ title: 'Registre — eTontine' })
               class="text-sm text-ink-muted"
               data-testid="mention-auto-confirmee"
             >
-              Aucun autre membre du bureau ne pouvait la vérifier.
+              {{ $t('tontine.registre.aucun_autre_membre_du') }}
             </span>
 
             <!-- La soupape : rien ne s'efface d'un registre append-only, on
@@ -342,8 +501,7 @@ useHead({ title: 'Registre — eTontine' })
               class="text-sm text-confirmed-ink"
               :data-testid="`signalement-envoye-${ecriture.id}`"
             >
-              Signalement envoyé. Le bureau doit l’examiner ; le suivi est sur
-              l’écran des impayés.
+              {{ $t('tontine.registre.signalement_envoye_le_bureau') }}
             </p>
 
             <template v-else-if="signalementOuvert === ecriture.id">
@@ -351,24 +509,24 @@ useHead({ title: 'Registre — eTontine' })
                 class="flex flex-col gap-1.5 pt-1 text-sm font-medium text-ink-muted"
                 :for="`message-signalement-${ecriture.id}`"
               >
-                Qu’est-ce qui ne va pas ?
+                {{ $t('tontine.registre.qu_est_ce_qui') }}
                 <InputText
                   :id="`message-signalement-${ecriture.id}`"
                   v-model="messageSignalement"
-                  placeholder="Le montant ne correspond pas à ce que j’ai envoyé"
+                  :placeholder="$t('tontine.registre.le_montant_ne_correspond')"
                   :data-testid="`champ-signalement-${ecriture.id}`"
                 />
               </label>
               <div class="flex flex-col gap-2 pt-1 sm:flex-row">
                 <Button
-                  :label="signalementEnCours ? 'Envoi…' : 'Envoyer le signalement'"
+                  :label="signalementEnCours ? $t('commun.envoi_en_cours') : $t('tontine.registre.envoyer_le_signalement')"
                   :disabled="signalementEnCours || messageSignalement.trim().length < 5"
                   class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
                   :data-testid="`bouton-envoyer-signalement-${ecriture.id}`"
                   @click="signaler(ecriture.id)"
                 />
                 <Button
-                  label="Annuler"
+                  :label="$t('tontine.registre.annuler')"
                   class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                   @click="signalementOuvert = null"
                 />
@@ -382,7 +540,7 @@ useHead({ title: 'Registre — eTontine' })
               :data-testid="`bouton-signaler-${ecriture.id}`"
               @click="signalementOuvert = ecriture.id; messageSignalement = ''"
             >
-              Signaler une erreur
+              {{ $t('tontine.registre.signaler_une_erreur') }}
             </button>
           </div>
 
@@ -404,6 +562,110 @@ useHead({ title: 'Registre — eTontine' })
         </li>
       </ul>
 
+      <Button
+        v-if="suite && !filtreType"
+        :label="suiteEnCours ? $t('tontine.registre.chargement') : $t('tontine.registre.voir_les_ecritures_plus')"
+        :disabled="suiteEnCours"
+        class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+        data-testid="bouton-suite-registre"
+        @click="chargerSuite"
+      />
+      <p
+        v-else-if="suite && filtreType"
+        class="text-sm text-ink-muted"
+      >
+        {{ $t('tontine.registre.le_filtre_porte_sur') }}
+      </p>
+
+      <!-- Contestations : le fil, pour tout le monde. -->
+      <section
+        v-if="litiges.length > 0"
+        class="flex flex-col gap-3"
+        data-testid="section-contestations"
+      >
+        <SectionTitle>{{ $t('tontine.registre.contestations') }}</SectionTitle>
+        <ul class="flex flex-col gap-3">
+          <li
+            v-for="litige in litiges"
+            :key="litige.dispute.id"
+            class="card-surface flex flex-col gap-3 p-4"
+            :data-testid="`contestation-${litige.dispute.id}`"
+          >
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-sm font-semibold text-ink">
+                {{ $t('tontine.registre.ecriture_n_p0_p1', { p0: litige.entryPosition, p1: LIBELLE[litige.entryType] ?? litige.entryType }) }}
+              </span>
+              <StatusBadge
+                kind="dispute"
+                :status="litige.dispute.status"
+                compact
+              />
+            </div>
+
+            <ul class="flex flex-col gap-2">
+              <li
+                v-for="msg in litige.messages"
+                :key="msg.id"
+                class="rounded-control bg-surface-muted p-3 text-sm text-ink"
+              >
+                <span class="font-semibold">{{ msg.auteur }}</span> — {{ msg.body }}
+              </li>
+            </ul>
+
+            <p
+              v-if="litige.dispute.status === 'resolved'"
+              class="rounded-control bg-confirmed-surface p-3 text-sm text-confirmed-ink"
+              :data-testid="`conclusion-${litige.dispute.id}`"
+            >
+              {{ $t('tontine.registre.conclusion_p0', { p0: litige.dispute.resolution }) }}
+            </p>
+
+            <template v-else>
+              <label
+                class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                :for="`reponse-${litige.dispute.id}`"
+              >
+                {{ $t('tontine.registre.repondre') }}
+                <InputText
+                  :id="`reponse-${litige.dispute.id}`"
+                  v-model="reponse[litige.dispute.id]"
+                  :data-testid="`champ-reponse-${litige.dispute.id}`"
+                />
+              </label>
+              <Button
+                :label="litigeEnCours === litige.dispute.id ? $t('commun.envoi_en_cours') : $t('tontine.registre.envoyer')"
+                :disabled="litigeEnCours !== null || (reponse[litige.dispute.id]?.trim().length ?? 0) < 5"
+                class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-repondre-${litige.dispute.id}`"
+                @click="repondre(litige.dispute.id)"
+              />
+
+              <!-- Trancher revient au président ou au censeur. -->
+              <template v-if="peutTrancher">
+                <label
+                  class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+                  :for="`resolution-${litige.dispute.id}`"
+                >
+                  {{ $t('tontine.registre.conclusion_pour_clore') }}
+                  <InputText
+                    :id="`resolution-${litige.dispute.id}`"
+                    v-model="resolution[litige.dispute.id]"
+                    :data-testid="`champ-resolution-${litige.dispute.id}`"
+                  />
+                </label>
+                <Button
+                  :label="litigeEnCours === litige.dispute.id ? $t('commun.cloture_en_cours') : $t('commun.clore_la_contestation')"
+                  :disabled="litigeEnCours !== null || (resolution[litige.dispute.id]?.trim().length ?? 0) < 5"
+                  class="bg-brand text-brand-ink hover:bg-brand-strong"
+                  :data-testid="`bouton-clore-${litige.dispute.id}`"
+                  @click="clore(litige.dispute.id)"
+                />
+              </template>
+            </template>
+          </li>
+        </ul>
+      </section>
+
       <!-- Exports : générés côté serveur (règle 17). -->
       <section class="mt-auto flex flex-col gap-2 pt-2">
         <a
@@ -416,7 +678,7 @@ useHead({ title: 'Registre — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Procès-verbal du dernier tour (PDF)
+          {{ $t('tontine.registre.proces_verbal_du_dernier') }}
         </a>
         <a
           :href="`/api/v1/tontines/${tontineId}/export?format=xlsx`"
@@ -428,7 +690,7 @@ useHead({ title: 'Registre — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Registre complet (Excel)
+          {{ $t('tontine.registre.registre_complet_excel') }}
         </a>
       </section>
     </template>

@@ -63,18 +63,67 @@ export interface ResultatDemarrage {
  * 2. **Le bénéficiaire cotise aussi.** C'est l'usage ivoirien : le net lui
  *    revient au versement. L'exclure fausserait le pot de tout le monde.
  */
-export function demarrerTontine(db: Db, tontineId: string, acteurId: string): ResultatDemarrage {
+export interface BlocageDemarrage {
+  champ: string
+  message: string
+}
+
+/** La date du jour, au format des dates du modèle (`AAAA-MM-JJ`). */
+export function dateDuJour(maintenant: Date = new Date()): string {
+  return maintenant.toISOString().slice(0, 10)
+}
+
+/**
+ * Ce qui empêche de démarrer, en une liste plutôt qu'un refus opaque.
+ *
+ * Le calendrier n'est vérifié que si l'on donne la date du jour : c'est la
+ * route qui la passe. Une date de départ **passée** au moment du démarrage
+ * mettrait le tour 1 en retard dès la première heure — le cas est courant, le
+ * président monte sa tontine en janvier, les membres arrivent pendant trois
+ * semaines, et la date choisie au brouillon est déjà derrière lui quand il
+ * démarre. Refuser en le disant vaut mieux que douze amendes le lendemain.
+ */
+export function blocagesDemarrage(db: Db, tontineId: string, aujourdhui?: string): BlocageDemarrage[] {
+  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
+
+  const blocages: BlocageDemarrage[] = []
+
+  const actifs = comptesActifs(db, tontineId)
+  if (actifs < MEMBRES_MINIMUM) {
+    blocages.push({
+      champ: 'members',
+      message: `Il faut au moins ${MEMBRES_MINIMUM} membres actifs pour démarrer. Il y en a ${actifs}.`,
+    })
+  }
+
+  if (aujourdhui && tontine.startDate < aujourdhui) {
+    blocages.push({
+      champ: 'startDate',
+      message: 'La date de démarrage est passée : le premier tour serait déjà en retard. Choisis une nouvelle date dans les réglages.',
+    })
+  }
+
+  return blocages
+}
+
+export function demarrerTontine(
+  db: Db,
+  tontineId: string,
+  acteurId: string,
+  options: { aujourdhui?: string } = {},
+): ResultatDemarrage {
   const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   assertTransition('tontine', tontine.status, 'running')
 
-  const actifs = comptesActifs(db, tontineId)
-  if (actifs < MEMBRES_MINIMUM) {
+  const blocages = blocagesDemarrage(db, tontineId, options.aujourdhui)
+  if (blocages.length > 0) {
     throw apiError(
-      'FORBIDDEN',
-      `Il faut au moins ${MEMBRES_MINIMUM} membres actifs pour démarrer. Il y en a ${actifs}.`,
-      { field: 'members' },
+      blocages[0]!.champ === 'startDate' ? 'VALIDATION_ERROR' : 'FORBIDDEN',
+      blocages[0]!.message,
+      { field: blocages[0]!.champ },
     )
   }
 

@@ -6,7 +6,7 @@ import { canauxDeTontine } from '../../../../services/canaux.ts'
 import {
   blocagesPublication, membresActifs, potAttendu, totalParts, tourCourant,
 } from '../../../../services/tontines.ts'
-import { etatDuTour, toursDe } from '../../../../services/tours.ts'
+import { blocagesDemarrage, dateDuJour, etatDuTour, toursDe } from '../../../../services/tours.ts'
 import { etatVersement } from '../../../../services/versements.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
@@ -54,5 +54,8 @@ export default defineEventHandler(async (event) => {
     // une douzaine de lignes que le serveur a déjà sous la main.
     rounds: toursDe(db, tontineId),
     publicationBlockers: tontine.status === 'draft' ? blocagesPublication(db, tontineId) : [],
+    // Ce qui empêche de démarrer une tontine publiée — le nombre de membres,
+    // et une date de départ déjà passée. L'écran le dit avant le clic.
+    startBlockers: tontine.status === 'open' ? blocagesDemarrage(db, tontineId, dateDuJour()) : [],
   }
 })

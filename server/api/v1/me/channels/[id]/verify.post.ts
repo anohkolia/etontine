@@ -5,7 +5,7 @@ import { otpCode } from '../../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../../db/index.ts'
 import { collectionChannels } from '../../../../../db/schema.ts'
 import { marquerVerifie } from '../../../../../services/canaux.ts'
-import { requestOtp, verifyOtp } from '../../../../../services/otp.ts'
+import { consommerCode, requestOtp } from '../../../../../services/otp.ts'
 import { requireUser } from '../../../../../utils/auth.ts'
 import { apiError, validationError } from '../../../../../utils/errors.ts'
 
@@ -43,7 +43,9 @@ export default defineEventHandler(async (event) => {
     return requestOtp(db, canal.msisdn, 'sms')
   }
 
-  await verifyOtp(db, canal.msisdn, parsed.data.code)
+  // Consommer le code, sans créer de compte : `verifyOtp` ouvrait un compte
+  // fantôme au numéro de collecte, qui n'est pas forcément celui d'un membre.
+  consommerCode(db, canal.msisdn, parsed.data.code)
   marquerVerifie(db, id)
 
   return { id, verified: true }

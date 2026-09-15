@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { blocagesSuppression, exporterDonnees } from '../../server/services/compte.ts'
+import { eq } from 'drizzle-orm'
+import {
+  appliquerChangementNumero, blocagesSuppression, demanderChangementNumero, exporterDonnees,
+} from '../../server/services/compte.ts'
+import { consommerCode, requestOtp } from '../../server/services/otp.ts'
 import { hashPin, verifyPin } from '../../server/utils/pin.ts'
 import {
-  contributions, memberships, rounds, shares, tontines,
+  contributions, ledgerEntries, memberships, notifications, rounds, shares, tontines, users,
 } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
@@ -145,5 +149,71 @@ describe('code de verrouillage', () => {
   it('refuse une empreinte malformée sans lever', () => {
     expect(verifyPin('1234', 'nimportequoi')).toBe(false)
     expect(verifyPin('1234', '')).toBe(false)
+  })
+})
+
+describe('changement de numéro', () => {
+  const T2 = 'b0000000-0000-4000-8000-000000000011'
+
+  async function membreAvecBureau() {
+    // U est membre actif de T, où AUTRE est président ; et de T2, sans bureau à prévenir.
+    await db.insert(memberships).values({ id: 'ms-u', tontineId: T, userId: U, status: 'active', role: 'member' })
+    await db.insert(memberships).values({ id: 'ms-p', tontineId: T, userId: AUTRE, status: 'active', role: 'president' })
+    await db.insert(tontines).values({
+      id: T2, name: 'Autre tontine', shareAmount: 5_000, frequency: 'weekly', startDate: '2026-01-01', createdBy: U,
+    })
+    await db.insert(memberships).values({ id: 'ms-u2', tontineId: T2, userId: U, status: 'active', role: 'president' })
+  }
+
+  it('refuse le numéro actuel, et un numéro déjà pris', () => {
+    expect(() => demanderChangementNumero(db, U, '+2250707000001')).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
+    expect(() => demanderChangementNumero(db, U, '+2250707000002')).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
+    expect(() => demanderChangementNumero(db, U, '+2250707009999')).not.toThrow()
+  })
+
+  it('change le numéro et pose la date du changement — le gel de 48 h en découle', async () => {
+    await membreAvecBureau()
+    appliquerChangementNumero(db, U, '+2250707009999')
+
+    const [u] = db.select().from(users).where(eq(users.id, U)).all()
+    expect(u!.phone).toBe('+2250707009999')
+    expect(u!.phoneChangedAt).toBeInstanceOf(Date)
+    expect(Date.now() - u!.phoneChangedAt!.getTime()).toBeLessThan(5_000)
+  })
+
+  it('l’écrit au registre de chaque tontine active, sans le numéro en clair', async () => {
+    await membreAvecBureau()
+    appliquerChangementNumero(db, U, '+2250707009999')
+
+    const ecritures = db.select().from(ledgerEntries).all()
+      .filter(e => (e.payload as { changement?: string }).changement === 'numero_change')
+    expect(ecritures.map(e => e.tontineId).sort()).toEqual([T, T2].sort())
+    for (const e of ecritures) {
+      expect(JSON.stringify(e.payload)).not.toContain('0707009999')
+      expect(e.payload).toMatchObject({ ancienFin: '0001', nouveauFin: '9999' })
+    }
+  })
+
+  it('prévient le bureau de chaque tontine, sans montant ni numéro', async () => {
+    await membreAvecBureau()
+    appliquerChangementNumero(db, U, '+2250707009999')
+
+    const prevenus = db.select().from(notifications).all()
+    expect(prevenus.map(n => n.userId)).toEqual([AUTRE])
+    expect(prevenus[0]!.body).not.toContain('9999')
+  })
+
+  it('consommer un code ne crée jamais de compte', async () => {
+    const { devCode } = await requestOtp(db, '+2250707009999')
+    consommerCode(db, '+2250707009999', devCode!)
+    expect(db.select().from(users).where(eq(users.phone, '+2250707009999')).all()).toHaveLength(0)
+    // Et il ne se consomme qu'une fois.
+    expect(() => consommerCode(db, '+2250707009999', devCode!)).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
   })
 })

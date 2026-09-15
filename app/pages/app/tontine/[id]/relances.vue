@@ -9,6 +9,7 @@
  * autre. Le bureau relit, adapte son ton, et choisit qui il relance.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -37,7 +38,7 @@ async function charger() {
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
     etat.value = 'erreur'
   }
 }
@@ -49,10 +50,10 @@ function marquerEnvoye(membershipId: string) {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Relancer',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.relances.relancer'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Relancer — eTontine' })
+useHead({ title: t('tontine.relances.relancer_etontine') })
 </script>
 
 <template>
@@ -71,9 +72,8 @@ useHead({ title: 'Relancer — eTontine' })
         aria-hidden="true"
       />
       <span>
-        <strong class="font-semibold">Rien n’est envoyé automatiquement.</strong>
-        Chaque bouton ouvre WhatsApp avec un message préparé. Tu le relis, tu le
-        modifies si tu veux, et c’est toi qui envoies.
+        <strong class="font-semibold">{{ $t('tontine.relances.rien_n_est_envoye') }}</strong>
+        {{ $t('tontine.relances.chaque_bouton_ouvre_whatsapp') }}
       </span>
     </p>
 
@@ -91,8 +91,8 @@ useHead({ title: 'Relancer — eTontine' })
 
     <EmptyState
       v-else-if="relances.length === 0"
-      title="Personne à relancer"
-      description="Toutes les cotisations du tour en cours sont déclarées ou confirmées."
+      :title="$t('tontine.relances.personne_a_relancer')"
+      :description="$t('tontine.relances.toutes_les_cotisations_du')"
       icon="lucide:circle-check"
     />
 
@@ -141,15 +141,14 @@ useHead({ title: 'Relancer — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Ouvrir WhatsApp
+          {{ $t('tontine.relances.ouvrir_whatsapp') }}
         </a>
 
         <p
           v-else
           class="rounded-control bg-late-surface p-3 text-sm text-late-ink"
         >
-          Ce membre n’a pas de numéro enregistré. Ajoute-le dans la fiche du
-          membre pour pouvoir le relancer.
+          {{ $t('tontine.relances.ce_membre_n_a') }}
         </p>
       </li>
     </ul>

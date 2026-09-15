@@ -21,13 +21,14 @@ const props = defineProps<{
  * plutôt que de dicter un lien. Il est replié par défaut — le partage passe
  * massivement par WhatsApp, et l'afficher d'emblée encombrerait l'écran.
  */
+const { t } = useI18n()
 const qrOuvert = ref(false)
 
 const messageWhatsApp = computed(() => {
   const lignes = [
-    `Salut ! Je t'invite à rejoindre la tontine « ${props.tontineName} ».`,
+    t('ui.PartageInvitation.salut_je_t_invite', { nom: props.tontineName }),
     props.engagement ?? '',
-    `Tu peux voir les détails ici avant de décider : ${props.url}`,
+    t('ui.PartageInvitation.tu_peux_voir_les', { url: props.url }),
   ].filter(Boolean)
 
   return lignes.join('\n\n')
@@ -59,7 +60,7 @@ const { copie, copier } = useCopie()
           size="1rem"
           aria-hidden="true"
         />
-        Envoyer par WhatsApp
+        {{ $t('ui.PartageInvitation.envoyer_par_whatsapp') }}
       </a>
 
       <button
@@ -73,7 +74,7 @@ const { copie, copier } = useCopie()
           size="1rem"
           aria-hidden="true"
         />
-        {{ copie ? 'Lien copié' : 'Copier le lien' }}
+        {{ copie ? $t('commun.lien_copie') : $t('commun.copier_le_lien') }}
       </button>
     </div>
 
@@ -89,20 +90,20 @@ const { copie, copier } = useCopie()
           size="1rem"
           aria-hidden="true"
         />
-        {{ qrOuvert ? 'Masquer le QR code' : 'Afficher le QR code' }}
+        {{ qrOuvert ? $t('ui.PartageInvitation.masquer_le_qr_code') : $t('ui.PartageInvitation.afficher_le_qr_code') }}
       </button>
 
       <img
         v-if="qrOuvert"
         :src="qrUrl"
-        :alt="`QR code du lien d’invitation à ${tontineName}`"
+        :alt="$t('ui.PartageInvitation.qr_code_du_lien', { nom: tontineName })"
         class="mt-2 w-full max-w-[280px] card-surface p-2"
         data-testid="image-qr"
       >
     </div>
 
     <p class="text-sm text-ink-subtle">
-      L’envoi est manuel : tu relis le message et choisis à qui l’adresser.
+      {{ $t('ui.PartageInvitation.l_envoi_est_manuel') }}
     </p>
   </div>
 </template>

@@ -110,7 +110,7 @@ test.describe('parcours de connexion', () => {
 })
 
 test('l’administrateur examine un dossier et l’approuve', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUnDossierEnAttente(membre, { prenom: 'Aya', nom: 'Koné' })
 
@@ -152,7 +152,7 @@ test('l’administrateur examine un dossier et l’approuve', async ({ page, bro
 })
 
 test('un rejet exige un motif, et le motif reste visible', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUnDossierEnAttente(membre, { prenom: 'Koffi', nom: 'N’Guessan' })
 

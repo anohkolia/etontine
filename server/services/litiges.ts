@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { disputeMessages, disputes, ledgerEntries, memberships, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
-import { notifierTontine } from './notifications.ts'
+import { notifier, notifierTontine } from './notifications.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -53,7 +53,43 @@ export function ouvrirContestation(db: Db, ledgerEntryId: string, acteurId: stri
   return { disputeId }
 }
 
-/** Ajoute un message au fil d'une contestation. */
+/** La tontine d'une contestation, par l'écriture qu'elle vise. */
+function tontineDe(db: Db, litige: typeof disputes.$inferSelect): string {
+  const [ecriture] = db
+    .select({ tontineId: ledgerEntries.tontineId })
+    .from(ledgerEntries)
+    .where(eq(ledgerEntries.id, litige.ledgerEntryId))
+    .limit(1)
+    .all()
+  return ecriture!.tontineId
+}
+
+/**
+ * Ceux qu'une réponse concerne : celui qui a ouvert le fil, et le bureau qui
+ * doit trancher — président et censeur. Jamais l'auteur du message lui-même.
+ */
+function destinatairesDuFil(db: Db, tontineId: string, litige: typeof disputes.$inferSelect, sauf: string): string[] {
+  const bureau = db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(
+      eq(memberships.tontineId, tontineId),
+      eq(memberships.status, 'active'),
+      inArray(memberships.role, ['president', 'auditor']),
+    ))
+    .all()
+    .map(m => m.userId)
+
+  return [...new Set([litige.openedBy, ...bureau])].filter((id): id is string => Boolean(id) && id !== sauf)
+}
+
+/**
+ * Ajoute un message au fil d'une contestation.
+ *
+ * Celui qui a ouvert le fil et le bureau sont prévenus : sans cela, une
+ * réponse restait lettre morte — le membre qui avait signalé une erreur ne
+ * savait pas qu'on lui avait répondu, et retournait voir de temps en temps.
+ */
 export function ajouterMessage(db: Db, disputeId: string, auteurId: string, message: string) {
   const [litige] = db.select().from(disputes).where(eq(disputes.id, disputeId)).limit(1).all()
   if (!litige) throw apiError('NOT_FOUND', 'Contestation introuvable.')
@@ -64,6 +100,18 @@ export function ajouterMessage(db: Db, disputeId: string, auteurId: string, mess
 
   const id = randomUUID()
   db.insert(disputeMessages).values({ id, disputeId, authorId: auteurId, body: message.trim() }).run()
+
+  const tontineId = tontineDe(db, litige)
+  for (const userId of destinatairesDuFil(db, tontineId, litige, auteurId)) {
+    notifier(db, userId, {
+      type: 'contestation_reponse',
+      tontineId,
+      title: 'Réponse à une contestation',
+      body: 'Quelqu’un a répondu dans le fil d’une erreur signalée au registre.',
+      url: `/app/tontine/${tontineId}/registre`,
+    })
+  }
+
   return { id }
 }
 
@@ -87,6 +135,18 @@ export function resoudreContestation(db: Db, disputeId: string, acteurId: string
     .set({ status: 'resolved', resolvedBy: acteurId, resolvedAt: new Date(), resolution: resolution.trim() })
     .where(eq(disputes.id, disputeId))
     .run()
+
+  // Celui qui a signalé apprend la conclusion : c'est lui qu'elle concerne.
+  const tontineId = tontineDe(db, litige)
+  if (litige.openedBy !== acteurId) {
+    notifier(db, litige.openedBy, {
+      type: 'contestation_close',
+      tontineId,
+      title: 'Ta contestation a été tranchée',
+      body: 'Le bureau a écrit sa conclusion sur l’erreur que tu avais signalée.',
+      url: `/app/tontine/${tontineId}/registre`,
+    })
+  }
 
   return { disputeId, status: 'resolved' as const }
 }
