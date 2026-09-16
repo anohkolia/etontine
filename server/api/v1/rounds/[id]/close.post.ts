@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   if (!roundId) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const db = useDb()
-  const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1).all()
+  const [tour] = await db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1)
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const { user } = await requireMembership(event, tour.tontineId, ['president'])
@@ -33,5 +33,5 @@ export default defineEventHandler(async (event) => {
   const parsed = closeInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return cloturerTourSansAccuse(db, roundId, user.id, parsed.data.reason)
+  return await cloturerTourSansAccuse(db, roundId, user.id, parsed.data.reason)
 })

@@ -8,6 +8,6 @@ export default defineTask({
     description: 'Envoie les rappels de cotisation, hors plages de silence',
   },
   async run() {
-    return { result: { envoyes: envoyerRappels(useDb()).length } }
+    return { result: { envoyes: (await envoyerRappels(useDb())).length } }
   },
 })

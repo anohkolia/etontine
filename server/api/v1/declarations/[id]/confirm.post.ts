@@ -13,19 +13,18 @@ export default defineEventHandler(async (event) => {
   if (!declarationId) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId })
     .from(paymentDeclarations)
     .innerJoin(contributions, eq(contributions.id, paymentDeclarations.contributionId))
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
   const { user } = await requireMembership(event, ligne.tontineId, ['treasurer', 'president'])
 
-  return withIdempotency(event, user.id, { declarationId }, () =>
-    confirmerDeclaration(db, declarationId, user.id))
+  return await withIdempotency(event, user.id, { declarationId }, async () =>
+    await confirmerDeclaration(db, declarationId, user.id))
 })

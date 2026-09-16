@@ -31,10 +31,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  useDb().update(users)
+  await useDb().update(users)
     .set({ pinHash: hashPin(parsed.data.pin) })
     .where(eq(users.id, user.id))
-    .run()
 
   return { ok: true }
 })

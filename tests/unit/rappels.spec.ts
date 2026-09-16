@@ -12,7 +12,7 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let T: string
 
 const PRESIDENT = 'c2000000-0000-4000-8000-000000000001'
@@ -23,27 +23,27 @@ const ECHEANCE = '2026-01-15'
 const A = (jour: string, heure = 8) => new Date(`${jour}T${String(heure).padStart(2, '0')}:00:00`)
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
   await createTestUser(db, PRESIDENT, '+2250707001111')
   await createTestUser(db, MEMBRE, '+2250707002222')
 
-  T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: ECHEANCE })
+  T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
+  await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: ECHEANCE })
   // Yao a deux parts : on vérifiera qu'il n'est relancé qu'une fois.
-  ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 2 })
-  ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 2 })
+  await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
 
-  const canal = creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
-  demarrerTontine(db, T, PRESIDENT)
+  const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
+  await demarrerTontine(db, T, PRESIDENT)
 
-  const gere = db.select().from(memberships).all().find(m => m.managedName === 'Koffi')!
-  db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, gere.id)).run()
+  const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi')!
+  await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, gere.id))
 })
 
 afterEach(() => cleanup())
@@ -79,88 +79,88 @@ describe('plages de silence', () => {
 })
 
 describe('rappels de cotisation', () => {
-  it('relance à J-2 et le jour même, pas les autres jours', () => {
+  it('relance à J-2 et le jour même, pas les autres jours', async () => {
     expect(JOURS_DE_RAPPEL).toEqual([2, 0])
 
     // Deux destinataires et non trois : Fatou est une membre gérée, sans
     // compte à notifier. C'est voulu — elle est jointe par la relance
     // WhatsApp, qui est exactement le recours prévu pour elle.
-    expect(envoyerRappels(db, A('2026-01-13'))).toHaveLength(2)
-    db.delete(notifications).run()
+    expect(await envoyerRappels(db, A('2026-01-13'))).toHaveLength(2)
+    await db.delete(notifications)
 
-    expect(envoyerRappels(db, A('2026-01-15'))).toHaveLength(2)
-    db.delete(notifications).run()
+    expect(await envoyerRappels(db, A('2026-01-15'))).toHaveLength(2)
+    await db.delete(notifications)
 
     // Ni J-3, ni J-1, ni après : deux rappels suffisent, au-delà c'est du
     // harcèlement et le membre coupe les notifications.
-    expect(envoyerRappels(db, A('2026-01-12'))).toHaveLength(0)
-    expect(envoyerRappels(db, A('2026-01-14'))).toHaveLength(0)
-    expect(envoyerRappels(db, A('2026-01-16'))).toHaveLength(0)
+    expect(await envoyerRappels(db, A('2026-01-12'))).toHaveLength(0)
+    expect(await envoyerRappels(db, A('2026-01-14'))).toHaveLength(0)
+    expect(await envoyerRappels(db, A('2026-01-16'))).toHaveLength(0)
   })
 
-  it('ne notifie pas un membre géré, qui n’a pas de compte', () => {
-    const envoyes = envoyerRappels(db, A('2026-01-15'))
+  it('ne notifie pas un membre géré, qui n’a pas de compte', async () => {
+    const envoyes = await envoyerRappels(db, A('2026-01-15'))
     const destinataires = new Set(envoyes.map(e => e.userId))
 
     expect(destinataires).toEqual(new Set([PRESIDENT, MEMBRE]))
     // Mais elle figure bien dans les relances WhatsApp.
-    expect(relancesWhatsApp(db, T).map(r => r.nom)).toContain('Fatou')
+    expect((await relancesWhatsApp(db, T)).map(r => r.nom)).toContain('Fatou')
   })
 
-  it('ne relance qu’une fois un membre à double part', () => {
-    const envoyes = envoyerRappels(db, A('2026-01-15'))
+  it('ne relance qu’une fois un membre à double part', async () => {
+    const envoyes = await envoyerRappels(db, A('2026-01-15'))
 
     // Deux notifications identiques à la seconde près donnent l'impression
     // d'un bug.
     expect(envoyes.filter(e => e.userId === MEMBRE)).toHaveLength(1)
   })
 
-  it('ne relance pas pendant la plage de silence du membre', () => {
-    db.insert(notificationPreferences).values({
+  it('ne relance pas pendant la plage de silence du membre', async () => {
+    await db.insert(notificationPreferences).values({
       id: 'pref-1',
       userId: MEMBRE,
       tontineId: null,
       quietHoursStart: 21 * 60,
       quietHoursEnd: 7 * 60,
-    }).run()
+    })
 
-    const laNuit = envoyerRappels(db, A('2026-01-15', 23))
+    const laNuit = await envoyerRappels(db, A('2026-01-15', 23))
     expect(laNuit.some(e => e.userId === MEMBRE)).toBe(false)
 
     // Et les autres membres, eux, sont bien relancés.
     expect(laNuit.some(e => e.userId === PRESIDENT)).toBe(true)
   })
 
-  it('respecte le refus des rappels', () => {
-    db.insert(notificationPreferences).values({
+  it('respecte le refus des rappels', async () => {
+    await db.insert(notificationPreferences).values({
       id: 'pref-2', userId: MEMBRE, tontineId: null, remindersEnabled: false,
-    }).run()
+    })
 
-    expect(envoyerRappels(db, A('2026-01-15')).some(e => e.userId === MEMBRE)).toBe(false)
+    expect((await envoyerRappels(db, A('2026-01-15'))).some(e => e.userId === MEMBRE)).toBe(false)
   })
 
-  it('laisse le réglage par tontine l’emporter sur le réglage général', () => {
-    db.insert(notificationPreferences).values([
+  it('laisse le réglage par tontine l’emporter sur le réglage général', async () => {
+    await db.insert(notificationPreferences).values([
       { id: 'pref-g', userId: MEMBRE, tontineId: null, remindersEnabled: false },
       { id: 'pref-t', userId: MEMBRE, tontineId: T, remindersEnabled: true },
-    ]).run()
+    ])
 
-    expect(envoyerRappels(db, A('2026-01-15')).some(e => e.userId === MEMBRE)).toBe(true)
+    expect((await envoyerRappels(db, A('2026-01-15'))).some(e => e.userId === MEMBRE)).toBe(true)
   })
 
-  it('n’écrit aucun montant dans les rappels', () => {
-    envoyerRappels(db, A('2026-01-15'))
+  it('n’écrit aucun montant dans les rappels', async () => {
+    await envoyerRappels(db, A('2026-01-15'))
 
     // Règle 21, vérifiée sur ce qui est réellement écrit en base.
-    for (const n of db.select().from(notifications).all()) {
+    for (const n of await db.select().from(notifications)) {
       expect(`${n.title} ${n.body}`).not.toMatch(/FCFA|\d{4}/)
     }
   })
 })
 
 describe('relances WhatsApp — l’envoi reste manuel', () => {
-  it('produit un lien wa.me pré-rempli par retardataire', () => {
-    const relances = relancesWhatsApp(db, T)
+  it('produit un lien wa.me pré-rempli par retardataire', async () => {
+    const relances = await relancesWhatsApp(db, T)
 
     // Trois membres, dont un à double part : trois relances, pas quatre.
     expect(relances).toHaveLength(3)
@@ -171,19 +171,19 @@ describe('relances WhatsApp — l’envoi reste manuel', () => {
     expect(decodeURIComponent(koffi.url!)).toContain('Bonjour Koffi')
   })
 
-  it('n’écrit aucun montant dans le message', () => {
+  it('n’écrit aucun montant dans le message', async () => {
     // Le message part sur WhatsApp, qui affiche un aperçu sur l'écran
     // verrouillé — exactement comme une notification.
-    for (const relance of relancesWhatsApp(db, T)) {
+    for (const relance of await relancesWhatsApp(db, T)) {
       expect(relance.message).not.toMatch(/FCFA|\d{4}/)
     }
   })
 
-  it('n’invente pas de lien pour un membre sans numéro', () => {
-    const gere = db.select().from(memberships).all().find(m => m.managedName === 'Fatou')!
-    db.update(memberships).set({ managedPhone: null }).where(eq(memberships.id, gere.id)).run()
+  it('n’invente pas de lien pour un membre sans numéro', async () => {
+    const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Fatou')!
+    await db.update(memberships).set({ managedPhone: null }).where(eq(memberships.id, gere.id))
 
-    const fatou = relancesWhatsApp(db, T).find(r => r.nom === 'Fatou')!
+    const fatou = (await relancesWhatsApp(db, T)).find(r => r.nom === 'Fatou')!
     expect(fatou.url).toBeNull()
     expect(fatou.msisdn).toBeNull()
   })

@@ -45,8 +45,8 @@ export default defineEventHandler(async (event) => {
   const { collectionChannelIds, ...champs } = parsed.data
   const db = useDb()
 
-  if (Object.keys(champs).length > 0) majTontine(db, tontineId, champs)
-  if (collectionChannelIds) definirCanaux(db, tontineId, collectionChannelIds, user.id)
+  if (Object.keys(champs).length > 0) await majTontine(db, tontineId, champs)
+  if (collectionChannelIds) await definirCanaux(db, tontineId, collectionChannelIds, user.id)
 
   return { ok: true }
 })

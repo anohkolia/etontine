@@ -13,14 +13,13 @@ export default defineEventHandler(async (event) => {
   if (!penaltyId) throw apiError('NOT_FOUND', 'Amende introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId })
     .from(penalties)
     .innerJoin(contributions, eq(contributions.id, penalties.contributionId))
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(penalties.id, penaltyId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Amende introuvable.')
 
@@ -29,5 +28,5 @@ export default defineEventHandler(async (event) => {
   const parsed = waivePenaltyInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return annulerAmende(db, penaltyId, user.id, parsed.data.reason)
+  return await annulerAmende(db, penaltyId, user.id, parsed.data.reason)
 })

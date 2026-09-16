@@ -20,9 +20,9 @@ export default defineEventHandler(async (event) => {
   const db = useDb()
 
   const bureau = membership.role === 'president' || membership.role === 'treasurer'
-  const members = membresDe(db, tontineId).map(m =>
+  const members = (await membresDe(db, tontineId)).map(m =>
     bureau || m.id === membership.id ? m : { ...m, phone: null },
   )
 
-  return { members, rotation: rotationDe(db, tontineId) }
+  return { members, rotation: await rotationDe(db, tontineId) }
 })

@@ -13,7 +13,7 @@ import { requireUser } from '../../../utils/auth.ts'
 export default defineEventHandler(async (event) => {
   const user = requireUser(event)
 
-  const adhesions = useDb()
+  const adhesions = await useDb()
     .select({
       id: memberships.id,
       tontineId: memberships.tontineId,
@@ -22,7 +22,6 @@ export default defineEventHandler(async (event) => {
     })
     .from(memberships)
     .where(eq(memberships.userId, user.id))
-    .all()
 
   return {
     user: {

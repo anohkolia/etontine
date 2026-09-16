@@ -16,13 +16,13 @@ import type { TestDb } from '../helpers/db.ts'
  */
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const U = 'f0000000-0000-4000-8000-000000000001'
 const T0 = Date.parse('2026-03-01T10:00:00Z')
 
-function utilisateur(): User {
-  return db.select().from(users).where(eq(users.id, U)).all()[0]!
+async function utilisateur(): Promise<User> {
+  return (await db.select().from(users).where(eq(users.id, U)))[0]!
 }
 
 function erreur(statut: number, motif?: RegExp) {
@@ -35,77 +35,83 @@ function erreur(statut: number, motif?: RegExp) {
 }
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   reinitialiserCompteurs()
   await createTestUser(db, U, '+2250707000001')
-  db.update(users).set({ pinHash: hashPin('1234') }).where(eq(users.id, U)).run()
+  await db.update(users).set({ pinHash: hashPin('1234') }).where(eq(users.id, U))
 })
 
 afterEach(() => cleanup())
 
 describe('vérification du code', () => {
-  it('accepte le bon code', () => {
-    expect(verifierCodeVerrou(utilisateur(), '1234', T0)).toEqual({ ok: true })
+  it('accepte le bon code', async () => {
+    const u = await utilisateur()
+    expect(verifierCodeVerrou(u, '1234', T0)).toEqual({ ok: true })
   })
 
-  it('refuse un mauvais code en disant combien d’essais restent', () => {
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403, /4 essais/))
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403, /3 essais/))
+  it('refuse un mauvais code en disant combien d’essais restent', async () => {
+    const u = await utilisateur()
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403, /4 essais/))
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403, /3 essais/))
   })
 
-  it('bloque quinze minutes après cinq échecs, même pour le bon code', () => {
+  it('bloque quinze minutes après cinq échecs, même pour le bon code', async () => {
+    const u = await utilisateur()
     for (let i = 0; i < ESSAIS_MAX - 1; i++) {
-      expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403))
+      expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403))
     }
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(429))
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(429))
 
     // Le bon code ne passe pas pendant le blocage : sinon il suffirait de
     // l'essayer entre deux mauvais.
-    expect(() => verifierCodeVerrou(utilisateur(), '1234', T0 + 60_000)).toThrow(erreur(429, /minute/))
+    expect(() => verifierCodeVerrou(u, '1234', T0 + 60_000)).toThrow(erreur(429, /minute/))
 
     // Une fois le délai écoulé, on repart.
-    expect(verifierCodeVerrou(utilisateur(), '1234', T0 + BLOCAGE_MS + 1)).toEqual({ ok: true })
+    expect(verifierCodeVerrou(u, '1234', T0 + BLOCAGE_MS + 1)).toEqual({ ok: true })
   })
 
-  it('remet le compteur à zéro après un succès', () => {
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403))
-    verifierCodeVerrou(utilisateur(), '1234', T0)
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403, /4 essais/))
+  it('remet le compteur à zéro après un succès', async () => {
+    const u = await utilisateur()
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403))
+    verifierCodeVerrou(u, '1234', T0)
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403, /4 essais/))
   })
 
-  it('refuse de vérifier quand aucun code n’est défini', () => {
-    retirerCodeVerrou(db, U)
-    expect(() => verifierCodeVerrou(utilisateur(), '1234', T0)).toThrow(erreur(409))
+  it('refuse de vérifier quand aucun code n’est défini', async () => {
+    await retirerCodeVerrou(db, U)
+    const u = await utilisateur()
+    expect(() => verifierCodeVerrou(u, '1234', T0)).toThrow(erreur(409))
   })
 })
 
 describe('code oublié — la connexion SMS fraîche', () => {
-  function ouvrirSession(id: string, ilYA: number) {
-    db.insert(sessions).values({
+  async function ouvrirSession(id: string, ilYA: number) {
+    await db.insert(sessions).values({
       id,
       userId: U,
       expiresAt: new Date(T0 + 86_400_000),
       createdAt: new Date(T0 - ilYA),
-    }).run()
+    })
   }
 
-  it('reconnaît une session de moins de dix minutes', () => {
-    ouvrirSession('s-fraiche', 60_000)
-    expect(sessionFraiche(db, 's-fraiche', T0)).toBe(true)
+  it('reconnaît une session de moins de dix minutes', async () => {
+    await ouvrirSession('s-fraiche', 60_000)
+    expect(await sessionFraiche(db, 's-fraiche', T0)).toBe(true)
   })
 
-  it('refuse une session plus ancienne, ou absente', () => {
-    ouvrirSession('s-vieille', SESSION_FRAICHE_MS + 1)
-    expect(sessionFraiche(db, 's-vieille', T0)).toBe(false)
-    expect(sessionFraiche(db, undefined, T0)).toBe(false)
-    expect(sessionFraiche(db, 'inconnue', T0)).toBe(false)
+  it('refuse une session plus ancienne, ou absente', async () => {
+    await ouvrirSession('s-vieille', SESSION_FRAICHE_MS + 1)
+    expect(await sessionFraiche(db, 's-vieille', T0)).toBe(false)
+    expect(await sessionFraiche(db, undefined, T0)).toBe(false)
+    expect(await sessionFraiche(db, 'inconnue', T0)).toBe(false)
   })
 
-  it('retirer le code efface aussi les échecs', () => {
-    expect(() => verifierCodeVerrou(utilisateur(), '0000', T0)).toThrow(erreur(403))
-    retirerCodeVerrou(db, U)
-    expect(utilisateur().pinHash).toBeNull()
+  it('retirer le code efface aussi les échecs', async () => {
+    const u = await utilisateur()
+    expect(() => verifierCodeVerrou(u, '0000', T0)).toThrow(erreur(403))
+    await retirerCodeVerrou(db, U)
+    expect((await utilisateur()).pinHash).toBeNull()
   })
 })

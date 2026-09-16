@@ -6,17 +6,16 @@ import { requireUser } from '../../../../../utils/auth.ts'
 import { apiError } from '../../../../../utils/errors.ts'
 
 /** Supprime un canal, sauf s'il sert encore à une tontine. */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
   const id = getRouterParam(event, 'id')
   if (!id) throw apiError('NOT_FOUND', 'Canal introuvable.')
 
   const db = useDb()
-  const rattachements = db
+  const rattachements = await db
     .select()
     .from(tontineChannels)
     .where(eq(tontineChannels.channelId, id))
-    .all()
 
   if (rattachements.length > 0) {
     throw apiError(
@@ -25,9 +24,8 @@ export default defineEventHandler((event) => {
     )
   }
 
-  db.delete(collectionChannels)
+  await db.delete(collectionChannels)
     .where(and(eq(collectionChannels.id, id), eq(collectionChannels.userId, user.id)))
-    .run()
 
   return { ok: true }
 })

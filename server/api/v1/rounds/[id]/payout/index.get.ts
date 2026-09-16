@@ -12,11 +12,11 @@ export default defineEventHandler(async (event) => {
   if (!roundId) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const db = useDb()
-  const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1).all()
+  const [tour] = await db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1)
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const { user, membership } = await requireMembership(event, tour.tontineId)
-  const etat = etatVersement(db, roundId, user.id)
+  const etat = await etatVersement(db, roundId, user.id)
 
   // Le bureau, et le bénéficiaire du tour — il a désormais un geste à faire
   // ici, et cet écran porte le numéro vers lequel le pot va partir : on ne

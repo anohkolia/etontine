@@ -24,6 +24,6 @@ export default defineEventHandler(async (event) => {
   const parsed = cancelInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  annulerTontine(useDb(), tontineId, user.id, parsed.data.reason)
+  await annulerTontine(useDb(), tontineId, user.id, parsed.data.reason)
   return { ok: true }
 })

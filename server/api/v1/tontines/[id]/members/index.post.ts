@@ -17,8 +17,8 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  verifierQuotaMembres(db, tontineId)
+  await verifierQuotaMembres(db, tontineId)
 
-  const id = ajouterMembreGere(db, tontineId, parsed.data)
+  const id = await ajouterMembreGere(db, tontineId, parsed.data)
   return { id, shares: parsed.data.shares }
 })

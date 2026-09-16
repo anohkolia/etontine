@@ -13,6 +13,6 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   await requireMembership(event, tontineId, ['president'])
-  supprimerBrouillon(useDb(), tontineId)
+  await supprimerBrouillon(useDb(), tontineId)
   return { ok: true }
 })

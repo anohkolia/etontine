@@ -21,15 +21,14 @@ export default defineEventHandler(async (event) => {
   const db = useDb()
   const complet = Boolean(parsed.data.firstName ?? user.firstName) && Boolean(parsed.data.lastName ?? user.lastName)
 
-  db.update(users)
+  await db.update(users)
     .set({
       ...parsed.data,
       ...(complet && user.kycLevel < 1 ? { kycLevel: 1 } : {}),
     })
     .where(eq(users.id, user.id))
-    .run()
 
-  const [maj] = db.select().from(users).where(eq(users.id, user.id)).limit(1).all()
+  const [maj] = await db.select().from(users).where(eq(users.id, user.id)).limit(1)
   return {
     id: maj!.id,
     firstName: maj!.firstName,

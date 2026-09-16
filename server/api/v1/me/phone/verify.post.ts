@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  consommerCode(db, parsed.data.phone, parsed.data.code)
-  appliquerChangementNumero(db, user.id, parsed.data.phone)
+  await consommerCode(db, parsed.data.phone, parsed.data.code)
+  await appliquerChangementNumero(db, user.id, parsed.data.phone)
   return { ok: true, phone: parsed.data.phone }
 })

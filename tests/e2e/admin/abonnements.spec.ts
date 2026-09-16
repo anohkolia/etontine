@@ -78,7 +78,7 @@ test('l’administrateur approuve une demande et le palier est posé', async ({ 
   await expect(page.locator('[data-testid^="demande-"]').filter({ hasText: numero }))
     .toHaveCount(0)
 
-  const [compte] = useDb().select().from(users).where(eq(users.phone, numero)).all()
+  const [compte] = await useDb().select().from(users).where(eq(users.phone, numero))
   expect(compte!.planTier).toBe('standard')
   expect(compte!.planUntil).not.toBeNull()
 
@@ -111,7 +111,7 @@ test('un refus sans motif est impossible, et le motif parvient au président', a
   await expect(page.locator('[data-testid^="demande-"]').filter({ hasText: numero }))
     .toHaveCount(0)
 
-  const [compte] = useDb().select().from(users).where(eq(users.phone, numero)).all()
+  const [compte] = await useDb().select().from(users).where(eq(users.phone, numero))
   expect(compte!.planTier).toBe('free')
 
   await membre.goto(`${APP_MEMBRE}/app/abonnement`)

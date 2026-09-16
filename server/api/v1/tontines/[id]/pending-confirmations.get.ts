@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const { user } = await requireMembership(event, tontineId, ['treasurer', 'president'])
-  const items = fileDAttente(useDb(), tontineId)
+  const items = await fileDAttente(useDb(), tontineId)
 
   return {
     items: items.map(item => ({

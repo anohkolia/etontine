@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   await requireMembership(event, tontineId)
 
   const q = getQuery(event)
-  return readLedger(useDb(), tontineId, {
+  return await readLedger(useDb(), tontineId, {
     roundId: typeof q.roundId === 'string' ? q.roundId : undefined,
     type: typeof q.type === 'string' ? q.type as LedgerType : undefined,
     limit: q.limit ? Number(q.limit) : undefined,

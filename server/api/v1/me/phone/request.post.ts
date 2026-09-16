@@ -18,6 +18,6 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  demanderChangementNumero(db, user.id, parsed.data.phone)
-  return requestOtp(db, parsed.data.phone, 'sms')
+  await demanderChangementNumero(db, user.id, parsed.data.phone)
+  return await requestOtp(db, parsed.data.phone, 'sms')
 })

@@ -83,13 +83,13 @@ export function dateDuJour(maintenant: Date = new Date()): string {
  * semaines, et la date choisie au brouillon est déjà derrière lui quand il
  * démarre. Refuser en le disant vaut mieux que douze amendes le lendemain.
  */
-export function blocagesDemarrage(db: Db, tontineId: string, aujourdhui?: string): BlocageDemarrage[] {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function blocagesDemarrage(db: Db, tontineId: string, aujourdhui?: string): Promise<BlocageDemarrage[]> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const blocages: BlocageDemarrage[] = []
 
-  const actifs = comptesActifs(db, tontineId)
+  const actifs = await comptesActifs(db, tontineId)
   if (actifs < MEMBRES_MINIMUM) {
     blocages.push({
       champ: 'members',
@@ -107,18 +107,18 @@ export function blocagesDemarrage(db: Db, tontineId: string, aujourdhui?: string
   return blocages
 }
 
-export function demarrerTontine(
+export async function demarrerTontine(
   db: Db,
   tontineId: string,
   acteurId: string,
   options: { aujourdhui?: string } = {},
-): ResultatDemarrage {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+): Promise<ResultatDemarrage> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   assertTransition('tontine', tontine.status, 'running')
 
-  const blocages = blocagesDemarrage(db, tontineId, options.aujourdhui)
+  const blocages = await blocagesDemarrage(db, tontineId, options.aujourdhui)
   if (blocages.length > 0) {
     throw apiError(
       blocages[0]!.champ === 'startDate' ? 'VALIDATION_ERROR' : 'FORBIDDEN',
@@ -127,12 +127,11 @@ export function demarrerTontine(
     )
   }
 
-  const parts = db
+  const parts = await db
     .select()
     .from(shares)
     .where(eq(shares.tontineId, tontineId))
     .orderBy(asc(shares.rotationPosition))
-    .all()
 
   if (parts.length === 0) {
     throw apiError('FORBIDDEN', 'Aucune part n’est attribuée.', { field: 'shares' })
@@ -149,7 +148,7 @@ export function demarrerTontine(
     const echeance = dateDuTour(tontine.startDate, index, tontine.frequency)
     const roundId = randomUUID()
 
-    db.insert(rounds).values({
+    await db.insert(rounds).values({
       id: roundId,
       tontineId,
       index,
@@ -158,10 +157,10 @@ export function demarrerTontine(
       expectedAmount: potAttendu,
       // Seul le premier tour s'ouvre : les suivants attendent leur date (T13).
       status: index === 1 ? 'collecting' : 'pending',
-    }).run()
+    })
 
     for (const cotisante of parts) {
-      db.insert(contributions).values({
+      await db.insert(contributions).values({
         id: randomUUID(),
         roundId,
         shareId: cotisante.id,
@@ -170,17 +169,16 @@ export function demarrerTontine(
         confirmedAmount: 0,
         status: 'due',
         dueDate: echeance,
-      }).run()
+      })
       nbCotisations++
     }
   }
 
-  db.update(tontines)
+  await db.update(tontines)
     .set({ status: 'running', rotationFrozenAt: new Date() })
     .where(eq(tontines.id, tontineId))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
@@ -205,8 +203,8 @@ export function demarrerTontine(
  * un calendrier de passage, une ligne sans nom ne répond pas à la question
  * qu'on vient y poser.
  */
-export function toursDe(db: Db, tontineId: string) {
-  return db
+export async function toursDe(db: Db, tontineId: string) {
+  return (await db
     .select({
       id: rounds.id,
       index: rounds.index,
@@ -225,8 +223,7 @@ export function toursDe(db: Db, tontineId: string) {
     .innerJoin(memberships, eq(memberships.id, shares.membershipId))
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(rounds.tontineId, tontineId))
-    .orderBy(asc(rounds.index))
-    .all()
+    .orderBy(asc(rounds.index)))
     .map(t => ({
       ...t,
       beneficiaryName: [t.firstName, t.lastName].filter(Boolean).join(' ') || t.managedName || 'Membre',
@@ -254,12 +251,11 @@ export interface EtatDuTour {
   miennes: Array<typeof contributions.$inferSelect>
 }
 
-export function etatDuTour(db: Db, roundId: string, membershipId: string): EtatDuTour {
-  const toutes = db
+export async function etatDuTour(db: Db, roundId: string, membershipId: string): Promise<EtatDuTour> {
+  const toutes = await db
     .select()
     .from(contributions)
     .where(eq(contributions.roundId, roundId))
-    .all()
 
   // Un membre à double part a plusieurs cotisations sur le même tour : on les
   // additionne, on n'en prend pas une au hasard.
@@ -288,22 +284,21 @@ export function etatDuTour(db: Db, roundId: string, membershipId: string): EtatD
  * rien à faire, et demander un geste de plus à l'organisateur pour constater
  * une évidence n'ajouterait qu'un oubli possible.
  */
-export function cloturerSiDernierTour(db: Db, tontineId: string, acteurId: string): boolean {
-  const tous = db
+export async function cloturerSiDernierTour(db: Db, tontineId: string, acteurId: string): Promise<boolean> {
+  const tous = await db
     .select({ status: rounds.status })
     .from(rounds)
     .where(eq(rounds.tontineId, tontineId))
-    .all()
 
   if (tous.length === 0 || tous.some(r => r.status !== 'closed')) return false
 
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine || tontine.status !== 'running') return false
 
   assertTransition('tontine', tontine.status, 'closed')
-  db.update(tontines).set({ status: 'closed' }).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set({ status: 'closed' }).where(eq(tontines.id, tontineId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
@@ -311,7 +306,7 @@ export function cloturerSiDernierTour(db: Db, tontineId: string, acteurId: strin
   })
 
   // Aucun montant : écran de verrouillage, téléphone partagé (règle 21).
-  notifierTontine(db, tontineId, {
+  await notifierTontine(db, tontineId, {
     type: 'tontine_terminee',
     title: 'Ta tontine est arrivée à son terme',
     body: 'Tous les tours sont clos. Le registre reste consultable.',

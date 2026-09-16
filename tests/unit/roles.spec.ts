@@ -22,7 +22,7 @@ import type { TestDb } from '../helpers/db.ts'
  */
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let T: string
 
 const PRESIDENT = 'a1000000-0000-4000-8000-000000000001'
@@ -33,7 +33,7 @@ const FATOU = 'a1000000-0000-4000-8000-000000000003'
 const A = (jour: string) => new Date(`${jour}T08:00:00`)
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
@@ -41,25 +41,25 @@ beforeEach(async () => {
   await createTestUser(db, KOFFI, '+2250707100002')
   await createTestUser(db, FATOU, '+2250707100003')
 
-  T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
+  T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
+  await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
-  const [msPresident] = db.select().from(memberships).where(eq(memberships.tontineId, T)).all()
-  attribuerParts(db, T, msPresident!.id, 1)
+  const [msPresident] = await db.select().from(memberships).where(eq(memberships.tontineId, T))
+  await attribuerParts(db, T, msPresident!.id, 1)
 
   // Koffi et Fatou ont un compte ; Yao est géré, sans application.
-  const koffi = ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707100002', shares: 1 })
-  db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi)).run()
-  const fatou = ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707100003', shares: 1 })
-  db.update(memberships).set({ userId: FATOU }).where(eq(memberships.id, fatou)).run()
-  ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707100004', shares: 1 })
+  const koffi = await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707100002', shares: 1 })
+  await db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi))
+  const fatou = await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707100003', shares: 1 })
+  await db.update(memberships).set({ userId: FATOU }).where(eq(memberships.id, fatou))
+  await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707100004', shares: 1 })
 
-  const canal = creerCanal(db, PRESIDENT, {
+  const canal = await creerCanal(db, PRESIDENT, {
     provider: 'wave', msisdn: '+2250707100001', holderName: 'Aya Koné',
   })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
 })
 
 afterEach(() => cleanup())
@@ -72,86 +72,85 @@ function erreur(statut: number, motif: RegExp) {
   })
 }
 
-function adhesion(nomOuUser: string) {
-  return db.select().from(memberships).where(eq(memberships.tontineId, T)).all()
+async function adhesion(nomOuUser: string) {
+  return (await db.select().from(memberships).where(eq(memberships.tontineId, T)))
     .find(m => m.userId === nomOuUser || m.managedName === nomOuUser)!
 }
 
-function president() {
-  return db.select().from(memberships)
+async function president() {
+  return await db.select().from(memberships)
     .where(and(eq(memberships.tontineId, T), eq(memberships.role, 'president')))
-    .all()
 }
 
 describe('nommer le bureau', () => {
-  it('nomme un trésorier et un censeur, et l’écrit au registre', () => {
-    definirRole(db, T, adhesion(KOFFI).id, 'treasurer', PRESIDENT)
-    definirRole(db, T, adhesion(FATOU).id, 'auditor', PRESIDENT)
+  it('nomme un trésorier et un censeur, et l’écrit au registre', async () => {
+    await definirRole(db, T, (await adhesion(KOFFI)).id, 'treasurer', PRESIDENT)
+    await definirRole(db, T, (await adhesion(FATOU)).id, 'auditor', PRESIDENT)
 
-    expect(adhesion(KOFFI).role).toBe('treasurer')
-    expect(adhesion(FATOU).role).toBe('auditor')
+    expect((await adhesion(KOFFI)).role).toBe('treasurer')
+    expect((await adhesion(FATOU)).role).toBe('auditor')
 
-    const ecritures = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+    const ecritures = (await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)))
       .filter(e => (e.payload as { changement?: string }).changement === 'role_modifie')
     expect(ecritures).toHaveLength(2)
     expect(ecritures[0]!.payload).toMatchObject({ de: 'member', vers: 'treasurer', name: 'Koffi N’Guessan' })
   })
 
-  it('prévient la personne nommée, sans montant', () => {
-    definirRole(db, T, adhesion(KOFFI).id, 'treasurer', PRESIDENT)
+  it('prévient la personne nommée, sans montant', async () => {
+    await definirRole(db, T, (await adhesion(KOFFI)).id, 'treasurer', PRESIDENT)
 
-    const recues = db.select().from(notifications).where(eq(notifications.userId, KOFFI)).all()
+    const recues = await db.select().from(notifications).where(eq(notifications.userId, KOFFI))
     expect(recues).toHaveLength(1)
     expect(recues[0]!.body).toContain('trésorier')
   })
 
-  it('accepte de nommer un membre qui n’a pas encore de compte, sans le notifier', () => {
+  it('accepte de nommer un membre qui n’a pas encore de compte, sans le notifier', async () => {
     // « Koffi sera trésorier, il installe l'application demain » : le rôle
     // prend effet au rattachement. Personne à notifier en attendant.
-    definirRole(db, T, adhesion('Yao Brou').id, 'treasurer', PRESIDENT)
-    expect(adhesion('Yao Brou').role).toBe('treasurer')
-    expect(db.select().from(notifications).all()).toHaveLength(0)
+    await definirRole(db, T, (await adhesion('Yao Brou')).id, 'treasurer', PRESIDENT)
+    expect((await adhesion('Yao Brou')).role).toBe('treasurer')
+    expect(await db.select().from(notifications)).toHaveLength(0)
   })
 
-  it('refuse de rétrograder le président par ce chemin', () => {
-    expect(() => definirRole(db, T, adhesion(PRESIDENT).id, 'member', PRESIDENT))
+  it('refuse de rétrograder le président par ce chemin', async () => {
+    await expect(definirRole(db, T, (await adhesion(PRESIDENT)).id, 'member', PRESIDENT)).rejects
       .toThrow(erreur(403, /présidence/))
-    expect(president()).toHaveLength(1)
+    expect(await president()).toHaveLength(1)
   })
 
-  it('ne fait rien quand le rôle ne change pas', () => {
-    definirRole(db, T, adhesion(KOFFI).id, 'member', PRESIDENT)
-    const ecritures = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+  it('ne fait rien quand le rôle ne change pas', async () => {
+    await definirRole(db, T, (await adhesion(KOFFI)).id, 'member', PRESIDENT)
+    const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T))
     expect(ecritures.filter(e => (e.payload as { changement?: string }).changement === 'role_modifie'))
       .toHaveLength(0)
   })
 
-  it('retire un rôle en repassant à membre', () => {
-    definirRole(db, T, adhesion(KOFFI).id, 'treasurer', PRESIDENT)
-    definirRole(db, T, adhesion(KOFFI).id, 'member', PRESIDENT)
-    expect(adhesion(KOFFI).role).toBe('member')
+  it('retire un rôle en repassant à membre', async () => {
+    await definirRole(db, T, (await adhesion(KOFFI)).id, 'treasurer', PRESIDENT)
+    await definirRole(db, T, (await adhesion(KOFFI)).id, 'member', PRESIDENT)
+    expect((await adhesion(KOFFI)).role).toBe('member')
   })
 })
 
 describe('passer la présidence', () => {
-  it('fait de l’autre le président et de l’ancien un membre — un seul président', () => {
-    transfererPresidence(db, T, adhesion(KOFFI).id, PRESIDENT)
+  it('fait de l’autre le président et de l’ancien un membre — un seul président', async () => {
+    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
 
-    expect(adhesion(KOFFI).role).toBe('president')
-    expect(adhesion(PRESIDENT).role).toBe('member')
-    expect(president()).toHaveLength(1)
+    expect((await adhesion(KOFFI)).role).toBe('president')
+    expect((await adhesion(PRESIDENT)).role).toBe('member')
+    expect(await president()).toHaveLength(1)
   })
 
-  it('passe aussi par `role: president` sur un autre membre', () => {
-    definirRole(db, T, adhesion(FATOU).id, 'president', PRESIDENT)
-    expect(adhesion(FATOU).role).toBe('president')
-    expect(president()).toHaveLength(1)
+  it('passe aussi par `role: president` sur un autre membre', async () => {
+    await definirRole(db, T, (await adhesion(FATOU)).id, 'president', PRESIDENT)
+    expect((await adhesion(FATOU)).role).toBe('president')
+    expect(await president()).toHaveLength(1)
   })
 
-  it('l’écrit au registre et prévient tout le groupe', () => {
-    transfererPresidence(db, T, adhesion(KOFFI).id, PRESIDENT)
+  it('l’écrit au registre et prévient tout le groupe', async () => {
+    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
 
-    const ecriture = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+    const ecriture = (await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)))
       .find(e => (e.payload as { changement?: string }).changement === 'presidence_transferee')!
     expect(ecriture.payload).toMatchObject({
       de: { name: expect.any(String) },
@@ -160,96 +159,96 @@ describe('passer la présidence', () => {
 
     // Les trois comptes sont prévenus : c'est la personne à qui l'on envoie
     // de l'argent qui change.
-    const prevenus = new Set(db.select().from(notifications).all().map(n => n.userId))
+    const prevenus = new Set((await db.select().from(notifications)).map(n => n.userId))
     expect(prevenus).toEqual(new Set([PRESIDENT, KOFFI, FATOU]))
   })
 
-  it('refuse un membre géré, sans compte', () => {
-    expect(() => transfererPresidence(db, T, adhesion('Yao Brou').id, PRESIDENT)).toThrow(erreur(403, /compte/))
-    expect(adhesion(PRESIDENT).role).toBe('president')
+  it('refuse un membre géré, sans compte', async () => {
+    await expect(transfererPresidence(db, T, (await adhesion('Yao Brou')).id, PRESIDENT)).rejects.toThrow(erreur(403, /compte/))
+    expect((await adhesion(PRESIDENT)).role).toBe('president')
   })
 
-  it('libère l’ancien président, qui peut alors sortir', () => {
-    expect(() => retirerMembre(db, adhesion(PRESIDENT).id, PRESIDENT)).toThrow(erreur(403, /présidence/))
+  it('libère l’ancien président, qui peut alors sortir', async () => {
+    await expect(retirerMembre(db, (await adhesion(PRESIDENT)).id, PRESIDENT)).rejects.toThrow(erreur(403, /présidence/))
 
-    transfererPresidence(db, T, adhesion(KOFFI).id, PRESIDENT)
-    const sortie = retirerMembre(db, adhesion(PRESIDENT).id, KOFFI)
+    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
+    const sortie = await retirerMembre(db, (await adhesion(PRESIDENT)).id, KOFFI)
 
-    expect(sortie.membershipId).toBe(adhesion(PRESIDENT).id)
-    expect(adhesion(PRESIDENT).status).toBe('left')
+    expect(sortie.membershipId).toBe((await adhesion(PRESIDENT)).id)
+    expect((await adhesion(PRESIDENT)).status).toBe('left')
   })
 
-  it('ne touche ni aux parts ni à la rotation', () => {
-    const avant = db.select().from(shares).where(eq(shares.tontineId, T)).all()
-    transfererPresidence(db, T, adhesion(KOFFI).id, PRESIDENT)
-    const apres = db.select().from(shares).where(eq(shares.tontineId, T)).all()
+  it('ne touche ni aux parts ni à la rotation', async () => {
+    const avant = await db.select().from(shares).where(eq(shares.tontineId, T))
+    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
+    const apres = await db.select().from(shares).where(eq(shares.tontineId, T))
     expect(apres).toEqual(avant)
   })
 })
 
 describe('membre défaillant', () => {
   /** Clôt à la main le tour dont Koffi est bénéficiaire : il a pris la main. */
-  function koffiAPrisLaMain() {
-    demarrerTontine(db, T, PRESIDENT)
-    const partDeKoffi = db.select().from(shares).where(eq(shares.membershipId, adhesion(KOFFI).id)).all()[0]!
-    db.update(rounds).set({ status: 'closed' }).where(eq(rounds.beneficiaryShareId, partDeKoffi.id)).run()
+  async function koffiAPrisLaMain() {
+    await demarrerTontine(db, T, PRESIDENT)
+    const partDeKoffi = (await db.select().from(shares).where(eq(shares.membershipId, (await adhesion(KOFFI)).id)))[0]!
+    await db.update(rounds).set({ status: 'closed' }).where(eq(rounds.beneficiaryShareId, partDeKoffi.id))
   }
 
-  it('refuse tant que le membre n’a pas pris la main', () => {
-    demarrerTontine(db, T, PRESIDENT)
-    expect(aDejaPrisLaMain(db, adhesion(KOFFI).id)).toBe(false)
-    expect(() => declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)).toThrow(erreur(403, /pris la main/))
-    expect(adhesion(KOFFI).status).toBe('active')
+  it('refuse tant que le membre n’a pas pris la main', async () => {
+    await demarrerTontine(db, T, PRESIDENT)
+    expect(await aDejaPrisLaMain(db, (await adhesion(KOFFI)).id)).toBe(false)
+    await expect(declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)).rejects.toThrow(erreur(403, /pris la main/))
+    expect((await adhesion(KOFFI)).status).toBe('active')
   })
 
-  it('passe le membre en défaillant après un tour où il a reçu le pot', () => {
-    koffiAPrisLaMain()
-    expect(aDejaPrisLaMain(db, adhesion(KOFFI).id)).toBe(true)
+  it('passe le membre en défaillant après un tour où il a reçu le pot', async () => {
+    await koffiAPrisLaMain()
+    expect(await aDejaPrisLaMain(db, (await adhesion(KOFFI)).id)).toBe(true)
 
-    const resultat = declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)
+    const resultat = await declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)
 
-    expect(adhesion(KOFFI).status).toBe('defaulted')
+    expect((await adhesion(KOFFI)).status).toBe('defaulted')
     // Ce qu'il doit encore sur les tours non clos : trois tours restants à 25 000.
     expect(resultat.resteDu).toBe(75_000)
   })
 
-  it('l’écrit au registre avec le reste dû, sans prévenir le groupe', () => {
-    koffiAPrisLaMain()
-    declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)
+  it('l’écrit au registre avec le reste dû, sans prévenir le groupe', async () => {
+    await koffiAPrisLaMain()
+    await declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)
 
-    const ecriture = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+    const ecriture = (await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)))
       .find(e => (e.payload as { changement?: string }).changement === 'membre_defaillant')!
     expect(ecriture.payload).toMatchObject({ name: 'Koffi N’Guessan', resteDu: 75_000 })
 
     // Aucune publication (§2.2) : personne n'est notifié.
-    expect(db.select().from(notifications).all()).toHaveLength(0)
+    expect(await db.select().from(notifications)).toHaveLength(0)
   })
 
-  it('gèle les rappels automatiques du membre défaillant', () => {
-    koffiAPrisLaMain()
+  it('gèle les rappels automatiques du membre défaillant', async () => {
+    await koffiAPrisLaMain()
     // Le tour de Koffi est clos par le raccourci ci-dessus ; on ouvre le tour
     // suivant pour qu'un rappel ait un objet.
-    const suivant = db.select().from(rounds).where(and(eq(rounds.tontineId, T), eq(rounds.status, 'pending'))).all()[0]!
-    db.update(rounds).set({ status: 'collecting' }).where(eq(rounds.id, suivant.id)).run()
+    const suivant = (await db.select().from(rounds).where(and(eq(rounds.tontineId, T), eq(rounds.status, 'pending'))))[0]!
+    await db.update(rounds).set({ status: 'collecting' }).where(eq(rounds.id, suivant.id))
 
-    declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)
+    await declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)
 
-    const envoyes = envoyerRappels(db, A(suivant.dueDate))
+    const envoyes = await envoyerRappels(db, A(suivant.dueDate))
     const destinataires = new Set(envoyes.map(e => e.userId))
     expect(destinataires.has(KOFFI)).toBe(false)
     // Les autres comptes, eux, sont toujours relancés.
     expect(destinataires.has(FATOU)).toBe(true)
   })
 
-  it('est un état final', () => {
-    koffiAPrisLaMain()
-    declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)
-    expect(() => declarerDefaillant(db, adhesion(KOFFI).id, PRESIDENT)).toThrow(erreur(409, /final/))
-    expect(() => retirerMembre(db, adhesion(KOFFI).id, PRESIDENT)).toThrow(erreur(409, /final/))
+  it('est un état final', async () => {
+    await koffiAPrisLaMain()
+    await declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)
+    await expect(declarerDefaillant(db, (await adhesion(KOFFI)).id, PRESIDENT)).rejects.toThrow(erreur(409, /final/))
+    await expect(retirerMembre(db, (await adhesion(KOFFI)).id, PRESIDENT)).rejects.toThrow(erreur(409, /final/))
   })
 
-  it('ne se pose jamais sur le président', () => {
-    demarrerTontine(db, T, PRESIDENT)
-    expect(() => declarerDefaillant(db, adhesion(PRESIDENT).id, PRESIDENT)).toThrow(erreur(403, /président/))
+  it('ne se pose jamais sur le président', async () => {
+    await demarrerTontine(db, T, PRESIDENT)
+    await expect(declarerDefaillant(db, (await adhesion(PRESIDENT)).id, PRESIDENT)).rejects.toThrow(erreur(403, /président/))
   })
 })

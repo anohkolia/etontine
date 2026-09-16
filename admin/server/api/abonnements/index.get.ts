@@ -4,7 +4,7 @@ import { demandesEnAttente, demandesTraitees } from '../../../../server/services
 import { requireAdmin } from '../../utils/garde.ts'
 
 /** La file des demandes d'abonnement : en attente par défaut, traitées sur demande. */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   requireAdmin(event)
 
   const db = useDb()
@@ -12,7 +12,7 @@ export default defineEventHandler((event) => {
 
   return {
     etat: traitees ? 'traitees' : 'en_attente',
-    demandes: traitees ? demandesTraitees(db) : demandesEnAttente(db),
-    nbEnAttente: demandesEnAttente(db).length,
+    demandes: traitees ? (await demandesTraitees(db)) : (await demandesEnAttente(db)),
+    nbEnAttente: (await demandesEnAttente(db)).length,
   }
 })

@@ -29,9 +29,10 @@ export interface AppendLedgerInput {
  * - le JSON est **canonique** (clés triées). Sans cela, une bibliothèque qui
  *   réordonne les clés en relisant casserait la vérification sur des données
  *   pourtant intactes ;
- * - l'horodatage est haché en **secondes**, la précision effectivement stockée
- *   par SQLite. Hacher des millisecondes rendrait toute écriture invérifiable
- *   dès sa relecture.
+ * - l'horodatage est haché en **secondes**. Postgres stocke la microseconde
+ *   et JavaScript la milliseconde : hacher sous la seconde exposerait la
+ *   vérification à la précision du pilote, et changer cette précision
+ *   invaliderait les chaînes déjà écrites.
  */
 export function computeHash(input: {
   prevHash: string | null
@@ -61,24 +62,24 @@ export function computeHash(input: {
  * client n'est jamais utilisé pour le chaînage : c'est ce qui empêche
  * d'antidater une cotisation.
  */
-export function appendLedger(db: Db, input: AppendLedgerInput): LedgerEntry {
+export async function appendLedger(db: Db, input: AppendLedgerInput): Promise<LedgerEntry> {
   // La position et le hachage précédent doivent être lus et écrits sans qu'une
   // autre écriture s'intercale. La transaction plus la contrainte d'unicité
   // `(tontine_id, position)` rendent la course impossible : au pire, la seconde
   // écriture échoue et l'appelant réessaie.
-  return db.transaction((tx) => {
-    const [precedente] = tx
+  return await db.transaction(async (tx) => {
+    const [precedente] = await tx
       .select({ hash: ledgerEntries.hash, position: ledgerEntries.position })
       .from(ledgerEntries)
       .where(eq(ledgerEntries.tontineId, input.tontineId))
       .orderBy(desc(ledgerEntries.position))
       .limit(1)
-      .all()
 
     const prevHash = precedente?.hash ?? null
     const position = (precedente?.position ?? 0) + 1
 
-    // Secondes pleines : c'est la précision que SQLite conservera.
+    // Secondes pleines : le hachage est calculé sur cet horodatage, et il doit
+    // se relire à l'identique quel que soit le moteur qui le stocke.
     const serverTimestamp = new Date(Math.floor(Date.now() / 1000) * 1000)
 
     const hash = computeHash({
@@ -103,7 +104,7 @@ export function appendLedger(db: Db, input: AppendLedgerInput): LedgerEntry {
       serverTimestamp,
     }
 
-    tx.insert(ledgerEntries).values(ligne).run()
+    await tx.insert(ledgerEntries).values(ligne)
     return ligne as LedgerEntry
   })
 }
@@ -128,13 +129,12 @@ export interface LedgerVerification {
  * Renvoyer la position, et pas seulement `false`, est ce qui rend le contrôle
  * utile : on sait à partir d'où le registre n'est plus digne de foi.
  */
-export function verifyLedger(db: Db, tontineId: string): LedgerVerification {
-  const ecritures = db
+export async function verifyLedger(db: Db, tontineId: string): Promise<LedgerVerification> {
+  const ecritures = await db
     .select()
     .from(ledgerEntries)
     .where(eq(ledgerEntries.tontineId, tontineId))
     .orderBy(asc(ledgerEntries.position))
-    .all()
 
   let prevHash: string | null = null
 
@@ -183,7 +183,7 @@ export function verifyLedger(db: Db, tontineId: string): LedgerVerification {
 }
 
 /** Lecture paginée du registre. Accessible à tout membre actif. */
-export function readLedger(
+export async function readLedger(
   db: Db,
   tontineId: string,
   options: { roundId?: string, type?: LedgerType, limit?: number, cursor?: number } = {},
@@ -199,13 +199,12 @@ export function readLedger(
   // une tontine de douze membres y arrive au quatrième tour.
   if (options.cursor !== undefined) conditions.push(lt(ledgerEntries.position, options.cursor))
 
-  const lignes = db
+  const lignes = await db
     .select()
     .from(ledgerEntries)
     .where(and(...conditions))
     .orderBy(desc(ledgerEntries.position))
     .limit(limite + 1)
-    .all()
 
   const items = lignes.slice(0, limite)
   return {

@@ -24,9 +24,9 @@ export default defineEventHandler(async (event) => {
   requireKyc(user, 2)
 
   const db = useDb()
-  verifierQuotaTontines(db, user)
+  await verifierQuotaTontines(db, user)
 
-  publier(db, tontineId)
+  await publier(db, tontineId)
 
   return { id: tontineId, status: 'open' as const }
 })

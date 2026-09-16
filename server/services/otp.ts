@@ -74,12 +74,11 @@ export async function requestOtp(
 ): Promise<OtpRequestResult> {
   const depuis = new Date(Date.now() - FENETRE_LIMITE_MS)
 
-  const recentes = db
+  const recentes = await db
     .select({ id: otpRequests.id, createdAt: otpRequests.createdAt })
     .from(otpRequests)
     .where(and(eq(otpRequests.phone, phone), gt(otpRequests.createdAt, depuis)))
     .orderBy(desc(otpRequests.createdAt))
-    .all()
 
   if (recentes.length >= MAX_DEMANDES) {
     throw apiError(
@@ -100,20 +99,20 @@ export async function requestOtp(
   // générateur cryptographique, sinon il est prédictible.
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
 
-  // `createdAt` est posé explicitement, et non laissé au `unixepoch()` de
-  // SQLite : la limitation de débit compare cette valeur à l'horloge du
+  // `createdAt` est posé explicitement, et non laissé au `now()` de
+  // Postgres : la limitation de débit compare cette valeur à l'horloge du
   // processus. Deux horloges différentes, et la fenêtre de dix minutes devient
   // fausse — en test comme en production si la base tourne sur une autre machine.
   const maintenant = new Date()
 
-  db.insert(otpRequests).values({
+  await db.insert(otpRequests).values({
     id: randomUUID(),
     phone,
     codeHash: empreinte(phone, code),
     channel: canal,
     createdAt: maintenant,
     expiresAt: new Date(maintenant.getTime() + VALIDITE_MS),
-  }).run()
+  })
 
   await livrerCode(phone, code, canal)
 
@@ -146,13 +145,13 @@ export interface OtpVerifyResult {
  * la base de comptes fantômes en saisissant des numéros au hasard.
  */
 export async function verifyOtp(db: Db, phone: string, code: string): Promise<OtpVerifyResult> {
-  consommerCode(db, phone, code)
+  await consommerCode(db, phone, code)
 
-  const [existant] = db.select().from(users).where(eq(users.phone, phone)).limit(1).all()
+  const [existant] = await db.select().from(users).where(eq(users.phone, phone)).limit(1)
   if (existant) return { userId: existant.id, isNewUser: false }
 
   const userId = randomUUID()
-  db.insert(users).values({ id: userId, phone, kycLevel: 0 }).run()
+  await db.insert(users).values({ id: userId, phone, kycLevel: 0 })
   return { userId, isNewUser: true }
 }
 
@@ -163,8 +162,8 @@ export async function verifyOtp(db: Db, phone: string, code: string): Promise<Ot
  * le second cas, le compte existe déjà et c'est un autre numéro qu'on prouve.
  * Lever l'erreur ici plutôt que renvoyer faux garde un seul message par cas.
  */
-export function consommerCode(db: Db, phone: string, code: string): void {
-  const [demande] = db
+export async function consommerCode(db: Db, phone: string, code: string): Promise<void> {
+  const [demande] = await db
     .select()
     .from(otpRequests)
     .where(and(
@@ -174,7 +173,6 @@ export function consommerCode(db: Db, phone: string, code: string): void {
     ))
     .orderBy(desc(otpRequests.createdAt))
     .limit(1)
-    .all()
 
   if (!demande) {
     throw apiError('VALIDATION_ERROR', 'Code expiré ou déjà utilisé. Demande un nouveau code.', { field: 'code' })
@@ -185,29 +183,26 @@ export function consommerCode(db: Db, phone: string, code: string): void {
   }
 
   if (!comparaisonConstante(demande.codeHash, empreinte(phone, code))) {
-    db.update(otpRequests)
+    await db.update(otpRequests)
       .set({ attempts: demande.attempts + 1 })
       .where(eq(otpRequests.id, demande.id))
-      .run()
 
     throw apiError('VALIDATION_ERROR', 'Code incorrect.', { field: 'code' })
   }
 
-  db.update(otpRequests)
+  await db.update(otpRequests)
     .set({ consumedAt: new Date() })
     .where(eq(otpRequests.id, demande.id))
-    .run()
 }
 
 /** Nombre d'échecs sur la dernière demande en cours — pilote l'offre d'appel vocal. */
-export function failedAttempts(db: Db, phone: string): number {
-  const [demande] = db
+export async function failedAttempts(db: Db, phone: string): Promise<number> {
+  const [demande] = await db
     .select({ attempts: otpRequests.attempts })
     .from(otpRequests)
     .where(eq(otpRequests.phone, phone))
     .orderBy(desc(otpRequests.createdAt))
     .limit(1)
-    .all()
 
   return demande?.attempts ?? 0
 }

@@ -1,5 +1,6 @@
-import { sql } from 'drizzle-orm'
-import { index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import {
+  boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique,
+} from 'drizzle-orm/pg-core'
 import {
   collectionProvider,
   contributionStatus,
@@ -30,19 +31,25 @@ import {
  *    recopiés : la base, le serveur et le client parlent des mêmes valeurs, et
  *    ajouter un statut au schéma Zod casse la compilation ici tant que la
  *    migration ne suit pas.
- * 3. **Les horodatages sont posés par le serveur** (`unixepoch()`), jamais par
- *    une valeur venue du client.
+ * 3. **Les horodatages sont posés par le serveur** (`now()`), jamais par une
+ *    valeur venue du client.
+ *
+ * Le dialecte est **Postgres** — Supabase en production, PGlite (le même
+ * moteur, embarqué) en développement et dans les tests. Les horodatages sont
+ * des `timestamptz`, les documents des `jsonb`, les drapeaux de vrais
+ * booléens ; les dates de calendrier restent du texte `AAAA-MM-JJ`, comme le
+ * modèle les compare.
  */
 
 const id = () => text('id').primaryKey()
-const createdAt = () =>
-  integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`)
+const horodatage = (nom: string) => timestamp(nom, { withTimezone: true, mode: 'date' })
+const createdAt = () => horodatage('created_at').notNull().defaultNow()
 
 /* ------------------------------------------------------------------ *
  * Personnes et accès
  * ------------------------------------------------------------------ */
 
-export const users = sqliteTable('users', {
+export const users = pgTable('users', {
   id: id(),
   /** E.164 obligatoire, `+225XXXXXXXXXX` (règle 20). Normalisé avant insertion. */
   phone: text('phone').notNull().unique(),
@@ -53,7 +60,7 @@ export const users = sqliteTable('users', {
   kycLevel: integer('kyc_level').notNull().default(0),
   pinHash: text('pin_hash'),
   /** Déclenche le gel de 48 h sur les versements. */
-  phoneChangedAt: integer('phone_changed_at', { mode: 'timestamp' }),
+  phoneChangedAt: horodatage('phone_changed_at'),
   /**
    * Vérification d'identité (palier 2). La revue manuelle relève du back-office,
    * hors périmètre MVP : `kycStatus` porte l'état pour que le jour où ce
@@ -63,10 +70,10 @@ export const users = sqliteTable('users', {
     .notNull().default('none'),
   kycDocumentUrl: text('kyc_document_url'),
   kycSelfieUrl: text('kyc_selfie_url'),
-  kycSubmittedAt: integer('kyc_submitted_at', { mode: 'timestamp' }),
+  kycSubmittedAt: horodatage('kyc_submitted_at'),
   /** Qui a statué, quand, et pourquoi en cas de refus. */
   kycReviewedBy: text('kyc_reviewed_by'),
-  kycReviewedAt: integer('kyc_reviewed_at', { mode: 'timestamp' }),
+  kycReviewedAt: horodatage('kyc_reviewed_at'),
   kycRejectionReason: text('kyc_rejection_reason'),
   /**
    * Abonnement du président. Il porte sur la **personne**, pas sur la tontine :
@@ -78,10 +85,10 @@ export const users = sqliteTable('users', {
    * gratuit, sans échéance.
    */
   planTier: text('plan_tier', { enum: planTier.options }).notNull().default('free'),
-  planUntil: integer('plan_until', { mode: 'timestamp' }),
+  planUntil: horodatage('plan_until'),
   /** Consentements granulaires — deux cases distinctes (T08). */
-  consentDataAt: integer('consent_data_at', { mode: 'timestamp' }),
-  consentNotificationsAt: integer('consent_notifications_at', { mode: 'timestamp' }),
+  consentDataAt: horodatage('consent_data_at'),
+  consentNotificationsAt: horodatage('consent_notifications_at'),
   createdAt: createdAt(),
 })
 
@@ -90,10 +97,10 @@ export const users = sqliteTable('users', {
  * mais le contrat d'API impose une session serveur : la stocker ici plutôt que
  * dans un JWT évite d'avoir à révoquer l'irrévocable.
  */
-export const sessions = sqliteTable('sessions', {
+export const sessions = pgTable('sessions', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: horodatage('expires_at').notNull(),
   userAgent: text('user_agent'),
   createdAt: createdAt(),
 }, t => [index('sessions_user_idx').on(t.userId)])
@@ -102,14 +109,14 @@ export const sessions = sqliteTable('sessions', {
  * Demandes d'OTP. Le code n'est jamais stocké en clair : seule son empreinte
  * l'est, comme un mot de passe.
  */
-export const otpRequests = sqliteTable('otp_requests', {
+export const otpRequests = pgTable('otp_requests', {
   id: id(),
   phone: text('phone').notNull(),
   codeHash: text('code_hash').notNull(),
   channel: text('channel', { enum: ['sms', 'voice'] }).notNull().default('sms'),
   attempts: integer('attempts').notNull().default(0),
-  consumedAt: integer('consumed_at', { mode: 'timestamp' }),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  consumedAt: horodatage('consumed_at'),
+  expiresAt: horodatage('expires_at').notNull(),
   createdAt: createdAt(),
 }, t => [index('otp_phone_idx').on(t.phone, t.createdAt)])
 
@@ -117,7 +124,7 @@ export const otpRequests = sqliteTable('otp_requests', {
  * Canaux de collecte
  * ------------------------------------------------------------------ */
 
-export const collectionChannels = sqliteTable('collection_channels', {
+export const collectionChannels = pgTable('collection_channels', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: text('provider', { enum: collectionProvider.options }).notNull(),
@@ -126,7 +133,7 @@ export const collectionChannels = sqliteTable('collection_channels', {
   holderName: text('holder_name').notNull(),
   paymentLinkUrl: text('payment_link_url'),
   /** `null` = canal inutilisable. L'OTP sur le numéro de collecte est obligatoire. */
-  verifiedAt: integer('verified_at', { mode: 'timestamp' }),
+  verifiedAt: horodatage('verified_at'),
   createdAt: createdAt(),
 }, t => [index('channels_user_idx').on(t.userId)])
 
@@ -134,7 +141,7 @@ export const collectionChannels = sqliteTable('collection_channels', {
  * Tontines
  * ------------------------------------------------------------------ */
 
-export const tontines = sqliteTable('tontines', {
+export const tontines = pgTable('tontines', {
   id: id(),
   name: text('name').notNull(),
   description: text('description'),
@@ -159,15 +166,15 @@ export const tontines = sqliteTable('tontines', {
   status: text('status', { enum: tontineStatus.options }).notNull().default('draft'),
   createdBy: text('created_by').notNull().references(() => users.id),
   /** Figée au démarrage : après `start`, l'ordre ne change plus sans contre-validation. */
-  rotationFrozenAt: integer('rotation_frozen_at', { mode: 'timestamp' }),
+  rotationFrozenAt: horodatage('rotation_frozen_at'),
   createdAt: createdAt(),
 }, t => [index('tontines_status_idx').on(t.status)])
 
-export const tontineChannels = sqliteTable('tontine_channels', {
+export const tontineChannels = pgTable('tontine_channels', {
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   channelId: text('channel_id').notNull().references(() => collectionChannels.id, { onDelete: 'cascade' }),
   /** Gel de 48 h après un changement de canal (règle 22). */
-  frozenUntil: integer('frozen_until', { mode: 'timestamp' }),
+  frozenUntil: horodatage('frozen_until'),
   createdAt: createdAt(),
 }, t => [primaryKey({ columns: [t.tontineId, t.channelId] })])
 
@@ -175,7 +182,7 @@ export const tontineChannels = sqliteTable('tontine_channels', {
  * Membres et parts
  * ------------------------------------------------------------------ */
 
-export const memberships = sqliteTable('memberships', {
+export const memberships = pgTable('memberships', {
   id: id(),
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   /** `null` pour un membre géré, qui n'a pas encore l'application. */
@@ -185,7 +192,7 @@ export const memberships = sqliteTable('memberships', {
   /** Le rôle est **par tontine**, jamais global. */
   role: text('role', { enum: membershipRole.options }).notNull().default('member'),
   status: text('status', { enum: membershipStatus.options }).notNull().default('invited'),
-  joinedAt: integer('joined_at', { mode: 'timestamp' }),
+  joinedAt: horodatage('joined_at'),
   createdAt: createdAt(),
 }, t => [
   index('memberships_tontine_idx').on(t.tontineId),
@@ -201,11 +208,11 @@ export const memberships = sqliteTable('memberships', {
  * `memberships`** : un membre à double part y possède deux lignes.
  *
  * `tontine_id` est dénormalisé — il se déduirait de `membership_id`, mais
- * SQLite ne sait pas poser une contrainte d'unicité à travers une jointure, et
- * l'unicité de `(tontine_id, rotation_position)` est exigée par le ticket T04.
+ * une contrainte d'unicité ne traverse pas une jointure, et l'unicité de
+ * `(tontine_id, rotation_position)` est exigée par le ticket T04.
  * C'est le prix d'une garantie tenue par la base plutôt que par du code.
  */
-export const shares = sqliteTable('shares', {
+export const shares = pgTable('shares', {
   id: id(),
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   membershipId: text('membership_id').notNull().references(() => memberships.id, { onDelete: 'cascade' }),
@@ -220,7 +227,7 @@ export const shares = sqliteTable('shares', {
  * Tours et cotisations
  * ------------------------------------------------------------------ */
 
-export const rounds = sqliteTable('rounds', {
+export const rounds = pgTable('rounds', {
   id: id(),
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   index: integer('index').notNull(),
@@ -230,7 +237,7 @@ export const rounds = sqliteTable('rounds', {
   /** `share_amount × nombre total de parts`, bénéficiaire inclus. */
   expectedAmount: integer('expected_amount').notNull(),
   status: text('status', { enum: roundStatus.options }).notNull().default('pending'),
-  closedAt: integer('closed_at', { mode: 'timestamp' }),
+  closedAt: horodatage('closed_at'),
   createdAt: createdAt(),
 }, t => [
   unique('rounds_tontine_index_unique').on(t.tontineId, t.index),
@@ -241,7 +248,7 @@ export const rounds = sqliteTable('rounds', {
  * Une ligne par part et par tour. **Le bénéficiaire cotise aussi** : c'est
  * l'usage ivoirien, et l'exclure fausserait le pot.
  */
-export const contributions = sqliteTable('contributions', {
+export const contributions = pgTable('contributions', {
   id: id(),
   roundId: text('round_id').notNull().references(() => rounds.id, { onDelete: 'cascade' }),
   shareId: text('share_id').notNull().references(() => shares.id, { onDelete: 'cascade' }),
@@ -258,7 +265,7 @@ export const contributions = sqliteTable('contributions', {
   index('contributions_status_idx').on(t.status, t.dueDate),
 ])
 
-export const paymentDeclarations = sqliteTable('payment_declarations', {
+export const paymentDeclarations = pgTable('payment_declarations', {
   id: id(),
   contributionId: text('contribution_id').notNull().references(() => contributions.id, { onDelete: 'cascade' }),
   declaredBy: text('declared_by').notNull().references(() => users.id),
@@ -267,23 +274,23 @@ export const paymentDeclarations = sqliteTable('payment_declarations', {
   channel: text('channel', { enum: paymentChannel.options }).notNull(),
   providerRef: text('provider_ref'),
   proofUrl: text('proof_url'),
-  declaredAt: integer('declared_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  declaredAt: horodatage('declared_at').notNull().defaultNow(),
   decision: text('decision', { enum: ['pending', 'confirmed', 'rejected'] }).notNull().default('pending'),
   /** **Doit différer de `declaredBy`** — vérifié côté serveur, pas côté client. */
   decidedBy: text('decided_by').references(() => users.id),
-  decidedAt: integer('decided_at', { mode: 'timestamp' }),
+  decidedAt: horodatage('decided_at'),
   /** Obligatoire si `decision = 'rejected'`. */
   rejectionReason: text('rejection_reason'),
   /** Posé automatiquement à +48 h sans décision. */
-  escalatedAt: integer('escalated_at', { mode: 'timestamp' }),
+  escalatedAt: horodatage('escalated_at'),
   /**
    * Confirmation **inverse** : quand le trésorier déclare des espèces pour un
    * tiers, c'est au membre de reconnaître le versement. Sans cette contrepartie,
    * le bureau pourrait porter au registre des versements qui n'ont jamais eu lieu.
    */
-  memberAcknowledgedAt: integer('member_acknowledged_at', { mode: 'timestamp' }),
+  memberAcknowledgedAt: horodatage('member_acknowledged_at'),
   /** Posé à +72 h quand le membre n'a toujours pas reconnu un versement en espèces. */
-  unconfirmedFlaggedAt: integer('unconfirmed_flagged_at', { mode: 'timestamp' }),
+  unconfirmedFlaggedAt: horodatage('unconfirmed_flagged_at'),
 }, t => [
   index('declarations_contribution_idx').on(t.contributionId),
   index('declarations_decision_idx').on(t.decision, t.declaredAt),
@@ -293,7 +300,7 @@ export const paymentDeclarations = sqliteTable('payment_declarations', {
  * Versement du pot
  * ------------------------------------------------------------------ */
 
-export const payouts = sqliteTable('payouts', {
+export const payouts = pgTable('payouts', {
   id: id(),
   roundId: text('round_id').notNull().unique().references(() => rounds.id, { onDelete: 'cascade' }),
   beneficiaryMembershipId: text('beneficiary_membership_id').notNull().references(() => memberships.id),
@@ -308,7 +315,7 @@ export const payouts = sqliteTable('payouts', {
   counterValidatedBy: text('counter_validated_by').references(() => users.id),
   declaredBy: text('declared_by').references(() => users.id),
   /** Seul le bénéficiaire peut poser cet horodatage. */
-  acknowledgedAt: integer('acknowledged_at', { mode: 'timestamp' }),
+  acknowledgedAt: horodatage('acknowledged_at'),
   status: text('status', { enum: payoutStatus.options }).notNull().default('prepared'),
   createdAt: createdAt(),
 })
@@ -342,14 +349,14 @@ export const LEDGER_TYPES = [
  *
  * `hash = sha256(prev_hash + type + actor_id + canonical_json(payload) + server_timestamp)`.
  */
-export const ledgerEntries = sqliteTable('ledger_entries', {
+export const ledgerEntries = pgTable('ledger_entries', {
   id: id(),
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   roundId: text('round_id').references(() => rounds.id),
   type: text('type', { enum: LEDGER_TYPES }).notNull(),
   actorId: text('actor_id').notNull().references(() => users.id),
   /** Données figées au moment de l'écriture, en JSON canonique. */
-  payload: text('payload', { mode: 'json' }).notNull(),
+  payload: jsonb('payload').notNull(),
   /** L'écriture annulée, si `type = 'reversal'`. */
   reversesId: text('reverses_id'),
   prevHash: text('prev_hash'),
@@ -357,7 +364,7 @@ export const ledgerEntries = sqliteTable('ledger_entries', {
   /** Position dans la chaîne de la tontine, 1..n. Sert au diagnostic de rupture. */
   position: integer('position').notNull(),
   /** Horloge **serveur**, jamais celle du client. */
-  serverTimestamp: integer('server_timestamp', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  serverTimestamp: horodatage('server_timestamp').notNull().defaultNow(),
 }, t => [
   unique('ledger_tontine_position_unique').on(t.tontineId, t.position),
   index('ledger_tontine_idx').on(t.tontineId, t.position),
@@ -368,7 +375,7 @@ export const ledgerEntries = sqliteTable('ledger_entries', {
  * Amendes, avances, litiges
  * ------------------------------------------------------------------ */
 
-export const penalties = sqliteTable('penalties', {
+export const penalties = pgTable('penalties', {
   id: id(),
   contributionId: text('contribution_id').notNull().references(() => contributions.id, { onDelete: 'cascade' }),
   amount: integer('amount').notNull(),
@@ -383,28 +390,28 @@ export const penalties = sqliteTable('penalties', {
 }, t => [index('penalties_contribution_idx').on(t.contributionId)])
 
 /** Un membre avance pour un autre. Cas fréquent, à ne pas oublier. */
-export const advances = sqliteTable('advances', {
+export const advances = pgTable('advances', {
   id: id(),
   roundId: text('round_id').notNull().references(() => rounds.id, { onDelete: 'cascade' }),
   fromMembershipId: text('from_membership_id').notNull().references(() => memberships.id),
   toMembershipId: text('to_membership_id').notNull().references(() => memberships.id),
   amount: integer('amount').notNull(),
-  settledAt: integer('settled_at', { mode: 'timestamp' }),
+  settledAt: horodatage('settled_at'),
   createdAt: createdAt(),
 }, t => [index('advances_round_idx').on(t.roundId)])
 
-export const disputes = sqliteTable('disputes', {
+export const disputes = pgTable('disputes', {
   id: id(),
   ledgerEntryId: text('ledger_entry_id').notNull().references(() => ledgerEntries.id),
   openedBy: text('opened_by').notNull().references(() => users.id),
   status: text('status', { enum: ['open', 'resolved'] }).notNull().default('open'),
   resolvedBy: text('resolved_by').references(() => users.id),
-  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  resolvedAt: horodatage('resolved_at'),
   resolution: text('resolution'),
   createdAt: createdAt(),
 }, t => [index('disputes_entry_idx').on(t.ledgerEntryId)])
 
-export const disputeMessages = sqliteTable('dispute_messages', {
+export const disputeMessages = pgTable('dispute_messages', {
   id: id(),
   disputeId: text('dispute_id').notNull().references(() => disputes.id, { onDelete: 'cascade' }),
   authorId: text('author_id').notNull().references(() => users.id),
@@ -416,24 +423,24 @@ export const disputeMessages = sqliteTable('dispute_messages', {
  * Invitations et notifications
  * ------------------------------------------------------------------ */
 
-export const invites = sqliteTable('invites', {
+export const invites = pgTable('invites', {
   id: id(),
   token: text('token').notNull().unique(),
   tontineId: text('tontine_id').notNull().references(() => tontines.id, { onDelete: 'cascade' }),
   createdBy: text('created_by').notNull().references(() => users.id),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: horodatage('expires_at').notNull(),
   maxUses: integer('max_uses').notNull().default(1),
   usedCount: integer('used_count').notNull().default(0),
   createdAt: createdAt(),
 })
 
-export const notificationPreferences = sqliteTable('notification_preferences', {
+export const notificationPreferences = pgTable('notification_preferences', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   /** `null` = préférences par défaut, toutes tontines confondues. */
   tontineId: text('tontine_id').references(() => tontines.id, { onDelete: 'cascade' }),
-  pushEnabled: integer('push_enabled', { mode: 'boolean' }).notNull().default(true),
-  remindersEnabled: integer('reminders_enabled', { mode: 'boolean' }).notNull().default(true),
+  pushEnabled: boolean('push_enabled').notNull().default(true),
+  remindersEnabled: boolean('reminders_enabled').notNull().default(true),
   /** Plage de silence, en minutes depuis minuit. */
   quietHoursStart: integer('quiet_hours_start'),
   quietHoursEnd: integer('quiet_hours_end'),
@@ -448,7 +455,7 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
  * sur ta tontine », jamais « Tu as reçu 250 000 FCFA ». Un test le vérifie sur
  * l'ensemble des notifications produites.
  */
-export const notifications = sqliteTable('notifications', {
+export const notifications = pgTable('notifications', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tontineId: text('tontine_id').references(() => tontines.id, { onDelete: 'cascade' }),
@@ -457,13 +464,13 @@ export const notifications = sqliteTable('notifications', {
   body: text('body').notNull(),
   /** Lien d'ouverture dans l'application. */
   url: text('url'),
-  readAt: integer('read_at', { mode: 'timestamp' }),
+  readAt: horodatage('read_at'),
   /** Posé quand l'envoi push a réellement eu lieu (T23). */
-  sentAt: integer('sent_at', { mode: 'timestamp' }),
+  sentAt: horodatage('sent_at'),
   createdAt: createdAt(),
 }, t => [index('notifications_user_idx').on(t.userId, t.createdAt)])
 
-export const pushSubscriptions = sqliteTable('push_subscriptions', {
+export const pushSubscriptions = pgTable('push_subscriptions', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   endpoint: text('endpoint').notNull().unique(),
@@ -489,7 +496,7 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
  * changer entre la demande et la décision, le président doit être facturé ce
  * qu'on lui a affiché.
  */
-export const subscriptionRequests = sqliteTable('subscription_requests', {
+export const subscriptionRequests = pgTable('subscription_requests', {
   id: id(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tier: text('tier', { enum: planTier.options }).notNull(),
@@ -499,7 +506,7 @@ export const subscriptionRequests = sqliteTable('subscription_requests', {
   status: text('status', { enum: subscriptionRequestStatus.options }).notNull().default('pending'),
   /** L'administrateur qui a statué, quand, et pourquoi en cas de refus. */
   reviewedBy: text('reviewed_by').references(() => users.id),
-  reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
+  reviewedAt: horodatage('reviewed_at'),
   reviewNote: text('review_note'),
   createdAt: createdAt(),
 }, t => [
@@ -517,7 +524,7 @@ export const subscriptionRequests = sqliteTable('subscription_requests', {
  * qu'une clé réutilisée sur un autre point d'entrée ne renvoie pas la réponse
  * d'un autre appel.
  */
-export const idempotencyKeys = sqliteTable('idempotency_keys', {
+export const idempotencyKeys = pgTable('idempotency_keys', {
   id: id(),
   key: text('key').notNull(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -525,8 +532,8 @@ export const idempotencyKeys = sqliteTable('idempotency_keys', {
   /** Empreinte du corps de requête : même clé + corps différent = conflit. */
   requestHash: text('request_hash').notNull(),
   responseStatus: integer('response_status').notNull(),
-  responseBody: text('response_body', { mode: 'json' }).notNull(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  responseBody: jsonb('response_body').notNull(),
+  expiresAt: horodatage('expires_at').notNull(),
   createdAt: createdAt(),
 }, t => [unique('idempotency_key_user_endpoint_unique').on(t.key, t.userId, t.endpoint)])
 
@@ -562,7 +569,7 @@ export type SubscriptionRequest = typeof subscriptionRequests.$inferSelect
  *
  * Append-only, comme le registre : ni mise à jour ni suppression.
  */
-export const adminAudit = sqliteTable('admin_audit', {
+export const adminAudit = pgTable('admin_audit', {
   id: id(),
   /** L'administrateur qui a agi. Jamais déduit du payload. */
   actorId: text('actor_id').notNull().references(() => users.id),
@@ -570,7 +577,7 @@ export const adminAudit = sqliteTable('admin_audit', {
   action: text('action').notNull(),
   /** La personne concernée, quand il y en a une. */
   targetUserId: text('target_user_id').references(() => users.id),
-  payload: text('payload', { mode: 'json' }).notNull(),
+  payload: jsonb('payload').notNull(),
   /** Horloge serveur, jamais celle du client. */
   createdAt: createdAt(),
 }, t => [index('admin_audit_created_idx').on(t.createdAt)])

@@ -25,12 +25,12 @@ export default defineEventHandler(async (event) => {
   if (!user.pinHash) return { ok: true }
 
   const parLeCode = parsed.data.currentPin !== undefined && verifyPin(parsed.data.currentPin, user.pinHash)
-  const parLaSession = parsed.data.currentPin === undefined && sessionFraiche(db, getCookie(event, SESSION_COOKIE))
+  const parLaSession = parsed.data.currentPin === undefined && (await sessionFraiche(db, getCookie(event, SESSION_COOKIE)))
 
   if (!parLeCode && !parLaSession) {
     throw apiError('FORBIDDEN', 'Code actuel incorrect.', { field: 'currentPin' })
   }
 
-  retirerCodeVerrou(db, user.id)
+  await retirerCodeVerrou(db, user.id)
   return { ok: true }
 })

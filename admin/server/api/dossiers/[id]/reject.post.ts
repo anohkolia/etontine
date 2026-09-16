@@ -19,5 +19,5 @@ export default defineEventHandler(async (event) => {
   const parsed = rejetInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return rejeterDossier(useDb(), id, admin, parsed.data.reason)
+  return await rejeterDossier(useDb(), id, admin, parsed.data.reason)
 })

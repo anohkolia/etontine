@@ -14,14 +14,14 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let declarationId: string
 
 const PRESIDENT = 'e1000000-0000-4000-8000-000000000001'
 const MEMBRE = 'e1000000-0000-4000-8000-000000000002'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   vi.useRealTimers()
@@ -29,23 +29,23 @@ beforeEach(async () => {
   await createTestUser(db, PRESIDENT, '+2250707000001')
   await createTestUser(db, MEMBRE, '+2250707000002')
 
-  const T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
-  ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707000002', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
+  const T = await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
+  await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
+  await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707000002', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
 
-  const canal = creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
-  demarrerTontine(db, T, PRESIDENT)
+  const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
+  await demarrerTontine(db, T, PRESIDENT)
 
-  const gere = db.select().from(memberships).all().find(m => m.managedName === 'Koffi N’Guessan')!
-  db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, gere.id)).run()
+  const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi N’Guessan')!
+  await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, gere.id))
 
-  const sienne = db.select().from(contributions).all().find(c => c.membershipId === gere.id)!
-  declarationId = declarerPaiement(db, sienne.id, MEMBRE, { amount: 25_000, channel: 'wave' }).declarationId
-  confirmerDeclaration(db, declarationId, PRESIDENT)
+  const sienne = (await db.select().from(contributions)).find(c => c.membershipId === gere.id)!
+  declarationId = (await declarerPaiement(db, sienne.id, MEMBRE, { amount: 25_000, channel: 'wave' })).declarationId
+  await confirmerDeclaration(db, declarationId, PRESIDENT)
 })
 
 afterEach(() => {
@@ -109,8 +109,8 @@ describe('lien signé — acceptation T18', () => {
 })
 
 describe('contenu du reçu — ce qu’il ne divulgue pas', () => {
-  it('ne montre que montant, date, tontine et membre', () => {
-    const donnees = recu(db, declarationId)
+  it('ne montre que montant, date, tontine et membre', async () => {
+    const donnees = await recu(db, declarationId)
 
     expect(donnees.amount).toBe(25_000)
     expect(donnees.tontineName).toBe('Tontine des tantines')
@@ -118,17 +118,17 @@ describe('contenu du reçu — ce qu’il ne divulgue pas', () => {
     expect(donnees.status).toBe('confirmed')
   })
 
-  it('ne divulgue pas les autres membres', () => {
+  it('ne divulgue pas les autres membres', async () => {
     // Un reçu circule par WhatsApp, souvent dans des groupes qui débordent du
     // cercle de la tontine.
-    const texte = JSON.stringify(recu(db, declarationId)) + recuSvg(recu(db, declarationId))
+    const texte = JSON.stringify(await recu(db, declarationId)) + recuSvg(await recu(db, declarationId))
 
     expect(texte).not.toContain('Fatou Diarra')
     expect(texte).not.toContain('+2250707000003')
   })
 
-  it('ne divulgue pas l’état du pot ni les impayés', () => {
-    const donnees = recu(db, declarationId)
+  it('ne divulgue pas l’état du pot ni les impayés', async () => {
+    const donnees = await recu(db, declarationId)
 
     expect(Object.keys(donnees).sort()).toEqual([
       'amount', 'channel', 'confirmedAt', 'declaredAt',
@@ -138,8 +138,8 @@ describe('contenu du reçu — ce qu’il ne divulgue pas', () => {
 })
 
 describe('image du reçu — poids', () => {
-  it('pèse largement moins de 40 Ko', () => {
-    const svg = recuSvg(recu(db, declarationId))
+  it('pèse largement moins de 40 Ko', async () => {
+    const svg = recuSvg(await recu(db, declarationId))
     const octets = Buffer.byteLength(svg, 'utf8')
 
     // Acceptation T18. Aucune police n'est embarquée (règle 16), ce qui garde
@@ -148,8 +148,8 @@ describe('image du reçu — poids', () => {
     expect(octets).toBeGreaterThan(300) // et il contient bien quelque chose
   })
 
-  it('est un SVG valide et échappe le contenu', () => {
-    const donnees = recu(db, declarationId)
+  it('est un SVG valide et échappe le contenu', async () => {
+    const donnees = await recu(db, declarationId)
     const svg = recuSvg({ ...donnees, memberName: 'Aya <script>alert(1)</script>' })
 
     expect(svg.startsWith('<svg')).toBe(true)
@@ -159,11 +159,11 @@ describe('image du reçu — poids', () => {
     expect(svg).toContain('&lt;script&gt;')
   })
 
-  it('écrit le montant exactement comme l’interface', () => {
+  it('écrit le montant exactement comme l’interface', async () => {
     // Deux montants différents pour la même somme dans deux documents d'une
     // même tontine, c'est ce qui déclenche une dispute.
     const { format } = useMoney()
-    const svg = recuSvg(recu(db, declarationId))
+    const svg = recuSvg(await recu(db, declarationId))
 
     expect(formatMoney(25_000)).toBe(format(25_000))
     expect(svg).toContain(format(25_000))

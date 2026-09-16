@@ -15,7 +15,7 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let T: string
 let tour1: string
 
@@ -23,63 +23,63 @@ const PRESIDENT = 'a2000000-0000-4000-8000-000000000001'
 const TRESORIER = 'a2000000-0000-4000-8000-000000000002'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
   await createTestUser(db, PRESIDENT, '+2250707001111')
   await createTestUser(db, TRESORIER, '+2250707002222')
 
-  T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, {
+  T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
+  await majTontine(db, T, {
     shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15', locality: 'Abobo',
   })
-  ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707002222', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707003333', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707002222', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707003333', shares: 1 })
 
-  const canal = creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
-  demarrerTontine(db, T, PRESIDENT)
+  const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
+  await demarrerTontine(db, T, PRESIDENT)
 
-  const gere = db.select().from(memberships).all().find(m => m.managedName === 'Koffi N’Guessan')!
-  db.update(memberships).set({ userId: TRESORIER, role: 'treasurer' }).where(eq(memberships.id, gere.id)).run()
+  const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi N’Guessan')!
+  await db.update(memberships).set({ userId: TRESORIER, role: 'treasurer' }).where(eq(memberships.id, gere.id))
 
-  tour1 = db.select().from(rounds).all().find(r => r.index === 1)!.id
+  tour1 = (await db.select().from(rounds)).find(r => r.index === 1)!.id
 })
 
 afterEach(() => cleanup())
 
-function confirmerTout() {
-  for (const c of db.select().from(contributions).all().filter(x => x.roundId === tour1)) {
-    const msPresident = db.select().from(memberships).all().find(m => m.userId === PRESIDENT)!.id
+async function confirmerTout() {
+  for (const c of (await db.select().from(contributions)).filter(x => x.roundId === tour1)) {
+    const msPresident = (await db.select().from(memberships)).find(m => m.userId === PRESIDENT)!.id
     const declarant = c.membershipId === msPresident ? PRESIDENT : TRESORIER
     const decideur = declarant === PRESIDENT ? TRESORIER : PRESIDENT
-    const { declarationId } = declarerPaiement(db, c.id, declarant, { amount: 25_000, channel: 'wave' })
-    confirmerDeclaration(db, declarationId, decideur)
+    const { declarationId } = await declarerPaiement(db, c.id, declarant, { amount: 25_000, channel: 'wave' })
+    await confirmerDeclaration(db, declarationId, decideur)
   }
 }
 
 describe('procès-verbal PDF — acceptation T20', () => {
   it('produit un PDF valide', async () => {
-    confirmerTout()
+    await confirmerTout()
     const pdf = await procesVerbalPdf(db, tour1)
 
     expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
     expect(pdf.length).toBeGreaterThan(1_000)
   })
 
-  it('contient les cotisations du tour, le versement et un emplacement de signature', () => {
-    confirmerTout()
-    db.update(tontines).set({ counterValidationThreshold: 500_000 }).where(eq(tontines.id, T)).run()
-    preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: '1111', acceptIncompletePot: false })
-    declarerVersement(db, tour1, TRESORIER, { channel: 'wave' })
-    accuserReception(db, tour1, PRESIDENT, 75_000)
+  it('contient les cotisations du tour, le versement et un emplacement de signature', async () => {
+    await confirmerTout()
+    await db.update(tontines).set({ counterValidationThreshold: 500_000 }).where(eq(tontines.id, T))
+    await preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: '1111', acceptIncompletePot: false })
+    await declarerVersement(db, tour1, TRESORIER, { channel: 'wave' })
+    await accuserReception(db, tour1, PRESIDENT, 75_000)
 
     // Un PDF est compressé, donc invérifiable par lecture directe : c'est la
     // structure du document qui porte le contrat de contenu.
-    const pv = structureProcesVerbal(db, tour1)
+    const pv = await structureProcesVerbal(db, tour1)
 
     expect(pv.cotisations).toHaveLength(3)
     expect(pv.cotisations.every(c => c.confirme === 25_000)).toBe(true)
@@ -90,9 +90,9 @@ describe('procès-verbal PDF — acceptation T20', () => {
     expect(pv.signatures).toEqual(['Le président', 'Le trésorier'])
   })
 
-  it('mentionne le manquant quand le pot est incomplet', () => {
+  it('mentionne le manquant quand le pot est incomplet', async () => {
     // Rien n'est confirmé : le pot est vide, et le document doit le dire.
-    const pv = structureProcesVerbal(db, tour1)
+    const pv = await structureProcesVerbal(db, tour1)
 
     expect(pv.potConstitue).toBe(0)
     expect(pv.manquant).toBe(75_000)
@@ -102,7 +102,7 @@ describe('procès-verbal PDF — acceptation T20', () => {
 
 describe('export Excel', () => {
   it('produit un classeur xlsx valide', async () => {
-    confirmerTout()
+    await confirmerTout()
     const classeur = await registreXlsx(db, T)
 
     // Un .xlsx est une archive ZIP : elle commence par « PK ».
@@ -111,7 +111,7 @@ describe('export Excel', () => {
   })
 
   it('contient une feuille par sujet', async () => {
-    confirmerTout()
+    await confirmerTout()
     const ExcelJS = (await import('exceljs')).default
     const classeur = new ExcelJS.Workbook()
     await classeur.xlsx.load(await registreXlsx(db, T) as never)
@@ -120,7 +120,7 @@ describe('export Excel', () => {
   })
 
   it('écrit les montants comme des nombres, pas comme du texte', async () => {
-    confirmerTout()
+    await confirmerTout()
     const ExcelJS = (await import('exceljs')).default
     const classeur = new ExcelJS.Workbook()
     await classeur.xlsx.load(await registreXlsx(db, T) as never)

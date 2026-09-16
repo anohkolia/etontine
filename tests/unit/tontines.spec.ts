@@ -14,12 +14,12 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const U = 'd0000000-0000-4000-8000-000000000001'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   await createTestUser(db, U, '+2250707000001')
@@ -27,123 +27,123 @@ beforeEach(async () => {
 
 afterEach(() => cleanup())
 
-function brouillon() {
-  return creerBrouillon(db, U, { name: 'Tontine des tantines', access: 'private' })
+async function brouillon() {
+  return await creerBrouillon(db, U, { name: 'Tontine des tantines', access: 'private' })
 }
 
 describe('brouillon de tontine', () => {
-  it('crée le brouillon et fait du créateur le président', () => {
-    const id = brouillon()
+  it('crée le brouillon et fait du créateur le président', async () => {
+    const id = await brouillon()
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.status).toBe('draft')
 
-    const [ms] = db.select().from(memberships).where(eq(memberships.tontineId, id)).all()
+    const [ms] = await db.select().from(memberships).where(eq(memberships.tontineId, id))
     // Le rôle est par tontine : président ici, simple membre ailleurs.
     expect(ms!.role).toBe('president')
     expect(ms!.status).toBe('active')
   })
 
-  it('naît avec un montant à zéro — un brouillon, pas une tontine gratuite', () => {
-    const [t] = db.select().from(tontines).where(eq(tontines.id, brouillon())).all()
+  it('naît avec un montant à zéro — un brouillon, pas une tontine gratuite', async () => {
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, await brouillon()))
     expect(t!.shareAmount).toBe(0)
   })
 
-  it('attribue d’emblée une part au président', () => {
+  it('attribue d’emblée une part au président', async () => {
     // L'organisateur participe à sa tontine. Sans part, il serait membre sans
     // jamais cotiser ni prendre la main, et le pot attendu serait sous-évalué.
-    const id = brouillon()
-    expect(totalParts(db, id)).toBe(1)
+    const id = await brouillon()
+    expect(await totalParts(db, id)).toBe(1)
   })
 
-  it('enregistre les réglages étape par étape', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 25_000, frequency: 'weekly' })
+  it('enregistre les réglages étape par étape', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 25_000, frequency: 'weekly' })
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.shareAmount).toBe(25_000)
     expect(t!.frequency).toBe('weekly')
   })
 })
 
 describe('publication — draft vers open', () => {
-  it('refuse de publier sans montant', () => {
-    const id = brouillon()
-    const blocages = blocagesPublication(db, id)
+  it('refuse de publier sans montant', async () => {
+    const id = await brouillon()
+    const blocages = await blocagesPublication(db, id)
 
     // La liste, pas un simple refus : l'organisateur voit tout ce qui manque.
     expect(blocages.map(b => b.champ)).toContain('shareAmount')
-    expect(() => publier(db, id)).toThrow(expect.objectContaining({ statusCode: 403 }))
+    await expect(publier(db, id)).rejects.toThrow(expect.objectContaining({ statusCode: 403 }))
   })
 
-  it('refuse de publier sans canal de collecte vérifié', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 25_000 })
+  it('refuse de publier sans canal de collecte vérifié', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 25_000 })
 
-    expect(blocagesPublication(db, id).map(b => b.champ)).toEqual(['collectionChannelIds'])
+    expect((await blocagesPublication(db, id)).map(b => b.champ)).toEqual(['collectionChannelIds'])
   })
 
-  it('publie une fois montant et canal vérifié en place', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 25_000 })
+  it('publie une fois montant et canal vérifié en place', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 25_000 })
 
-    const canal = creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya Koné' })
-    marquerVerifie(db, canal)
-    definirCanaux(db, id, [canal], U)
+    const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya Koné' })
+    await marquerVerifie(db, canal)
+    await definirCanaux(db, id, [canal], U)
 
-    expect(blocagesPublication(db, id)).toEqual([])
-    publier(db, id)
+    expect(await blocagesPublication(db, id)).toEqual([])
+    await publier(db, id)
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.status).toBe('open')
   })
 
-  it('refuse une seconde publication', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 25_000 })
-    const canal = creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    marquerVerifie(db, canal)
-    definirCanaux(db, id, [canal], U)
-    publier(db, id)
+  it('refuse une seconde publication', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 25_000 })
+    const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
+    await marquerVerifie(db, canal)
+    await definirCanaux(db, id, [canal], U)
+    await publier(db, id)
 
     // `open → open` n'est pas dans la table : 409, pas un second passage.
-    expect(() => publier(db, id)).toThrow(
+    await expect(publier(db, id)).rejects.toThrow(
       expect.objectContaining({ statusCode: 409, data: { error: expect.objectContaining({ code: 'INVALID_TRANSITION' }) } }),
     )
   })
 })
 
 describe('réglages figés une fois la tontine lancée', () => {
-  it('refuse de changer un montant en cours de route', () => {
-    const id = brouillon()
-    db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, id)).run()
+  it('refuse de changer un montant en cours de route', async () => {
+    const id = await brouillon()
+    await db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, id))
 
     // Changer le montant réécrirait des dus déjà calculés et déjà versés.
-    expect(() => majTontine(db, id, { shareAmount: 50_000 })).toThrow(
+    await expect(majTontine(db, id, { shareAmount: 50_000 })).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('laisse modifier la présentation', () => {
-    const id = brouillon()
-    db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, id)).run()
+  it('laisse modifier la présentation', async () => {
+    const id = await brouillon()
+    await db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, id))
 
-    expect(() => majTontine(db, id, { description: 'Nouvelle description' })).not.toThrow()
+    await majTontine(db, id, { description: 'Nouvelle description' })
     // L'icône en fait partie : elle ne touche aucun montant ni aucun statut.
-    expect(() => majTontine(db, id, { emoji: '🚕' })).not.toThrow()
+    await majTontine(db, id, { emoji: '🚕' })
   })
 })
 
 describe('icône de tontine', () => {
-  it('est facultative — une tontine sans icône reste valide', () => {
-    const [t] = db.select().from(tontines).where(eq(tontines.id, brouillon())).all()
+  it('est facultative — une tontine sans icône reste valide', async () => {
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, await brouillon()))
     expect(t!.emoji).toBeNull()
   })
 
-  it('est enregistrée quand le président en choisit une', () => {
-    const id = creerBrouillon(db, U, { name: 'Tontine du marché', access: 'private', emoji: '🧺' })
+  it('est enregistrée quand le président en choisit une', async () => {
+    const id = await creerBrouillon(db, U, { name: 'Tontine du marché', access: 'private', emoji: '🧺' })
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.emoji).toBe('🧺')
   })
 
@@ -165,92 +165,92 @@ describe('icône de tontine', () => {
 })
 
 describe('calcul du pot — règle n°1', () => {
-  it('compte toutes les parts, bénéficiaire inclus', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 25_000 })
+  it('compte toutes les parts, bénéficiaire inclus', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 25_000 })
 
-    const [ms] = db.select().from(memberships).where(eq(memberships.tontineId, id)).all()
+    const [ms] = await db.select().from(memberships).where(eq(memberships.tontineId, id))
 
     // Le président a déjà une part à la création du brouillon : on lui en
     // donne une seconde, comme un membre à double part.
-    expect(totalParts(db, id)).toBe(1)
-    db.insert(shares).values({
+    expect(await totalParts(db, id)).toBe(1)
+    await db.insert(shares).values({
       id: 's2', tontineId: id, membershipId: ms!.id, rotationPosition: 2,
-    }).run()
+    })
 
     // Le double part compte deux fois : c'est la source d'erreur n°1 du modèle.
-    expect(totalParts(db, id)).toBe(2)
-    expect(potAttendu(db, id)).toBe(50_000)
+    expect(await totalParts(db, id)).toBe(2)
+    expect(await potAttendu(db, id)).toBe(50_000)
   })
 })
 
 describe('démarrage — ce qui bloque, et la date du premier tour', () => {
   /** Une tontine publiée à trois, avec la date de départ donnée. */
-  function publieeAvecDate(startDate: string) {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate })
-    ajouterMembreGere(db, id, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
-    ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
-    const canal = creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    marquerVerifie(db, canal)
-    definirCanaux(db, id, [canal], U)
-    publier(db, id)
+  async function publieeAvecDate(startDate: string) {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate })
+    await ajouterMembreGere(db, id, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
+    await ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
+    const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
+    await marquerVerifie(db, canal)
+    await definirCanaux(db, id, [canal], U)
+    await publier(db, id)
     return id
   }
 
-  it('liste le manque de membres', () => {
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate: '2026-03-01' })
-    expect(blocagesDemarrage(db, id, '2026-02-01').map(b => b.champ)).toEqual(['members'])
+  it('liste le manque de membres', async () => {
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate: '2026-03-01' })
+    expect((await blocagesDemarrage(db, id, '2026-02-01')).map(b => b.champ)).toEqual(['members'])
   })
 
-  it('bloque une date de départ déjà passée, et seulement elle', () => {
-    const id = publieeAvecDate('2026-01-15')
+  it('bloque une date de départ déjà passée, et seulement elle', async () => {
+    const id = await publieeAvecDate('2026-01-15')
 
-    expect(blocagesDemarrage(db, id, '2026-02-01').map(b => b.champ)).toEqual(['startDate'])
+    expect((await blocagesDemarrage(db, id, '2026-02-01')).map(b => b.champ)).toEqual(['startDate'])
     // Le jour même n'est pas passé : on peut démarrer une tontine dont le
     // premier tour est aujourd'hui.
-    expect(blocagesDemarrage(db, id, '2026-01-15')).toEqual([])
-    expect(blocagesDemarrage(db, id, '2026-01-01')).toEqual([])
+    expect(await blocagesDemarrage(db, id, '2026-01-15')).toEqual([])
+    expect(await blocagesDemarrage(db, id, '2026-01-01')).toEqual([])
   })
 
-  it('ne vérifie le calendrier que si on lui donne la date du jour', () => {
+  it('ne vérifie le calendrier que si on lui donne la date du jour', async () => {
     // Les jeux de données synthétiques démarrent des tontines datées du passé
     // pour rendre les rappels déterministes : sans date de référence, la règle
     // ne s'applique pas. C'est la route qui la passe, toujours.
-    const id = publieeAvecDate('2026-01-15')
-    expect(blocagesDemarrage(db, id)).toEqual([])
+    const id = await publieeAvecDate('2026-01-15')
+    expect(await blocagesDemarrage(db, id)).toEqual([])
   })
 
-  it('refuse le démarrage sur une date passée, en désignant le champ', () => {
-    const id = publieeAvecDate('2026-01-15')
+  it('refuse le démarrage sur une date passée, en désignant le champ', async () => {
+    const id = await publieeAvecDate('2026-01-15')
 
-    expect(() => demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })).toThrow(
+    await expect(demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })).rejects.toThrow(
       expect.objectContaining({
         statusCode: 422,
         data: { error: expect.objectContaining({ field: 'startDate' }) },
       }),
     )
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.status).toBe('open')
   })
 
-  it('démarre quand la date est à venir, et le tour 1 tombe à cette date', () => {
-    const id = publieeAvecDate('2026-03-01')
-    demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })
+  it('démarre quand la date est à venir, et le tour 1 tombe à cette date', async () => {
+    const id = await publieeAvecDate('2026-03-01')
+    await demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, id)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.status).toBe('running')
-    expect(toursDe(db, id)[0]!.dueDate).toBe('2026-03-01')
+    expect((await toursDe(db, id))[0]!.dueDate).toBe('2026-03-01')
   })
 
-  it('accepte de changer la date tant que la tontine n’a pas démarré', () => {
-    const id = publieeAvecDate('2026-01-15')
-    majTontine(db, id, { startDate: '2026-03-01' })
-    expect(blocagesDemarrage(db, id, '2026-02-01')).toEqual([])
+  it('accepte de changer la date tant que la tontine n’a pas démarré', async () => {
+    const id = await publieeAvecDate('2026-01-15')
+    await majTontine(db, id, { startDate: '2026-03-01' })
+    expect(await blocagesDemarrage(db, id, '2026-02-01')).toEqual([])
 
-    demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })
-    expect(() => majTontine(db, id, { startDate: '2026-04-01' })).toThrow(
+    await demarrerTontine(db, id, U, { aujourdhui: '2026-02-01' })
+    await expect(majTontine(db, id, { startDate: '2026-04-01' })).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
@@ -262,78 +262,78 @@ describe('fin de vie — annuler, archiver, supprimer', () => {
   /** Une tontine publiée à trois, dont Koffi a un compte. */
   async function publiee() {
     await createTestUser(db, KOFFI, '+2250707000002')
-    const id = brouillon()
-    majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate: '2026-03-01' })
-    const koffi = ajouterMembreGere(db, id, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
-    db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi)).run()
-    ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
-    const canal = creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    marquerVerifie(db, canal)
-    definirCanaux(db, id, [canal], U)
-    publier(db, id)
+    const id = await brouillon()
+    await majTontine(db, id, { shareAmount: 10_000, frequency: 'monthly', startDate: '2026-03-01' })
+    const koffi = await ajouterMembreGere(db, id, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
+    await db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi))
+    await ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
+    const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
+    await marquerVerifie(db, canal)
+    await definirCanaux(db, id, [canal], U)
+    await publier(db, id)
     return id
   }
 
-  function statut(id: string) {
-    return db.select().from(tontines).where(eq(tontines.id, id)).all()[0]?.status
+  async function statut(id: string) {
+    return (await db.select().from(tontines).where(eq(tontines.id, id)))[0]?.status
   }
 
   it('annule une tontine publiée : archivée, écrite au registre, membres prévenus', async () => {
     const id = await publiee()
-    annulerTontine(db, id, U, 'Le groupe ne s’est pas réuni')
+    await annulerTontine(db, id, U, 'Le groupe ne s’est pas réuni')
 
-    expect(statut(id)).toBe('archived')
+    expect(await statut(id)).toBe('archived')
 
-    const ecriture = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, id)).all()
+    const ecriture = (await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, id)))
       .find(e => (e.payload as { changement?: string }).changement === 'annulation')
     expect(ecriture?.payload).toMatchObject({ motif: 'Le groupe ne s’est pas réuni' })
 
     // Koffi est prévenu, pas le président qui vient d'agir ; aucun montant.
-    const prevenus = db.select().from(notifications).all()
+    const prevenus = await db.select().from(notifications)
     expect(prevenus.map(n => n.userId)).toEqual([KOFFI])
     expect(prevenus[0]!.body).not.toMatch(/\d{4}/)
   })
 
   it('refuse d’annuler une tontine en cours : elle va au bout de son cycle', async () => {
     const id = await publiee()
-    demarrerTontine(db, id, U)
-    expect(() => annulerTontine(db, id, U, 'Changement d’avis')).toThrow(
+    await demarrerTontine(db, id, U)
+    await expect(annulerTontine(db, id, U, 'Changement d’avis')).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
-    expect(statut(id)).toBe('running')
+    expect(await statut(id)).toBe('running')
   })
 
-  it('refuse d’annuler un brouillon : il se supprime', () => {
-    const id = brouillon()
-    expect(() => annulerTontine(db, id, U, 'Erreur de saisie')).toThrow(
+  it('refuse d’annuler un brouillon : il se supprime', async () => {
+    const id = await brouillon()
+    await expect(annulerTontine(db, id, U, 'Erreur de saisie')).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
 
-  it('supprime un brouillon, et tout ce qui en dépend', () => {
-    const id = brouillon()
-    supprimerBrouillon(db, id)
+  it('supprime un brouillon, et tout ce qui en dépend', async () => {
+    const id = await brouillon()
+    await supprimerBrouillon(db, id)
 
-    expect(statut(id)).toBeUndefined()
-    expect(db.select().from(memberships).where(eq(memberships.tontineId, id)).all()).toHaveLength(0)
-    expect(db.select().from(shares).where(eq(shares.tontineId, id)).all()).toHaveLength(0)
+    expect(await statut(id)).toBeUndefined()
+    expect(await db.select().from(memberships).where(eq(memberships.tontineId, id))).toHaveLength(0)
+    expect(await db.select().from(shares).where(eq(shares.tontineId, id))).toHaveLength(0)
   })
 
   it('ne supprime jamais une tontine publiée', async () => {
     const id = await publiee()
-    expect(() => supprimerBrouillon(db, id)).toThrow(expect.objectContaining({ statusCode: 409 }))
-    expect(statut(id)).toBe('open')
+    await expect(supprimerBrouillon(db, id)).rejects.toThrow(expect.objectContaining({ statusCode: 409 }))
+    expect(await statut(id)).toBe('open')
   })
 
   it('archive une tontine terminée, et seulement elle', async () => {
     const id = await publiee()
-    expect(() => archiverTontine(db, id, U)).toThrow(expect.objectContaining({ statusCode: 409 }))
+    await expect(archiverTontine(db, id, U)).rejects.toThrow(expect.objectContaining({ statusCode: 409 }))
 
-    db.update(tontines).set({ status: 'closed' }).where(eq(tontines.id, id)).run()
-    archiverTontine(db, id, U)
+    await db.update(tontines).set({ status: 'closed' }).where(eq(tontines.id, id))
+    await archiverTontine(db, id, U)
 
-    expect(statut(id)).toBe('archived')
-    const ecriture = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, id)).all()
+    expect(await statut(id)).toBe('archived')
+    const ecriture = (await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, id)))
       .find(e => (e.payload as { changement?: string }).changement === 'archivage')
     expect(ecriture).toBeDefined()
   })

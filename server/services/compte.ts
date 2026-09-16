@@ -32,8 +32,8 @@ export interface BlocageSuppression {
  * - un tour où il n'a pas encore pris la main : partir maintenant, c'est avoir
  *   cotisé pour rien.
  */
-export function blocagesSuppression(db: Db, userId: string): BlocageSuppression[] {
-  const adhesions = db
+export async function blocagesSuppression(db: Db, userId: string): Promise<BlocageSuppression[]> {
+  const adhesions = await db
     .select({
       membershipId: memberships.id,
       tontineId: memberships.tontineId,
@@ -43,21 +43,19 @@ export function blocagesSuppression(db: Db, userId: string): BlocageSuppression[
     .from(memberships)
     .innerJoin(tontines, eq(tontines.id, memberships.tontineId))
     .where(and(eq(memberships.userId, userId), eq(memberships.status, 'active')))
-    .all()
 
   const blocages: BlocageSuppression[] = []
 
   for (const a of adhesions) {
     if (a.tontineStatus !== 'running') continue
 
-    const toursEnCours = db
+    const toursEnCours = await db
       .select({ index: rounds.index, status: rounds.status })
       .from(rounds)
       .where(and(
         eq(rounds.tontineId, a.tontineId),
         inArray(rounds.status, ['collecting', 'payout_pending']),
       ))
-      .all()
 
     for (const tour of toursEnCours) {
       blocages.push({
@@ -71,12 +69,11 @@ export function blocagesSuppression(db: Db, userId: string): BlocageSuppression[
     }
 
     // Parts pas encore servies : le membre a cotisé sans avoir pris la main.
-    const partsRestantes = db
+    const partsRestantes = await db
       .select({ id: shares.id })
       .from(shares)
       .innerJoin(rounds, eq(rounds.beneficiaryShareId, shares.id))
       .where(and(eq(shares.membershipId, a.membershipId), ne(rounds.status, 'closed')))
-      .all()
 
     if (partsRestantes.length > 0 && toursEnCours.length === 0) {
       blocages.push({
@@ -98,10 +95,10 @@ export function blocagesSuppression(db: Db, userId: string): BlocageSuppression[
  * les montants dus par les autres. Un export de données ne doit pas devenir un
  * moyen d'aspirer le carnet d'adresses d'une tontine.
  */
-export function exporterDonnees(db: Db, userId: string) {
-  const [utilisateur] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+export async function exporterDonnees(db: Db, userId: string) {
+  const [utilisateur] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
 
-  const adhesions = db
+  const adhesions = await db
     .select({
       tontineId: memberships.tontineId,
       tontineName: tontines.name,
@@ -112,9 +109,8 @@ export function exporterDonnees(db: Db, userId: string) {
     .from(memberships)
     .innerJoin(tontines, eq(tontines.id, memberships.tontineId))
     .where(eq(memberships.userId, userId))
-    .all()
 
-  const mesCotisations = db
+  const mesCotisations = await db
     .select({
       tontineId: rounds.tontineId,
       roundIndex: rounds.index,
@@ -127,7 +123,6 @@ export function exporterDonnees(db: Db, userId: string) {
     .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(memberships.userId, userId))
-    .all()
 
   return {
     exportedAt: new Date().toISOString(),
@@ -156,8 +151,8 @@ export function exporterDonnees(db: Db, userId: string) {
  * le signale au trésorier. Chaque tontine du membre en garde la trace au
  * registre, sans le numéro en clair.
  */
-export function demanderChangementNumero(db: Db, userId: string, nouveauNumero: string): void {
-  const [actuel] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+export async function demanderChangementNumero(db: Db, userId: string, nouveauNumero: string): Promise<void> {
+  const [actuel] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!actuel) throw apiError('NOT_FOUND', 'Compte introuvable.')
 
   if (actuel.phone === nouveauNumero) {
@@ -167,34 +162,32 @@ export function demanderChangementNumero(db: Db, userId: string, nouveauNumero: 
   // Dire qu'un numéro est pris révèle qu'un compte existe — ici c'est
   // inévitable et acceptable : l'appelant est connecté, et il ne peut de toute
   // façon pas prendre un numéro qui n'est pas le sien.
-  const [pris] = db.select({ id: users.id }).from(users).where(eq(users.phone, nouveauNumero)).limit(1).all()
+  const [pris] = await db.select({ id: users.id }).from(users).where(eq(users.phone, nouveauNumero)).limit(1)
   if (pris) {
     throw apiError('VALIDATION_ERROR', 'Ce numéro est déjà rattaché à un autre compte.', { field: 'phone' })
   }
 }
 
-export function appliquerChangementNumero(db: Db, userId: string, nouveauNumero: string): void {
-  demanderChangementNumero(db, userId, nouveauNumero)
+export async function appliquerChangementNumero(db: Db, userId: string, nouveauNumero: string): Promise<void> {
+  await demanderChangementNumero(db, userId, nouveauNumero)
 
-  const [actuel] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  const [actuel] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   const ancien = actuel!.phone
 
-  db.update(users)
+  await db.update(users)
     .set({ phone: nouveauNumero, phoneChangedAt: new Date() })
     .where(eq(users.id, userId))
-    .run()
 
   // Chaque tontine où le membre est actif l'apprend au registre — les quatre
   // derniers chiffres, jamais le numéro entier — et le bureau est prévenu :
   // c'est peut-être vers ce numéro que le prochain pot part.
-  const adhesions = db
+  const adhesions = await db
     .select({ tontineId: memberships.tontineId })
     .from(memberships)
     .where(and(eq(memberships.userId, userId), eq(memberships.status, 'active')))
-    .all()
 
   for (const { tontineId } of adhesions) {
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId,
       type: 'settings_changed',
       actorId: userId,
@@ -206,7 +199,7 @@ export function appliquerChangementNumero(db: Db, userId: string, nouveauNumero:
       },
     })
 
-    const bureau = db
+    const bureau = await db
       .select({ userId: memberships.userId })
       .from(memberships)
       .where(and(
@@ -214,11 +207,10 @@ export function appliquerChangementNumero(db: Db, userId: string, nouveauNumero:
         eq(memberships.status, 'active'),
         inArray(memberships.role, ['president', 'treasurer']),
       ))
-      .all()
 
     for (const { userId: destinataire } of bureau) {
       if (!destinataire || destinataire === userId) continue
-      notifier(db, destinataire, {
+      await notifier(db, destinataire, {
         type: 'numero_membre_change',
         tontineId,
         title: 'Un membre a changé de numéro',

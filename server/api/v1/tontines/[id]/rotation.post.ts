@@ -21,5 +21,5 @@ export default defineEventHandler(async (event) => {
   const parsed = rotationInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return definirRotation(useDb(), tontineId, user.id, parsed.data)
+  return await definirRotation(useDb(), tontineId, user.id, parsed.data)
 })

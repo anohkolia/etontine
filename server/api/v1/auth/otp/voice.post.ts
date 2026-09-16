@@ -16,12 +16,12 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  if (failedAttempts(db, parsed.data.phone) < ECHECS_AVANT_VOCAL) {
+  if ((await failedAttempts(db, parsed.data.phone)) < ECHECS_AVANT_VOCAL) {
     throw apiError(
       'FORBIDDEN',
       'L’appel vocal est proposé après deux essais infructueux.',
     )
   }
 
-  return requestOtp(db, parsed.data.phone, 'voice')
+  return await requestOtp(db, parsed.data.phone, 'voice')
 })

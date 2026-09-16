@@ -111,7 +111,9 @@ Vite de Nuxt 4 est `app/`, et les classes des tables de statuts y échapperaient
 * **Aucun frais n'est affiché** : le membre les supporte à l'envoi comme au
 retrait et en connaît l'ordre de grandeur. Aucun taux ne figure donc dans le
 code ni dans la configuration.
-* **Base de données** : SQLite en développement via Drizzle. `better-sqlite3`
-n'est importé que dans `server/db/index.ts`, pour que la bascule vers
-Postgres en production ne touche qu'un fichier.
+* **Base de données** : Postgres partout, via Drizzle et `postgres-js`. En
+développement, `pnpm db:local` lance un serveur PGlite sur `127.0.0.1:5433` ;
+en production, Supabase par `DATABASE_URL` (pooler en mode transaction pour
+l'application, mode session pour `pnpm db:migrate`). Le pilote n'est importé
+que dans `server/db/index.ts`.
 

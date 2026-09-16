@@ -27,12 +27,11 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  const [declaration] = db
+  const [declaration] = await db
     .select()
     .from(paymentDeclarations)
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!declaration || declaration.declaredBy !== user.id) {
     throw apiError('NOT_FOUND', 'Déclaration introuvable.')
@@ -50,10 +49,9 @@ export default defineEventHandler(async (event) => {
     throw apiError('VALIDATION_ERROR', 'La capture doit être déposée depuis ton compte.', { field: 'proofUrl' })
   }
 
-  db.update(paymentDeclarations)
+  await db.update(paymentDeclarations)
     .set({ proofUrl: parsed.data.proofUrl })
     .where(eq(paymentDeclarations.id, declarationId))
-    .run()
 
   return { ok: true }
 })

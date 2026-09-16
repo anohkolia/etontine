@@ -17,5 +17,5 @@ export default defineEventHandler(async (event) => {
   const { user } = await requireMembership(event, tontineId, ['president'])
   // La date du jour est passée ici, pas devinée par le service : c'est ce qui
   // permet de refuser un démarrage dont le premier tour serait déjà passé.
-  return demarrerTontine(useDb(), tontineId, user.id, { aujourdhui: dateDuJour() })
+  return await demarrerTontine(useDb(), tontineId, user.id, { aujourdhui: dateDuJour() })
 })

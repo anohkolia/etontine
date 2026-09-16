@@ -15,6 +15,6 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const { user } = await requireMembership(event, tontineId, ['president'])
-  archiverTontine(useDb(), tontineId, user.id)
+  await archiverTontine(useDb(), tontineId, user.id)
   return { ok: true }
 })

@@ -20,12 +20,11 @@ function jour(decalageJours = 0): string {
  * **Idempotent** : relancer ne change rien à ce qui est déjà marqué, et une
  * exécution manquée se rattrape à la suivante.
  */
-export function marquerRetards(db: Db, maintenant: Date = new Date()): number {
-  const enCours = db
+export async function marquerRetards(db: Db, maintenant: Date = new Date()): Promise<number> {
+  const enCours = await db
     .select({ id: tontines.id, graceDays: tontines.graceDays })
     .from(tontines)
     .where(eq(tontines.status, 'running'))
-    .all()
 
   let marquees = 0
 
@@ -35,15 +34,14 @@ export function marquerRetards(db: Db, maintenant: Date = new Date()): number {
       .toISOString()
       .slice(0, 10)
 
-    const tours = db
+    const tours = await db
       .select({ id: rounds.id })
       .from(rounds)
       .where(and(eq(rounds.tontineId, tontine.id), eq(rounds.status, 'collecting')))
-      .all()
 
     if (tours.length === 0) continue
 
-    const aMarquer = db
+    const aMarquer = await db
       .select({ id: contributions.id, status: contributions.status })
       .from(contributions)
       .where(and(
@@ -51,13 +49,12 @@ export function marquerRetards(db: Db, maintenant: Date = new Date()): number {
         eq(contributions.status, 'due'),
         lte(contributions.dueDate, limite),
       ))
-      .all()
 
     for (const c of aMarquer) {
       // Même dans une tâche, la transition passe par la machine à états :
       // aucun chemin d'écriture ne doit la contourner.
       assertTransition('contribution', c.status, 'late')
-      db.update(contributions).set({ status: 'late' }).where(eq(contributions.id, c.id)).run()
+      await db.update(contributions).set({ status: 'late' }).where(eq(contributions.id, c.id))
       marquees++
     }
   }
@@ -77,30 +74,28 @@ export function marquerRetards(db: Db, maintenant: Date = new Date()): number {
  * parallèle : les cotisations des deux se mélangeraient sur le même canal de
  * collecte, et plus personne ne saurait à quel pot appartient quel envoi.
  */
-export function ouvrirTourSuivant(db: Db, maintenant: Date = new Date()): number {
+export async function ouvrirTourSuivant(db: Db, maintenant: Date = new Date()): Promise<number> {
   const aujourdhui = maintenant.toISOString().slice(0, 10)
 
-  const enCours = db
+  const enCours = await db
     .select({ id: tontines.id })
     .from(tontines)
     .where(eq(tontines.status, 'running'))
-    .all()
 
   let ouverts = 0
 
   for (const tontine of enCours) {
-    const dejaOuvert = db
+    const dejaOuvert = await db
       .select({ id: rounds.id })
       .from(rounds)
       .where(and(
         eq(rounds.tontineId, tontine.id),
         inArray(rounds.status, ['collecting', 'payout_pending']),
       ))
-      .all()
 
     if (dejaOuvert.length > 0) continue
 
-    const [suivant] = db
+    const [suivant] = await db
       .select()
       .from(rounds)
       .where(and(
@@ -110,12 +105,11 @@ export function ouvrirTourSuivant(db: Db, maintenant: Date = new Date()): number
       ))
       .orderBy(asc(rounds.index))
       .limit(1)
-      .all()
 
     if (!suivant) continue
 
     assertTransition('round', suivant.status, 'collecting')
-    db.update(rounds).set({ status: 'collecting' }).where(eq(rounds.id, suivant.id)).run()
+    await db.update(rounds).set({ status: 'collecting' }).where(eq(rounds.id, suivant.id))
     ouverts++
   }
 

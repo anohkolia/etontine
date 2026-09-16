@@ -19,16 +19,15 @@ export default defineEventHandler(async (event) => {
   if (!contributionId) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
   const { user } = await requireMembership(event, ligne.tontineId, ['president', 'auditor'])
-  return rouvrirCotisation(db, contributionId, user.id)
+  return await rouvrirCotisation(db, contributionId, user.id)
 })

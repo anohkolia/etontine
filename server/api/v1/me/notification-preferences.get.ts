@@ -4,22 +4,20 @@ import { notificationPreferences, tontines, memberships } from '../../../db/sche
 import { requireUser } from '../../../utils/auth.ts'
 
 /** Mes préférences de notification, générales et par tontine. */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
   const db = useDb()
 
-  const reglages = db
+  const reglages = await db
     .select()
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, user.id))
-    .all()
 
-  const mesTontines = db
+  const mesTontines = await db
     .select({ id: tontines.id, name: tontines.name })
     .from(memberships)
     .innerJoin(tontines, eq(tontines.id, memberships.tontineId))
     .where(eq(memberships.userId, user.id))
-    .all()
 
   return {
     general: reglages.find(r => r.tontineId === null) ?? null,

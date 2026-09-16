@@ -8,6 +8,6 @@ export default defineTask({
     description: 'Signale au registre les déclarations laissées sans décision',
   },
   async run() {
-    return { result: { escaladees: escaladerDeclarations(useDb()) } }
+    return { result: { escaladees: await escaladerDeclarations(useDb()) } }
   },
 })

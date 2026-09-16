@@ -25,7 +25,7 @@ const INTERDITES: Array<{ nom: string, marqueurs: string[] }> = [
   { nom: 'exceljs', marqueurs: ['xl/workbook.xml', 'ExcelJS'] },
   { nom: 'jspdf', marqueurs: ['jsPDF'] },
   { nom: 'xlsx (SheetJS)', marqueurs: ['SheetJS'] },
-  { nom: 'better-sqlite3', marqueurs: ['better_sqlite3.node'] },
+  { nom: 'postgres (postgres-js)', marqueurs: ['PostgresError', 'max_lifetime', 'fetch_types'] },
   { nom: 'web-push', marqueurs: ['vapidHelper', 'setVapidDetails'] },
 ]
 

@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   if (!declarationId) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({
       tontineId: rounds.tontineId,
       membershipId: contributions.membershipId,
@@ -33,7 +33,6 @@ export default defineEventHandler(async (event) => {
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
@@ -53,5 +52,5 @@ export default defineEventHandler(async (event) => {
   const parsed = rejectDeclarationInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return rejeterDeclaration(db, declarationId, user.id, parsed.data.reason)
+  return await rejeterDeclaration(db, declarationId, user.id, parsed.data.reason)
 })

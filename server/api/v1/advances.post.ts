@@ -13,11 +13,11 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds)
-    .where(eq(rounds.id, parsed.data.roundId)).limit(1).all()
+  const [tour] = await db.select({ tontineId: rounds.tontineId }).from(rounds)
+    .where(eq(rounds.id, parsed.data.roundId)).limit(1)
 
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   await requireMembership(event, tour.tontineId, ['treasurer', 'president'])
-  return enregistrerAvance(db, parsed.data)
+  return await enregistrerAvance(db, parsed.data)
 })

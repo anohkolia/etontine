@@ -30,7 +30,7 @@ pnpm db:migrate     # migrations drizzle
 |Validation|**Zod** uniquement|schémas dans `shared/schemas/`, partagés client + serveur|
 |Formulaires|Vee-Validate + `@vee-validate/zod`||
 |État|Pinia + `pinia-plugin-persistedstate`||
-|ORM|Drizzle + SQLite (dev) / Postgres (prod)||
+|ORM|Drizzle + Postgres|PGlite local en dev (`pnpm db:local`), Supabase en prod|
 |Icônes|`@nuxt/icon` en mode **local**|jamais d'appel réseau à l'exécution|
 |PWA|`@vite-pwa/nuxt`||
 |i18n|`@nuxtjs/i18n`|toutes les chaînes externalisées dès le départ|

@@ -28,35 +28,34 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  const [membre] = db
+  const [membre] = await db
     .select()
     .from(memberships)
     .where(and(eq(memberships.id, membershipId), eq(memberships.tontineId, tontineId)))
     .limit(1)
-    .all()
 
   if (!membre) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
-  if (parsed.data.role) definirRole(db, tontineId, membershipId, parsed.data.role, user.id)
+  if (parsed.data.role) await definirRole(db, tontineId, membershipId, parsed.data.role, user.id)
 
   if (parsed.data.status === 'defaulted') {
-    return declarerDefaillant(db, membershipId, user.id)
+    return await declarerDefaillant(db, membershipId, user.id)
   }
 
   if (parsed.data.status === 'active') {
     // L'approbation attribue les parts elle-même : le nombre voyage avec
     // l'accord, et vaut une part si le président n'en dit rien.
-    approuverAdhesion(db, membershipId, user.id, parsed.data.shares ?? 1)
+    await approuverAdhesion(db, membershipId, user.id, parsed.data.shares ?? 1)
     return { ok: true }
   }
 
   if (parsed.data.status === 'left') {
-    refuserAdhesion(db, membershipId, user.id)
+    await refuserAdhesion(db, membershipId, user.id)
     return { ok: true }
   }
 
   if (parsed.data.shares !== undefined) {
-    const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+    const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
 
     // Changer le nombre de parts en cours de cycle modifierait le pot attendu
     // de tours déjà cotisés : les dus deviendraient faux rétroactivement.
@@ -67,7 +66,7 @@ export default defineEventHandler(async (event) => {
         { field: 'shares' },
       )
     }
-    attribuerParts(db, tontineId, membershipId, parsed.data.shares)
+    await attribuerParts(db, tontineId, membershipId, parsed.data.shares)
   }
 
   return { ok: true }

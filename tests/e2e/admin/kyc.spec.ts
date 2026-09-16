@@ -72,10 +72,9 @@ async function deposerUnDossierEnAttente(page: Page, nom: { prenom: string, nom:
   })
 
   const e164 = `+225${numero}`
-  useDb().update(users)
+  await useDb().update(users)
     .set({ kycStatus: 'pending_review', kycLevel: 1 })
     .where(eq(users.phone, e164))
-    .run()
 
   return e164
 }

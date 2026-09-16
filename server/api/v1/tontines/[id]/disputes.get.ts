@@ -17,5 +17,5 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const { membership } = await requireMembership(event, tontineId)
-  return { myRole: membership.role, litiges: litigesDe(useDb(), tontineId) }
+  return { myRole: membership.role, litiges: await litigesDe(useDb(), tontineId) }
 })

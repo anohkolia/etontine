@@ -5,20 +5,21 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { appendLedger, readLedger, verifyLedger } from '../../server/services/ledger.ts'
 import { ledgerEntries, tontines } from '../../server/db/schema.ts'
+import type { PGlite } from '@electric-sql/pglite'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let sqlite: import('better-sqlite3').Database
-let cleanup: () => void
+let pg: PGlite
+let cleanup: () => Promise<void>
 
 const T = 'a0000000-0000-4000-8000-000000000001'
 const U = 'a0000000-0000-4000-8000-000000000002'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
-  sqlite = ctx.sqlite
+  pg = ctx.pg
   cleanup = ctx.cleanup
 
   await createTestUser(db, U, '+2250707000001')
@@ -30,16 +31,16 @@ beforeEach(async () => {
 
 afterEach(() => cleanup())
 
-function troisEcritures() {
-  appendLedger(db, { tontineId: T, type: 'member_joined', actorId: U, payload: { membre: 'Aya' } })
-  appendLedger(db, { tontineId: T, type: 'contribution_declared', actorId: U, payload: { montant: 25_000 } })
-  appendLedger(db, { tontineId: T, type: 'contribution_confirmed', actorId: U, payload: { montant: 25_000 } })
+async function troisEcritures() {
+  await appendLedger(db, { tontineId: T, type: 'member_joined', actorId: U, payload: { membre: 'Aya' } })
+  await appendLedger(db, { tontineId: T, type: 'contribution_declared', actorId: U, payload: { montant: 25_000 } })
+  await appendLedger(db, { tontineId: T, type: 'contribution_confirmed', actorId: U, payload: { montant: 25_000 } })
 }
 
 describe('registre — chaînage', () => {
-  it('chaîne les écritures et les numérote à partir de 1', () => {
-    troisEcritures()
-    const lignes = sqlite.prepare(`SELECT position, prev_hash, hash FROM ledger_entries ORDER BY position`).all() as Array<{ position: number, prev_hash: string | null, hash: string }>
+  it('chaîne les écritures et les numérote à partir de 1', async () => {
+    await troisEcritures()
+    const { rows: lignes } = await pg.query<{ position: number, prev_hash: string | null, hash: string }>(`SELECT position, prev_hash, hash FROM ledger_entries ORDER BY position`)
 
     expect(lignes.map(l => l.position)).toEqual([1, 2, 3])
     expect(lignes[0]!.prev_hash).toBeNull()
@@ -47,17 +48,17 @@ describe('registre — chaînage', () => {
     expect(lignes[2]!.prev_hash).toBe(lignes[1]!.hash)
   })
 
-  it('valide une chaîne intacte', () => {
-    troisEcritures()
-    expect(verifyLedger(db, T)).toMatchObject({ valid: true, entriesChecked: 3 })
+  it('valide une chaîne intacte', async () => {
+    await troisEcritures()
+    expect(await verifyLedger(db, T)).toMatchObject({ valid: true, entriesChecked: 3 })
   })
 
-  it('horodate depuis le serveur, jamais depuis le payload client', () => {
+  it('horodate depuis le serveur, jamais depuis le payload client', async () => {
     // Un client qui glisse une date dans son payload ne doit pas pouvoir
     // antidater sa cotisation : le payload est haché, mais l'horodatage du
     // chaînage vient de l'horloge serveur.
     const avant = Date.now()
-    const e = appendLedger(db, {
+    const e = await appendLedger(db, {
       tontineId: T,
       type: 'contribution_declared',
       actorId: U,
@@ -75,76 +76,75 @@ describe('registre — chaînage', () => {
       id: T2, name: 'Autre', shareAmount: 10_000,
       frequency: 'weekly', startDate: '2026-01-01', createdBy: U,
     })
-    troisEcritures()
-    const e = appendLedger(db, { tontineId: T2, type: 'member_joined', actorId: U, payload: {} })
+    await troisEcritures()
+    const e = await appendLedger(db, { tontineId: T2, type: 'member_joined', actorId: U, payload: {} })
 
     // Une nouvelle tontine repart de 1, sans hériter du hachage d'une autre.
     expect(e.position).toBe(1)
     expect(e.prevHash).toBeNull()
-    expect(verifyLedger(db, T2).valid).toBe(true)
+    expect((await verifyLedger(db, T2)).valid).toBe(true)
   })
 })
 
 describe('registre — détection d’altération (acceptation T06)', () => {
-  it('altérer une écriture fait échouer la vérification, en indiquant la position', () => {
-    troisEcritures()
+  it('altérer une écriture fait échouer la vérification, en indiquant la position', async () => {
+    await troisEcritures()
 
     // On modifie directement en base, comme le ferait quelqu'un ayant accès au
     // serveur : c'est précisément ce que le chaînage doit rendre visible.
-    sqlite.prepare(`UPDATE ledger_entries SET payload = ? WHERE position = 2`)
-      .run(JSON.stringify({ montant: 250_000 }))
+    await pg.query(`UPDATE ledger_entries SET payload = $1 WHERE position = 2`, [JSON.stringify({ montant: 250_000 })])
 
-    const resultat = verifyLedger(db, T)
+    const resultat = await verifyLedger(db, T)
 
     expect(resultat.valid).toBe(false)
     expect(resultat.brokenAt).toBe(2)
     expect(resultat.reason).toContain('modifiée')
   })
 
-  it('supprimer une écriture est détecté comme un trou dans la chaîne', () => {
-    troisEcritures()
-    sqlite.prepare(`DELETE FROM ledger_entries WHERE position = 2`).run()
+  it('supprimer une écriture est détecté comme un trou dans la chaîne', async () => {
+    await troisEcritures()
+    await pg.exec(`DELETE FROM ledger_entries WHERE position = 2`)
 
-    const resultat = verifyLedger(db, T)
+    const resultat = await verifyLedger(db, T)
     expect(resultat.valid).toBe(false)
     expect(resultat.brokenAt).toBe(2)
     expect(resultat.reason).toContain('manquante')
   })
 
-  it('réécrire l’acteur d’une écriture est détecté', () => {
-    troisEcritures()
-    sqlite.prepare(`UPDATE ledger_entries SET actor_id = ? WHERE position = 3`).run(U)
+  it('réécrire l’acteur d’une écriture est détecté', async () => {
+    await troisEcritures()
+    await pg.query(`UPDATE ledger_entries SET actor_id = $1 WHERE position = 3`, [U])
     // Même acteur : la chaîne reste valide, rien n'a changé.
-    expect(verifyLedger(db, T).valid).toBe(true)
+    expect((await verifyLedger(db, T)).valid).toBe(true)
 
-    sqlite.prepare(`UPDATE ledger_entries SET type = 'contribution_rejected' WHERE position = 3`).run()
-    const resultat = verifyLedger(db, T)
+    await pg.exec(`UPDATE ledger_entries SET type = 'contribution_rejected' WHERE position = 3`)
+    const resultat = await verifyLedger(db, T)
     expect(resultat.valid).toBe(false)
     expect(resultat.brokenAt).toBe(3)
   })
 
-  it('décrocher un maillon est détecté avant même le recalcul', () => {
-    troisEcritures()
-    sqlite.prepare(`UPDATE ledger_entries SET prev_hash = 'faux' WHERE position = 3`).run()
+  it('décrocher un maillon est détecté avant même le recalcul', async () => {
+    await troisEcritures()
+    await pg.exec(`UPDATE ledger_entries SET prev_hash = 'faux' WHERE position = 3`)
 
-    const resultat = verifyLedger(db, T)
+    const resultat = await verifyLedger(db, T)
     expect(resultat.valid).toBe(false)
     expect(resultat.brokenAt).toBe(3)
     expect(resultat.reason).toContain('ne suit pas')
   })
 
-  it('signale la première rupture, pas la dernière', () => {
-    troisEcritures()
-    sqlite.prepare(`UPDATE ledger_entries SET payload = '{"x":1}' WHERE position = 2`).run()
-    sqlite.prepare(`UPDATE ledger_entries SET payload = '{"x":2}' WHERE position = 3`).run()
+  it('signale la première rupture, pas la dernière', async () => {
+    await troisEcritures()
+    await pg.exec(`UPDATE ledger_entries SET payload = '{"x":1}' WHERE position = 2`)
+    await pg.exec(`UPDATE ledger_entries SET payload = '{"x":2}' WHERE position = 3`)
 
     // Savoir à partir d'où le registre n'est plus digne de foi, c'est la
     // position la plus ancienne qui compte.
-    expect(verifyLedger(db, T).brokenAt).toBe(2)
+    expect((await verifyLedger(db, T)).brokenAt).toBe(2)
   })
 
-  it('une chaîne vide est valide', () => {
-    expect(verifyLedger(db, T)).toMatchObject({ valid: true, entriesChecked: 0 })
+  it('une chaîne vide est valide', async () => {
+    expect(await verifyLedger(db, T)).toMatchObject({ valid: true, entriesChecked: 0 })
   })
 })
 
@@ -204,12 +204,12 @@ describe('registre — append-only (acceptation T06)', () => {
     )
   })
 
-  it('une correction s’écrit comme une annulation, en gardant la trace', () => {
-    const originale = appendLedger(db, {
+  it('une correction s’écrit comme une annulation, en gardant la trace', async () => {
+    const originale = await appendLedger(db, {
       tontineId: T, type: 'contribution_confirmed', actorId: U, payload: { montant: 25_000 },
     })
 
-    const annulation = appendLedger(db, {
+    const annulation = await appendLedger(db, {
       tontineId: T,
       type: 'reversal',
       actorId: U,
@@ -219,45 +219,45 @@ describe('registre — append-only (acceptation T06)', () => {
 
     expect(annulation.reversesId).toBe(originale.id)
     // L'originale est toujours là : l'erreur reste visible de tous.
-    const restantes = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+    const restantes = await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T))
     expect(restantes).toHaveLength(2)
-    expect(verifyLedger(db, T).valid).toBe(true)
+    expect((await verifyLedger(db, T)).valid).toBe(true)
   })
 })
 
 describe('registre — pagination par curseur', () => {
-  function cinqEcritures() {
+  async function cinqEcritures() {
     for (let i = 1; i <= 5; i++) {
-      appendLedger(db, { tontineId: T, type: 'contribution_declared', actorId: U, payload: { rang: i } })
+      await appendLedger(db, { tontineId: T, type: 'contribution_declared', actorId: U, payload: { rang: i } })
     }
   }
 
-  it('rend les plus récentes d’abord, et un curseur tant qu’il en reste', () => {
-    cinqEcritures()
-    const page1 = readLedger(db, T, { limit: 2 })
+  it('rend les plus récentes d’abord, et un curseur tant qu’il en reste', async () => {
+    await cinqEcritures()
+    const page1 = await readLedger(db, T, { limit: 2 })
 
     expect(page1.items.map(e => e.position)).toEqual([5, 4])
     expect(page1.nextCursor).toBe('4')
   })
 
-  it('reprend juste sous le curseur, sans doublon ni trou', () => {
+  it('reprend juste sous le curseur, sans doublon ni trou', async () => {
     // Le curseur était accepté et jamais appliqué : chaque page rendait les
     // mêmes écritures, et tout ce qui dépassait la première restait invisible.
-    cinqEcritures()
-    const page1 = readLedger(db, T, { limit: 2 })
-    const page2 = readLedger(db, T, { limit: 2, cursor: Number(page1.nextCursor) })
-    const page3 = readLedger(db, T, { limit: 2, cursor: Number(page2.nextCursor) })
+    await cinqEcritures()
+    const page1 = await readLedger(db, T, { limit: 2 })
+    const page2 = await readLedger(db, T, { limit: 2, cursor: Number(page1.nextCursor) })
+    const page3 = await readLedger(db, T, { limit: 2, cursor: Number(page2.nextCursor) })
 
     expect(page2.items.map(e => e.position)).toEqual([3, 2])
     expect(page3.items.map(e => e.position)).toEqual([1])
     expect(page3.nextCursor).toBeNull()
   })
 
-  it('combine le curseur et le filtre par type', () => {
-    cinqEcritures()
-    appendLedger(db, { tontineId: T, type: 'member_joined', actorId: U, payload: {} })
+  it('combine le curseur et le filtre par type', async () => {
+    await cinqEcritures()
+    await appendLedger(db, { tontineId: T, type: 'member_joined', actorId: U, payload: {} })
 
-    const page = readLedger(db, T, { limit: 10, type: 'contribution_declared', cursor: 3 })
+    const page = await readLedger(db, T, { limit: 10, type: 'contribution_declared', cursor: 3 })
     expect(page.items.map(e => e.position)).toEqual([2, 1])
   })
 })

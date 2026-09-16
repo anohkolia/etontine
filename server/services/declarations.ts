@@ -67,20 +67,19 @@ export interface ResultatDeclaration {
  *   déclaration d'origine plutôt qu'un second enregistrement que le trésorier
  *   devrait ensuite démêler.
  */
-export function declarerPaiement(
+export async function declarerPaiement(
   db: Db,
   contributionId: string,
   declarantId: string,
   input: DeclarationInput,
   source: 'member' | 'treasurer' = 'member',
-): ResultatDeclaration {
-  const [ligne] = db
+): Promise<ResultatDeclaration> {
+  const [ligne] = await db
     .select({ contribution: contributions, tontineId: rounds.tontineId, roundId: rounds.id })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
@@ -97,7 +96,7 @@ export function declarerPaiement(
   // au moment où la seconde arrive. Seul un rejet est exclu — après un rejet,
   // re-déclarer est un geste légitime, pas un doublon.
   const depuis = new Date(Date.now() - FENETRE_DOUBLON_SECONDES * 1000)
-  const [recente] = db
+  const [recente] = await db
     .select()
     .from(paymentDeclarations)
     .where(and(
@@ -109,7 +108,6 @@ export function declarerPaiement(
     ))
     .orderBy(desc(paymentDeclarations.declaredAt))
     .limit(1)
-    .all()
 
   if (recente) {
     return {
@@ -125,7 +123,7 @@ export function declarerPaiement(
   assertTransition('contribution', ligne.contribution.status, 'declared')
 
   const declarationId = randomUUID()
-  db.insert(paymentDeclarations).values({
+  await db.insert(paymentDeclarations).values({
     id: declarationId,
     contributionId,
     declaredBy: declarantId,
@@ -136,14 +134,13 @@ export function declarerPaiement(
     proofUrl: input.proofUrl ?? null,
     declaredAt: new Date(),
     decision: 'pending',
-  }).run()
+  })
 
-  db.update(contributions)
+  await db.update(contributions)
     .set({ status: 'declared' })
     .where(eq(contributions.id, contributionId))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: ligne.tontineId,
     roundId: ligne.roundId,
     type: 'contribution_declared',
@@ -163,8 +160,8 @@ export function declarerPaiement(
   // enchaîne donc la confirmation, que `confirmerDeclaration` n'accorde que
   // s'il constate lui-même l'absence de second valideur — et qui l'inscrit au
   // registre comme telle.
-  if (confirmateursPossibles(db, ligne.tontineId, declarantId).length === 0) {
-    const confirmation = confirmerDeclaration(db, declarationId, declarantId)
+  if ((await confirmateursPossibles(db, ligne.tontineId, declarantId)).length === 0) {
+    const confirmation = await confirmerDeclaration(db, declarationId, declarantId)
     if (confirmation.autoConfirmee) {
       return {
         declarationId,
@@ -187,13 +184,13 @@ export function declarerPaiement(
  * cette dissymétrie : celui qui n'a pas envoyé lui-même doit pouvoir dire s'il
  * reconnaît le versement (T17).
  */
-export function declarerEspeces(
+export async function declarerEspeces(
   db: Db,
   contributionId: string,
   tresorierId: string,
   input: Omit<DeclarationInput, 'channel'>,
-): ResultatDeclaration {
-  const resultat = declarerPaiement(
+): Promise<ResultatDeclaration> {
+  const resultat = await declarerPaiement(
     db,
     contributionId,
     tresorierId,
@@ -201,25 +198,23 @@ export function declarerEspeces(
     'treasurer',
   )
 
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId, membershipId: contributions.membershipId })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (ligne) {
-    const [membre] = db
+    const [membre] = await db
       .select({ userId: memberships.userId })
       .from(memberships)
       .where(eq(memberships.id, ligne.membershipId))
       .limit(1)
-      .all()
 
     if (membre?.userId) {
       // Aucun montant dans la notification (règle 21).
-      notifierTontine(db, ligne.tontineId, {
+      await notifierTontine(db, ligne.tontineId, {
         type: 'especes_a_confirmer',
         title: 'Une cotisation a été enregistrée pour toi',
         body: 'Le trésorier a enregistré un versement en espèces à ton nom. Confirme-le si c’est exact.',
@@ -232,19 +227,18 @@ export function declarerEspeces(
 }
 
 /** Le total déjà déclaré et en attente sur une cotisation. */
-export function declarationsEnAttente(db: Db, contributionId: string) {
-  return db
+export async function declarationsEnAttente(db: Db, contributionId: string) {
+  return await db
     .select()
     .from(paymentDeclarations)
     .where(and(
       eq(paymentDeclarations.contributionId, contributionId),
       eq(paymentDeclarations.decision, 'pending'),
     ))
-    .all()
 }
 
 /** Le seuil de contre-validation d'une tontine — utilisé au versement (T19). */
-export function seuilContreValidation(db: Db, tontineId: string): number {
-  const [t] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function seuilContreValidation(db: Db, tontineId: string): Promise<number> {
+  const [t] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   return t?.counterValidationThreshold ?? 100_000
 }

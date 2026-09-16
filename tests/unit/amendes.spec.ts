@@ -13,27 +13,27 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let T: string
 
 const PRESIDENT = 'b2000000-0000-4000-8000-000000000001'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
   await createTestUser(db, PRESIDENT, '+2250707001111')
-  T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15', graceDays: 3 })
-  ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
+  T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
+  await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15', graceDays: 3 })
+  await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
 
-  const canal = creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
-  demarrerTontine(db, T, PRESIDENT)
+  const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
+  await demarrerTontine(db, T, PRESIDENT)
 })
 
 afterEach(() => cleanup())
@@ -100,175 +100,174 @@ describe('calcul d’amende — régime « per_day » avec plafond', () => {
 })
 
 describe('application d’une amende — acceptation T22', () => {
-  function premiereCotisation() {
-    return db.select().from(contributions).all()[0]!
+  async function premiereCotisation() {
+    return (await db.select().from(contributions))[0]!
   }
 
-  it('n’est jamais appliquée sans décision explicite', () => {
+  it('n’est jamais appliquée sans décision explicite', async () => {
     // Le calcul dit ce qui serait dû ; il n'écrit rien. Aucune amende
     // n'apparaît tant que le président n'a pas agi.
     calculerAmende({ penaltyAmount: 2_000, penaltyPeriod: 'once', penaltyCap: null, graceDays: 3 },
       '2026-01-15', LE('2026-06-01'))
 
-    expect(db.select().from(penalties).all()).toHaveLength(0)
+    expect(await db.select().from(penalties)).toHaveLength(0)
   })
 
-  it('enregistre l’amende et l’inscrit au registre', () => {
-    const cotisation = premiereCotisation()
-    const { penaltyId } = appliquerAmende(db, cotisation.id, PRESIDENT, 2_000, 'Retard de 5 jours')
+  it('enregistre l’amende et l’inscrit au registre', async () => {
+    const cotisation = await premiereCotisation()
+    const { penaltyId } = await appliquerAmende(db, cotisation.id, PRESIDENT, 2_000, 'Retard de 5 jours')
 
-    const [amende] = db.select().from(penalties).where(eq(penalties.id, penaltyId)).all()
+    const [amende] = await db.select().from(penalties).where(eq(penalties.id, penaltyId))
     expect(amende!.amount).toBe(2_000)
     expect(amende!.appliedBy).toBe(PRESIDENT)
 
-    const ecritures = db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'penalty_applied')).all()
+    const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'penalty_applied'))
     expect(ecritures).toHaveLength(1)
   })
 
-  it('refuse une seconde amende sur la même cotisation', () => {
-    const cotisation = premiereCotisation()
-    appliquerAmende(db, cotisation.id, PRESIDENT, 2_000)
+  it('refuse une seconde amende sur la même cotisation', async () => {
+    const cotisation = await premiereCotisation()
+    await appliquerAmende(db, cotisation.id, PRESIDENT, 2_000)
 
-    expect(() => appliquerAmende(db, cotisation.id, PRESIDENT, 2_000)).toThrow(
+    await expect(appliquerAmende(db, cotisation.id, PRESIDENT, 2_000)).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
 
-  it('laisse le président appliquer moins que le barème', () => {
+  it('laisse le président appliquer moins que le barème', async () => {
     // Le bureau sait faire la différence entre un retard et un abandon.
-    const cotisation = premiereCotisation()
-    const { amount } = appliquerAmende(db, cotisation.id, PRESIDENT, 500, 'Geste commercial')
+    const cotisation = await premiereCotisation()
+    const { amount } = await appliquerAmende(db, cotisation.id, PRESIDENT, 500, 'Geste commercial')
     expect(amount).toBe(500)
   })
 })
 
 describe('annulation d’une amende — le motif est obligatoire', () => {
-  function amendeAppliquee() {
-    const cotisation = db.select().from(contributions).all()[0]!
-    return appliquerAmende(db, cotisation.id, PRESIDENT, 2_000).penaltyId
+  async function amendeAppliquee() {
+    const cotisation = (await db.select().from(contributions))[0]!
+    return (await appliquerAmende(db, cotisation.id, PRESIDENT, 2_000)).penaltyId
   }
 
-  it('refuse une annulation sans motif', () => {
+  it('refuse une annulation sans motif', async () => {
     // Une amende qui disparaît sans explication, c'est ce qui fait dire que
     // « le bureau arrange ses amis ».
-    const penaltyId = amendeAppliquee()
+    const penaltyId = await amendeAppliquee()
 
-    expect(() => annulerAmende(db, penaltyId, PRESIDENT, '')).toThrow(
+    await expect(annulerAmende(db, penaltyId, PRESIDENT, '')).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
-    expect(() => annulerAmende(db, penaltyId, PRESIDENT, 'non')).toThrow(
+    await expect(annulerAmende(db, penaltyId, PRESIDENT, 'non')).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
   })
 
-  it('consigne le motif au registre', () => {
-    const penaltyId = amendeAppliquee()
-    annulerAmende(db, penaltyId, PRESIDENT, 'Le membre était hospitalisé')
+  it('consigne le motif au registre', async () => {
+    const penaltyId = await amendeAppliquee()
+    await annulerAmende(db, penaltyId, PRESIDENT, 'Le membre était hospitalisé')
 
-    const [amende] = db.select().from(penalties).where(eq(penalties.id, penaltyId)).all()
+    const [amende] = await db.select().from(penalties).where(eq(penalties.id, penaltyId))
     expect(amende!.status).toBe('waived')
     expect(amende!.waiveReason).toBe('Le membre était hospitalisé')
 
-    const ecriture = db.select().from(ledgerEntries).all().find(e => e.type === 'penalty_waived')!
+    const ecriture = (await db.select().from(ledgerEntries)).find(e => e.type === 'penalty_waived')!
     expect((ecriture.payload as { reason: string }).reason).toBe('Le membre était hospitalisé')
   })
 
-  it('refuse une seconde annulation', () => {
-    const penaltyId = amendeAppliquee()
-    annulerAmende(db, penaltyId, PRESIDENT, 'Motif suffisant')
+  it('refuse une seconde annulation', async () => {
+    const penaltyId = await amendeAppliquee()
+    await annulerAmende(db, penaltyId, PRESIDENT, 'Motif suffisant')
 
-    expect(() => annulerAmende(db, penaltyId, PRESIDENT, 'Autre motif')).toThrow(
+    await expect(annulerAmende(db, penaltyId, PRESIDENT, 'Autre motif')).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
 })
 
 describe('avances entre membres', () => {
-  function deuxMembres() {
-    const tous = db.select().from(memberships).where(eq(memberships.tontineId, T)).all()
+  async function deuxMembres() {
+    const tous = await db.select().from(memberships).where(eq(memberships.tontineId, T))
     return [tous[0]!.id, tous[1]!.id] as const
   }
 
-  it('enregistre l’avance sans toucher aux cotisations', () => {
-    const [de, vers] = deuxMembres()
-    const tour = db.select().from(rounds).all()[0]!
-    const avant = db.select().from(contributions).all().map(c => c.confirmedAmount)
+  it('enregistre l’avance sans toucher aux cotisations', async () => {
+    const [de, vers] = await deuxMembres()
+    const tour = (await db.select().from(rounds))[0]!
+    const avant = (await db.select().from(contributions)).map(c => c.confirmedAmount)
 
-    enregistrerAvance(db, { roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000 })
+    await enregistrerAvance(db, { roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000 })
 
     // L'avance est une reconnaissance de dette entre deux membres, pas un
     // paiement : elle ne modifie aucune cotisation.
-    expect(db.select().from(contributions).all().map(c => c.confirmedAmount)).toEqual(avant)
-    expect(db.select().from(advances).all()).toHaveLength(1)
+    expect((await db.select().from(contributions)).map(c => c.confirmedAmount)).toEqual(avant)
+    expect(await db.select().from(advances)).toHaveLength(1)
   })
 
-  it('refuse une avance pour soi-même', () => {
-    const [de] = deuxMembres()
-    const tour = db.select().from(rounds).all()[0]!
+  it('refuse une avance pour soi-même', async () => {
+    const [de] = await deuxMembres()
+    const tour = (await db.select().from(rounds))[0]!
 
-    expect(() => enregistrerAvance(db, {
+    await expect(enregistrerAvance(db, {
       roundId: tour.id, fromMembershipId: de, toMembershipId: de, amount: 25_000,
-    })).toThrow(expect.objectContaining({ statusCode: 422 }))
+    })).rejects.toThrow(expect.objectContaining({ statusCode: 422 }))
   })
 
-  it('dit qui a dépanné qui', () => {
-    const [de, vers] = deuxMembres()
-    const tour = db.select().from(rounds).all()[0]!
-    enregistrerAvance(db, { roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000 })
+  it('dit qui a dépanné qui', async () => {
+    const [de, vers] = await deuxMembres()
+    const tour = (await db.select().from(rounds))[0]!
+    await enregistrerAvance(db, { roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000 })
 
     // « 25 000 F, tour 3 » ne règle aucune dispute : ce qu'on vient chercher
     // dans une avance, ce sont les deux noms.
-    const [avance] = avancesDe(db, T)
+    const [avance] = await avancesDe(db, T)
     expect(avance!.nomPreteur).not.toBe('')
     expect(avance!.nomBeneficiaire).not.toBe('')
     expect(avance!.nomPreteur).not.toBe(avance!.nomBeneficiaire)
   })
 
-  it('se solde une seule fois', () => {
-    const [de, vers] = deuxMembres()
-    const tour = db.select().from(rounds).all()[0]!
-    const { id } = enregistrerAvance(db, {
+  it('se solde une seule fois', async () => {
+    const [de, vers] = await deuxMembres()
+    const tour = (await db.select().from(rounds))[0]!
+    const { id } = await enregistrerAvance(db, {
       roundId: tour.id, fromMembershipId: de, toMembershipId: vers, amount: 25_000,
     })
 
-    expect(solderAvance(db, id).settled).toBe(true)
-    expect(() => solderAvance(db, id)).toThrow(expect.objectContaining({ statusCode: 409 }))
+    expect((await solderAvance(db, id)).settled).toBe(true)
+    await expect(solderAvance(db, id)).rejects.toThrow(expect.objectContaining({ statusCode: 409 }))
   })
 })
 
 describe('contestations', () => {
-  function uneEcriture() {
-    return appendLedger(db, {
+  async function uneEcriture() {
+    return await appendLedger(db, {
       tontineId: T, type: 'contribution_confirmed', actorId: PRESIDENT,
       payload: { amount: 25_000 },
     })
   }
 
-  it('s’ouvre depuis n’importe quelle écriture du registre', () => {
-    const ecriture = uneEcriture()
-    const { disputeId } = ouvrirContestation(db, ecriture.id, PRESIDENT, 'Je n’ai jamais reçu cette somme')
+  it('s’ouvre depuis n’importe quelle écriture du registre', async () => {
+    const ecriture = await uneEcriture()
+    const { disputeId } = await ouvrirContestation(db, ecriture.id, PRESIDENT, 'Je n’ai jamais reçu cette somme')
 
     expect(disputeId).toBeTruthy()
   })
 
-  it('exige une conclusion écrite pour se clore', () => {
+  it('exige une conclusion écrite pour se clore', async () => {
     // Une contestation close sans rien dire laisse le doute là où il était.
-    const ecriture = uneEcriture()
-    const { disputeId } = ouvrirContestation(db, ecriture.id, PRESIDENT, 'Erreur de montant')
+    const ecriture = await uneEcriture()
+    const { disputeId } = await ouvrirContestation(db, ecriture.id, PRESIDENT, 'Erreur de montant')
 
-    expect(() => resoudreContestation(db, disputeId, PRESIDENT, '')).toThrow(
+    await expect(resoudreContestation(db, disputeId, PRESIDENT, '')).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
-    expect(() => resoudreContestation(db, disputeId, PRESIDENT, 'Corrigé par une écriture d’annulation'))
-      .not.toThrow()
+    await resoudreContestation(db, disputeId, PRESIDENT, 'Corrigé par une écriture d’annulation')
   })
 
-  it('n’accepte plus de message une fois close', () => {
-    const ecriture = uneEcriture()
-    const { disputeId } = ouvrirContestation(db, ecriture.id, PRESIDENT, 'Erreur de montant')
-    resoudreContestation(db, disputeId, PRESIDENT, 'Corrigé au registre')
+  it('n’accepte plus de message une fois close', async () => {
+    const ecriture = await uneEcriture()
+    const { disputeId } = await ouvrirContestation(db, ecriture.id, PRESIDENT, 'Erreur de montant')
+    await resoudreContestation(db, disputeId, PRESIDENT, 'Corrigé au registre')
 
-    expect(() => ajouterMessage(db, disputeId, PRESIDENT, 'Encore un mot')).toThrow(
+    await expect(ajouterMessage(db, disputeId, PRESIDENT, 'Encore un mot')).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
@@ -284,45 +283,45 @@ describe('contestations', () => {
     async function bureauAvecCompte() {
       await createTestUser(db, MEMBRE, '+2250707002222')
       await createTestUser(db, CENSEUR, '+2250707003333')
-      const koffi = db.select().from(memberships).all().find(m => m.managedName === 'Koffi')!
-      const fatou = db.select().from(memberships).all().find(m => m.managedName === 'Fatou')!
-      db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, koffi.id)).run()
-      db.update(memberships).set({ userId: CENSEUR, role: 'auditor' }).where(eq(memberships.id, fatou.id)).run()
+      const koffi = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi')!
+      const fatou = (await db.select().from(memberships)).find(m => m.managedName === 'Fatou')!
+      await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, koffi.id))
+      await db.update(memberships).set({ userId: CENSEUR, role: 'auditor' }).where(eq(memberships.id, fatou.id))
     }
 
-    function notifiesDe(type: string) {
-      return db.select().from(notifications).all().filter(n => n.type === type).map(n => n.userId).sort()
+    async function notifiesDe(type: string) {
+      return (await db.select().from(notifications)).filter(n => n.type === type).map(n => n.userId).sort()
     }
 
     it('une réponse prévient celui qui a signalé et le bureau qui tranche, pas son auteur', async () => {
       await bureauAvecCompte()
-      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Je n’ai jamais reçu cette somme')
+      const { disputeId } = await ouvrirContestation(db, (await uneEcriture()).id, MEMBRE, 'Je n’ai jamais reçu cette somme')
 
-      ajouterMessage(db, disputeId, PRESIDENT, 'On regarde ça')
+      await ajouterMessage(db, disputeId, PRESIDENT, 'On regarde ça')
       // Le membre et le censeur, pas le président qui vient d'écrire.
-      expect(notifiesDe('contestation_reponse')).toEqual([MEMBRE, CENSEUR].sort())
+      expect(await notifiesDe('contestation_reponse')).toEqual([MEMBRE, CENSEUR].sort())
 
-      db.delete(notifications).run()
-      ajouterMessage(db, disputeId, MEMBRE, 'Merci, j’attends')
+      await db.delete(notifications)
+      await ajouterMessage(db, disputeId, MEMBRE, 'Merci, j’attends')
       // Le membre est l'auteur : président et censeur seulement.
-      expect(notifiesDe('contestation_reponse')).toEqual([PRESIDENT, CENSEUR].sort())
+      expect(await notifiesDe('contestation_reponse')).toEqual([PRESIDENT, CENSEUR].sort())
     })
 
     it('la conclusion prévient celui qui a signalé', async () => {
       await bureauAvecCompte()
-      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Je n’ai jamais reçu cette somme')
+      const { disputeId } = await ouvrirContestation(db, (await uneEcriture()).id, MEMBRE, 'Je n’ai jamais reçu cette somme')
 
-      resoudreContestation(db, disputeId, CENSEUR, 'Vérifié : le versement est au registre')
-      expect(notifiesDe('contestation_close')).toEqual([MEMBRE])
+      await resoudreContestation(db, disputeId, CENSEUR, 'Vérifié : le versement est au registre')
+      expect(await notifiesDe('contestation_close')).toEqual([MEMBRE])
     })
 
     it('n’écrit aucun montant dans ces notifications', async () => {
       await bureauAvecCompte()
-      const { disputeId } = ouvrirContestation(db, uneEcriture().id, MEMBRE, 'Il manque 25 000')
-      ajouterMessage(db, disputeId, PRESIDENT, 'Les 25 000 sont bien là')
-      resoudreContestation(db, disputeId, PRESIDENT, '25 000 confirmés')
+      const { disputeId } = await ouvrirContestation(db, (await uneEcriture()).id, MEMBRE, 'Il manque 25 000')
+      await ajouterMessage(db, disputeId, PRESIDENT, 'Les 25 000 sont bien là')
+      await resoudreContestation(db, disputeId, PRESIDENT, '25 000 confirmés')
 
-      for (const n of db.select().from(notifications).all()) {
+      for (const n of await db.select().from(notifications)) {
         expect(n.body).not.toMatch(/\d{2} ?\d{3}/)
       }
     })

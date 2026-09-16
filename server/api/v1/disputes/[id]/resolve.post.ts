@@ -22,13 +22,12 @@ export default defineEventHandler(async (event) => {
   if (!disputeId) throw apiError('NOT_FOUND', 'Contestation introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: ledgerEntries.tontineId })
     .from(disputes)
     .innerJoin(ledgerEntries, eq(ledgerEntries.id, disputes.ledgerEntryId))
     .where(eq(disputes.id, disputeId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Contestation introuvable.')
 
@@ -37,5 +36,5 @@ export default defineEventHandler(async (event) => {
   const parsed = resolutionInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return resoudreContestation(db, disputeId, user.id, parsed.data.resolution)
+  return await resoudreContestation(db, disputeId, user.id, parsed.data.resolution)
 })

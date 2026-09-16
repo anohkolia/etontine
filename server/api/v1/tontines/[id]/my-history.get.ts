@@ -25,47 +25,43 @@ export default defineEventHandler(async (event) => {
   const { membership } = await requireMembership(event, tontineId)
   const db = useDb()
 
-  const tours = toursDe(db, tontineId)
+  const tours = await toursDe(db, tontineId)
   if (tours.length === 0) return { rounds: [], totalConfirme: 0, totalRecu: 0 }
 
   const mesParts = new Set(
-    db.select({ id: shares.id }).from(shares).where(eq(shares.membershipId, membership.id)).all().map(p => p.id),
+    (await db.select({ id: shares.id }).from(shares).where(eq(shares.membershipId, membership.id))).map(p => p.id),
   )
 
-  const miennes = db
+  const miennes = await db
     .select()
     .from(contributions)
     .where(and(
       inArray(contributions.roundId, tours.map(t => t.id)),
       eq(contributions.membershipId, membership.id),
     ))
-    .all()
 
   const declarations = miennes.length === 0
     ? []
-    : db
+    : (await db
         .select()
         .from(paymentDeclarations)
         .where(inArray(paymentDeclarations.contributionId, miennes.map(c => c.id)))
-        .orderBy(asc(paymentDeclarations.declaredAt))
-        .all()
+        .orderBy(asc(paymentDeclarations.declaredAt)))
 
   const amendes = miennes.length === 0
     ? []
-    : db
+    : (await db
         .select()
         .from(penalties)
-        .where(inArray(penalties.contributionId, miennes.map(c => c.id)))
-        .all()
+        .where(inArray(penalties.contributionId, miennes.map(c => c.id))))
 
-  const versements = db
+  const versements = await db
     .select()
     .from(payouts)
     .where(and(
       inArray(payouts.roundId, tours.map(t => t.id)),
       eq(payouts.beneficiaryMembershipId, membership.id),
     ))
-    .all()
 
   const parTour = tours.map((tour) => {
     const cotisations = miennes.filter(c => c.roundId === tour.id)

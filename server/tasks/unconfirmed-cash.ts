@@ -8,6 +8,6 @@ export default defineTask({
     description: 'Signale les versements en espèces qu’aucun membre n’a reconnus',
   },
   async run() {
-    return { result: { signalees: signalerEspecesNonConfirmees(useDb()) } }
+    return { result: { signalees: await signalerEspecesNonConfirmees(useDb()) } }
   },
 })

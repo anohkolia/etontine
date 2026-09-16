@@ -54,8 +54,8 @@ export interface EtatVersement {
   payout: typeof payouts.$inferSelect | null
 }
 
-function contexteTour(db: Db, roundId: string) {
-  const [ligne] = db
+async function contexteTour(db: Db, roundId: string) {
+  const [ligne] = await db
     .select({
       round: rounds,
       tontine: tontines,
@@ -66,7 +66,6 @@ function contexteTour(db: Db, roundId: string) {
     .innerJoin(shares, eq(shares.id, rounds.beneficiaryShareId))
     .where(eq(rounds.id, roundId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Tour introuvable.')
   return ligne
@@ -86,30 +85,28 @@ function contexteTour(db: Db, roundId: string) {
  * Le préparateur en est toujours exclu : deux paires d'yeux, jamais deux fois
  * les mêmes (docs/data-model.md §2.5).
  */
-export function contreValidateursPossibles(
+export async function contreValidateursPossibles(
   db: Db,
   roundId: string,
   preparateurId?: string | null,
-): string[] {
-  const { round, beneficiaryMembershipId } = contexteTour(db, roundId)
+): Promise<string[]> {
+  const { round, beneficiaryMembershipId } = await contexteTour(db, roundId)
 
-  const bureau = db
+  const bureau = (await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(and(
       eq(memberships.tontineId, round.tontineId),
       eq(memberships.status, 'active'),
       inArray(memberships.role, ['president', 'auditor']),
-    ))
-    .all()
+    )))
     .map(m => m.userId)
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, beneficiaryMembershipId))
     .limit(1)
-    .all()
 
   const candidats = new Set([...bureau, beneficiaire?.userId ?? null])
   candidats.delete(null)
@@ -125,10 +122,10 @@ export function contreValidateursPossibles(
  * été réellement confirmé. Afficher l'attendu comme s'il était acquis ferait
  * verser au bénéficiaire un montant que la tontine n'a pas.
  */
-export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatVersement {
-  const { round, tontine, beneficiaryMembershipId } = contexteTour(db, roundId)
+export async function etatVersement(db: Db, roundId: string, acteurId?: string): Promise<EtatVersement> {
+  const { round, tontine, beneficiaryMembershipId } = await contexteTour(db, roundId)
 
-  const lignes = db
+  const lignes = await db
     .select({
       contribution: contributions,
       membershipId: memberships.id,
@@ -140,7 +137,6 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
     .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(contributions.roundId, roundId))
-    .all()
 
   const collected = lignes.reduce((n, l) => n + l.contribution.confirmedAmount, 0)
   const missing = lignes
@@ -151,7 +147,7 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
       remaining: l.contribution.expectedAmount - l.contribution.confirmedAmount,
     }))
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({
       userId: memberships.userId,
       managedName: memberships.managedName,
@@ -165,7 +161,6 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.id, beneficiaryMembershipId))
     .limit(1)
-    .all()
 
   // Un numéro changé récemment est le signal d'un détournement par prise de
   // contrôle de compte : on ne bloque pas, on **alerte**, et le bureau vérifie
@@ -175,8 +170,8 @@ export function etatVersement(db: Db, roundId: string, acteurId?: string): EtatV
     && Date.now() - beneficiaire.phoneChangedAt.getTime() < GEL_NUMERO_HEURES * 3_600_000,
   )
 
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
-  const possibles = contreValidateursPossibles(db, roundId, versement?.preparedBy)
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
+  const possibles = await contreValidateursPossibles(db, roundId, versement?.preparedBy)
 
   return {
     roundId,
@@ -223,14 +218,14 @@ export interface PreparationInput {
  * de numéro passé inaperçu. Celui qui prépare doit avoir le bénéficiaire au
  * téléphone ou sous les yeux, pas seulement une ligne dans une liste.
  */
-export function preparerVersement(
+export async function preparerVersement(
   db: Db,
   roundId: string,
   acteurId: string,
   input: PreparationInput,
 ) {
-  const { round } = contexteTour(db, roundId)
-  const etat = etatVersement(db, roundId)
+  const { round } = await contexteTour(db, roundId)
+  const etat = await etatVersement(db, roundId)
 
   if (etat.payout) {
     throw apiError('INVALID_TRANSITION', 'Un versement est déjà préparé pour ce tour.', { field: 'status' })
@@ -271,11 +266,11 @@ export function preparerVersement(
 
   if (round.status === 'collecting') {
     assertTransition('round', round.status, 'payout_pending')
-    db.update(rounds).set({ status: 'payout_pending' }).where(eq(rounds.id, roundId)).run()
+    await db.update(rounds).set({ status: 'payout_pending' }).where(eq(rounds.id, roundId))
   }
 
   const payoutId = randomUUID()
-  db.insert(payouts).values({
+  await db.insert(payouts).values({
     id: payoutId,
     roundId,
     beneficiaryMembershipId: etat.beneficiary.membershipId,
@@ -284,12 +279,12 @@ export function preparerVersement(
     shortfallAmount: etat.shortfall,
     preparedBy: acteurId,
     status: 'prepared',
-  }).run()
+  })
 
   if (etat.shortfall > 0) {
     // Le manquant est écrit au registre, pas masqué : le bénéficiaire touche
     // moins que prévu, et le groupe doit pouvoir le constater.
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId: etat.tontineId,
       roundId,
       type: 'settings_changed',
@@ -324,8 +319,8 @@ export function preparerVersement(
  * numéro est faux, et le seul second acteur disponible quand l'organisateur
  * tient la tontine seul.
  */
-export function contreValiderVersement(db: Db, roundId: string, acteurId: string) {
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+export async function contreValiderVersement(db: Db, roundId: string, acteurId: string) {
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
   if (!versement) throw apiError('NOT_FOUND', 'Aucun versement préparé pour ce tour.')
 
   assertTransition('payout', versement.status, 'counter_validated')
@@ -337,32 +332,31 @@ export function contreValiderVersement(db: Db, roundId: string, acteurId: string
     )
   }
 
-  if (!contreValidateursPossibles(db, roundId, versement.preparedBy).includes(acteurId)) {
+  if (!(await contreValidateursPossibles(db, roundId, versement.preparedBy)).includes(acteurId)) {
     throw apiError(
       'FORBIDDEN',
       'Cette contre-validation est réservée au président, au censeur ou au bénéficiaire du tour.',
     )
   }
 
-  db.update(payouts)
+  await db.update(payouts)
     .set({ status: 'counter_validated', counterValidatedBy: acteurId })
     .where(eq(payouts.id, versement.id))
-    .run()
 
   return { payoutId: versement.id, status: 'counter_validated' as const }
 }
 
 /** Déclare que le pot a été envoyé au bénéficiaire. */
-export function declarerVersement(
+export async function declarerVersement(
   db: Db,
   roundId: string,
   acteurId: string,
   input: { channel: PaymentChannel, providerRef?: string, proofUrl?: string },
 ) {
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
   if (!versement) throw apiError('NOT_FOUND', 'Aucun versement préparé pour ce tour.')
 
-  const etat = etatVersement(db, roundId)
+  const etat = await etatVersement(db, roundId)
 
   // Au-delà du seuil, la contre-validation est un passage obligé : on ne peut
   // pas déclarer directement depuis `prepared`.
@@ -372,7 +366,7 @@ export function declarerVersement(
   // gèlerait le pot pour de bon, et un pot gelé fait plus de dégâts qu'un
   // versement vu par une seule personne. On laisse donc passer, et le registre
   // porte que le contrôle n'a pas eu lieu : le groupe doit pouvoir le lire.
-  const contreValidationImpossible = contreValidateursPossibles(db, roundId, versement.preparedBy).length === 0
+  const contreValidationImpossible = (await contreValidateursPossibles(db, roundId, versement.preparedBy)).length === 0
 
   if (etat.counterValidationRequired && versement.status === 'prepared' && !contreValidationImpossible) {
     throw apiError(
@@ -384,7 +378,7 @@ export function declarerVersement(
 
   assertTransition('payout', versement.status, 'declared')
 
-  db.update(payouts)
+  await db.update(payouts)
     .set({
       status: 'declared',
       declaredBy: acteurId,
@@ -393,9 +387,8 @@ export function declarerVersement(
       proofUrl: input.proofUrl ?? null,
     })
     .where(eq(payouts.id, versement.id))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: etat.tontineId,
     roundId,
     type: 'payout_declared',
@@ -414,7 +407,7 @@ export function declarerVersement(
     },
   })
 
-  notifierTontine(db, etat.tontineId, {
+  await notifierTontine(db, etat.tontineId, {
     type: 'pot_verse',
     title: 'Le pot du tour a été versé',
     body: 'Le versement est déclaré. Le bénéficiaire doit maintenant en accuser réception.',
@@ -431,21 +424,20 @@ export function declarerVersement(
  * trésorier suffirait à clore un tour, ce qui reviendrait à lui demander de se
  * délivrer un quitus à lui-même. **Le tour ne se clôt pas sans cet accusé.**
  */
-export function accuserReception(
+export async function accuserReception(
   db: Db,
   roundId: string,
   acteurId: string,
   receivedAmount: number,
 ) {
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
   if (!versement) throw apiError('NOT_FOUND', 'Aucun versement pour ce tour.')
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, versement.beneficiaryMembershipId))
     .limit(1)
-    .all()
 
   if (!beneficiaire?.userId || beneficiaire.userId !== acteurId) {
     throw apiError(
@@ -457,16 +449,15 @@ export function accuserReception(
   assertTransition('payout', versement.status, 'acknowledged')
 
   const maintenant = new Date()
-  db.update(payouts)
+  await db.update(payouts)
     .set({ status: 'acknowledged', acknowledgedAt: maintenant })
     .where(eq(payouts.id, versement.id))
-    .run()
 
-  const { round } = contexteTour(db, roundId)
+  const { round } = await contexteTour(db, roundId)
   assertTransition('round', round.status, 'closed')
-  db.update(rounds).set({ status: 'closed', closedAt: maintenant }).where(eq(rounds.id, roundId)).run()
+  await db.update(rounds).set({ status: 'closed', closedAt: maintenant }).where(eq(rounds.id, roundId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: round.tontineId,
     roundId,
     type: 'payout_acknowledged',
@@ -480,15 +471,14 @@ export function accuserReception(
     },
   })
 
-  const [president] = db
+  const [president] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(and(eq(memberships.tontineId, round.tontineId), eq(memberships.role, 'president')))
     .limit(1)
-    .all()
 
   if (president?.userId) {
-    notifier(db, president.userId, {
+    await notifier(db, president.userId, {
       type: 'pot_recu',
       tontineId: round.tontineId,
       title: 'Le pot a bien été reçu',
@@ -500,7 +490,7 @@ export function accuserReception(
   // Dernier tour du cycle : la tontine s'achève avec lui. Après l'écriture du
   // tour, jamais avant — le registre se lit dans l'ordre où les choses se sont
   // produites, et la fin du cycle vient après la fin du dernier tour.
-  const tontineClose = cloturerSiDernierTour(db, round.tontineId, acteurId)
+  const tontineClose = await cloturerSiDernierTour(db, round.tontineId, acteurId)
 
   return {
     payoutId: versement.id,
@@ -531,7 +521,7 @@ export function accuserReception(
  * le registre porte le motif, l'auteur, et si le bénéficiaire avait seulement
  * les moyens de le faire. La règle tient, l'exception est tracée.
  */
-export function cloturerTourSansAccuse(
+export async function cloturerTourSansAccuse(
   db: Db,
   roundId: string,
   acteurId: string,
@@ -545,8 +535,8 @@ export function cloturerTourSansAccuse(
     )
   }
 
-  const { round } = contexteTour(db, roundId)
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+  const { round } = await contexteTour(db, roundId)
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
 
   if (!versement || versement.status !== 'declared') {
     // Clore avant que le pot soit parti n'est pas une exception, c'est une
@@ -560,17 +550,16 @@ export function cloturerTourSansAccuse(
 
   assertTransition('round', round.status, 'closed')
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, versement.beneficiaryMembershipId))
     .limit(1)
-    .all()
 
   const maintenant = new Date()
-  db.update(rounds).set({ status: 'closed', closedAt: maintenant }).where(eq(rounds.id, roundId)).run()
+  await db.update(rounds).set({ status: 'closed', closedAt: maintenant }).where(eq(rounds.id, roundId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: round.tontineId,
     roundId,
     type: 'settings_changed',
@@ -587,7 +576,7 @@ export function cloturerTourSansAccuse(
     },
   })
 
-  notifierTontine(db, round.tontineId, {
+  await notifierTontine(db, round.tontineId, {
     type: 'tour_clos',
     title: 'Le tour a été clos par le président',
     body: 'Le tour est clos sans accusé de réception. Le motif est inscrit au registre.',
@@ -595,7 +584,7 @@ export function cloturerTourSansAccuse(
   })
 
   // Un tour forcé reste un tour clos : si c'était le dernier, le cycle est fini.
-  const tontineClose = cloturerSiDernierTour(db, round.tontineId, acteurId)
+  const tontineClose = await cloturerSiDernierTour(db, round.tontineId, acteurId)
 
   return {
     roundId,

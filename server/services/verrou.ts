@@ -85,14 +85,14 @@ export function verifierCodeVerrou(user: User, pin: string, maintenant = Date.no
  * dehors pour de bon. Se reconnecter par SMS prouve qu'on tient la SIM, et ce
  * temps-là, le retrait du code n'exige plus l'ancien.
  */
-export function sessionFraiche(db: Db, sessionId: string | undefined, maintenant = Date.now()): boolean {
+export async function sessionFraiche(db: Db, sessionId: string | undefined, maintenant = Date.now()): Promise<boolean> {
   if (!sessionId) return false
-  const [s] = db.select({ createdAt: sessions.createdAt }).from(sessions).where(eq(sessions.id, sessionId)).limit(1).all()
+  const [s] = await db.select({ createdAt: sessions.createdAt }).from(sessions).where(eq(sessions.id, sessionId)).limit(1)
   return Boolean(s && maintenant - s.createdAt.getTime() < SESSION_FRAICHE_MS)
 }
 
 /** Retire le code de verrouillage. */
-export function retirerCodeVerrou(db: Db, userId: string): void {
-  db.update(users).set({ pinHash: null }).where(eq(users.id, userId)).run()
+export async function retirerCodeVerrou(db: Db, userId: string): Promise<void> {
+  await db.update(users).set({ pinHash: null }).where(eq(users.id, userId))
   compteurs.delete(userId)
 }

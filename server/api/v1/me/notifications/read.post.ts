@@ -14,5 +14,5 @@ export default defineEventHandler(async (event) => {
   const parsed = lectureInput.safeParse((await readBody(event)) ?? {})
   if (!parsed.success) throw validationError(parsed.error)
 
-  return { lues: marquerLues(useDb(), user.id, parsed.data.ids) }
+  return { lues: await marquerLues(useDb(), user.id, parsed.data.ids) }
 })

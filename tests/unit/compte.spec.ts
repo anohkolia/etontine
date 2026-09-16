@@ -12,14 +12,14 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const U = 'b0000000-0000-4000-8000-000000000001'
 const AUTRE = 'b0000000-0000-4000-8000-000000000002'
 const T = 'b0000000-0000-4000-8000-000000000010'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
@@ -51,7 +51,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'collecting',
     })
 
-    const blocages = blocagesSuppression(db, U)
+    const blocages = await blocagesSuppression(db, U)
 
     expect(blocages).toHaveLength(1)
     expect(blocages[0]).toMatchObject({ tontineName: 'Tontine des tantines', roundIndex: 1 })
@@ -66,7 +66,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'payout_pending',
     })
 
-    expect(blocagesSuppression(db, U)[0]!.raison).toContain('versé')
+    expect((await blocagesSuppression(db, U))[0]!.raison).toContain('versé')
   })
 
   it('bloque un membre qui n’a pas encore pris la main', async () => {
@@ -77,7 +77,7 @@ describe('suppression de compte — acceptation T08', () => {
     })
 
     // Partir maintenant, c'est avoir cotisé pour rien.
-    expect(blocagesSuppression(db, U)[0]!.raison).toContain('pas encore pris la main')
+    expect((await blocagesSuppression(db, U))[0]!.raison).toContain('pas encore pris la main')
   })
 
   it('ne bloque rien quand tout est clos', async () => {
@@ -87,7 +87,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'closed',
     })
 
-    expect(blocagesSuppression(db, U)).toEqual([])
+    expect(await blocagesSuppression(db, U)).toEqual([])
   })
 
   it('ne bloque pas pour la tontine d’un autre membre', async () => {
@@ -97,7 +97,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partB, expectedAmount: 50_000, status: 'collecting',
     })
 
-    expect(blocagesSuppression(db, U)).toEqual([])
+    expect(await blocagesSuppression(db, U)).toEqual([])
   })
 })
 
@@ -114,7 +114,7 @@ describe('export des données personnelles', () => {
       { id: 'c2', roundId: 'r1', shareId: 'ms-b-s', membershipId: 'ms-b', expectedAmount: 25_000, dueDate: '2026-02-01' },
     ])
 
-    const donnees = exporterDonnees(db, U)
+    const donnees = await exporterDonnees(db, U)
     const texte = JSON.stringify(donnees)
 
     expect(donnees.cotisations).toHaveLength(1)
@@ -125,7 +125,7 @@ describe('export des données personnelles', () => {
   })
 
   it('contient les deux consentements séparément', async () => {
-    const donnees = exporterDonnees(db, U)
+    const donnees = await exporterDonnees(db, U)
     expect(donnees.profil).toHaveProperty('consentDataAt')
     expect(donnees.profil).toHaveProperty('consentNotificationsAt')
   })
@@ -165,21 +165,21 @@ describe('changement de numéro', () => {
     await db.insert(memberships).values({ id: 'ms-u2', tontineId: T2, userId: U, status: 'active', role: 'president' })
   }
 
-  it('refuse le numéro actuel, et un numéro déjà pris', () => {
-    expect(() => demanderChangementNumero(db, U, '+2250707000001')).toThrow(
+  it('refuse le numéro actuel, et un numéro déjà pris', async () => {
+    await expect(demanderChangementNumero(db, U, '+2250707000001')).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
-    expect(() => demanderChangementNumero(db, U, '+2250707000002')).toThrow(
+    await expect(demanderChangementNumero(db, U, '+2250707000002')).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
-    expect(() => demanderChangementNumero(db, U, '+2250707009999')).not.toThrow()
+    await demanderChangementNumero(db, U, '+2250707009999')
   })
 
   it('change le numéro et pose la date du changement — le gel de 48 h en découle', async () => {
     await membreAvecBureau()
-    appliquerChangementNumero(db, U, '+2250707009999')
+    await appliquerChangementNumero(db, U, '+2250707009999')
 
-    const [u] = db.select().from(users).where(eq(users.id, U)).all()
+    const [u] = await db.select().from(users).where(eq(users.id, U))
     expect(u!.phone).toBe('+2250707009999')
     expect(u!.phoneChangedAt).toBeInstanceOf(Date)
     expect(Date.now() - u!.phoneChangedAt!.getTime()).toBeLessThan(5_000)
@@ -187,9 +187,9 @@ describe('changement de numéro', () => {
 
   it('l’écrit au registre de chaque tontine active, sans le numéro en clair', async () => {
     await membreAvecBureau()
-    appliquerChangementNumero(db, U, '+2250707009999')
+    await appliquerChangementNumero(db, U, '+2250707009999')
 
-    const ecritures = db.select().from(ledgerEntries).all()
+    const ecritures = (await db.select().from(ledgerEntries))
       .filter(e => (e.payload as { changement?: string }).changement === 'numero_change')
     expect(ecritures.map(e => e.tontineId).sort()).toEqual([T, T2].sort())
     for (const e of ecritures) {
@@ -200,19 +200,19 @@ describe('changement de numéro', () => {
 
   it('prévient le bureau de chaque tontine, sans montant ni numéro', async () => {
     await membreAvecBureau()
-    appliquerChangementNumero(db, U, '+2250707009999')
+    await appliquerChangementNumero(db, U, '+2250707009999')
 
-    const prevenus = db.select().from(notifications).all()
+    const prevenus = await db.select().from(notifications)
     expect(prevenus.map(n => n.userId)).toEqual([AUTRE])
     expect(prevenus[0]!.body).not.toContain('9999')
   })
 
   it('consommer un code ne crée jamais de compte', async () => {
     const { devCode } = await requestOtp(db, '+2250707009999')
-    consommerCode(db, '+2250707009999', devCode!)
-    expect(db.select().from(users).where(eq(users.phone, '+2250707009999')).all()).toHaveLength(0)
+    await consommerCode(db, '+2250707009999', devCode!)
+    expect(await db.select().from(users).where(eq(users.phone, '+2250707009999'))).toHaveLength(0)
     // Et il ne se consomme qu'une fois.
-    expect(() => consommerCode(db, '+2250707009999', devCode!)).toThrow(
+    await expect(consommerCode(db, '+2250707009999', devCode!)).rejects.toThrow(
       expect.objectContaining({ statusCode: 422 }),
     )
   })

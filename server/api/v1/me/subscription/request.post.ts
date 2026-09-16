@@ -27,6 +27,6 @@ export default defineEventHandler(async (event) => {
   const parsed = subscriptionRequestInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return withIdempotency(event, user.id, parsed.data, () =>
-    creerDemande(useDb(), user.id, parsed.data))
+  return await withIdempotency(event, user.id, parsed.data, async () =>
+    await creerDemande(useDb(), user.id, parsed.data))
 })

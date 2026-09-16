@@ -24,7 +24,7 @@ export const MEMBRES_MINIMUM = 3
  * premier onglet fermé — et à faire du client la source de vérité sur des
  * réglages financiers, ce que la règle 12 interdit.
  */
-export function creerBrouillon(db: Db, userId: string, input: {
+export async function creerBrouillon(db: Db, userId: string, input: {
   name: string
   description?: string
   avatarUrl?: string
@@ -34,7 +34,7 @@ export function creerBrouillon(db: Db, userId: string, input: {
 }) {
   const id = randomUUID()
 
-  db.insert(tontines).values({
+  await db.insert(tontines).values({
     id,
     name: input.name,
     description: input.description ?? null,
@@ -49,31 +49,31 @@ export function creerBrouillon(db: Db, userId: string, input: {
     startDate: new Date().toISOString().slice(0, 10),
     status: 'draft',
     createdBy: userId,
-  }).run()
+  })
 
   // Le créateur est président de sa tontine. Le rôle est par tontine.
   const membershipId = randomUUID()
-  db.insert(memberships).values({
+  await db.insert(memberships).values({
     id: membershipId,
     tontineId: id,
     userId,
     role: 'president',
     status: 'active',
     joinedAt: new Date(),
-  }).run()
+  })
 
   // Et il reçoit une part : l'organisateur d'une tontine y participe. Sans
   // cela il serait membre sans jamais cotiser ni prendre la main, le pot
   // attendu serait sous-évalué, et la phrase d'engagement annoncerait un
   // cycle plus court que la réalité. Il pourra en prendre une seconde.
-  attribuerParts(db, id, membershipId, 1)
+  await attribuerParts(db, id, membershipId, 1)
 
   return id
 }
 
 /** Met à jour un brouillon. Les réglages financiers se figent au démarrage. */
-export function majTontine(db: Db, tontineId: string, modifications: Record<string, unknown>) {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function majTontine(db: Db, tontineId: string, modifications: Record<string, unknown>) {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   if (tontine.status === 'running') {
@@ -93,7 +93,7 @@ export function majTontine(db: Db, tontineId: string, modifications: Record<stri
     }
   }
 
-  db.update(tontines).set(modifications).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set(modifications).where(eq(tontines.id, tontineId))
 }
 
 /**
@@ -107,19 +107,18 @@ export function majTontine(db: Db, tontineId: string, modifications: Record<stri
  * sautaient en silence. La règle était écrite, testée sur `rattacherCanal`, et
  * inatteignable par le seul chemin qui existe : l'écran de réglages.
  */
-export function definirCanaux(db: Db, tontineId: string, channelIds: string[], acteurId: string) {
-  const actuels = db
+export async function definirCanaux(db: Db, tontineId: string, channelIds: string[], acteurId: string) {
+  const actuels = await db
     .select()
     .from(tontineChannels)
     .where(eq(tontineChannels.tontineId, tontineId))
-    .all()
 
   const dejaLa = new Set(actuels.map(c => c.channelId))
 
   for (const channelId of channelIds) {
     // Re-poser un canal déjà rattaché heurterait la clé primaire, et surtout
     // remettrait un gel de 48 h sur un numéro qui n'a pas bougé.
-    if (!dejaLa.has(channelId)) rattacherCanal(db, tontineId, channelId, acteurId)
+    if (!dejaLa.has(channelId)) await rattacherCanal(db, tontineId, channelId, acteurId)
   }
 
   const aRetirer = actuels
@@ -127,12 +126,11 @@ export function definirCanaux(db: Db, tontineId: string, channelIds: string[], a
     .map(c => c.channelId)
 
   if (aRetirer.length > 0) {
-    db.delete(tontineChannels)
+    await db.delete(tontineChannels)
       .where(and(
         eq(tontineChannels.tontineId, tontineId),
         inArray(tontineChannels.channelId, aRetirer),
       ))
-      .run()
   }
 }
 
@@ -147,8 +145,8 @@ export interface BlocagePublication {
  * Renvoyer la liste plutôt qu'un simple refus : l'organisateur voit d'un coup
  * ce qu'il lui reste à faire, au lieu de découvrir les manques un par un.
  */
-export function blocagesPublication(db: Db, tontineId: string): BlocagePublication[] {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function blocagesPublication(db: Db, tontineId: string): Promise<BlocagePublication[]> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const blocages: BlocagePublication[] = []
@@ -157,7 +155,7 @@ export function blocagesPublication(db: Db, tontineId: string): BlocagePublicati
     blocages.push({ champ: 'shareAmount', message: 'Le montant d’une part n’est pas défini.' })
   }
 
-  if (canauxDeTontine(db, tontineId).length === 0) {
+  if ((await canauxDeTontine(db, tontineId)).length === 0) {
     blocages.push({
       champ: 'collectionChannelIds',
       message: 'Aucun numéro de collecte vérifié n’est rattaché.',
@@ -168,27 +166,26 @@ export function blocagesPublication(db: Db, tontineId: string): BlocagePublicati
 }
 
 /** `draft → open`. Exige un canal vérifié, un montant et une fréquence. */
-export function publier(db: Db, tontineId: string) {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function publier(db: Db, tontineId: string) {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   assertTransition('tontine', tontine.status, 'open')
 
-  const blocages = blocagesPublication(db, tontineId)
+  const blocages = await blocagesPublication(db, tontineId)
   if (blocages.length > 0) {
     throw apiError('FORBIDDEN', blocages[0]!.message, { field: blocages[0]!.champ })
   }
 
-  db.update(tontines).set({ status: 'open' }).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set({ status: 'open' }).where(eq(tontines.id, tontineId))
 }
 
 /** Le nombre total de parts d'une tontine — la base de tous les calculs de pot. */
-export function totalParts(db: Db, tontineId: string): number {
-  const [ligne] = db
+export async function totalParts(db: Db, tontineId: string): Promise<number> {
+  const [ligne] = await db
     .select({ n: count() })
     .from(shares)
     .where(eq(shares.tontineId, tontineId))
-    .all()
 
   return ligne?.n ?? 0
 }
@@ -200,16 +197,16 @@ export function totalParts(db: Db, tontineId: string): number {
  * ivoirienne, celui qui prend la main cotise aussi, et le net lui revient au
  * versement. L'exclure fausserait le pot de tout le monde.
  */
-export function potAttendu(db: Db, tontineId: string): number {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function potAttendu(db: Db, tontineId: string): Promise<number> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
-  return tontine.shareAmount * totalParts(db, tontineId)
+  return tontine.shareAmount * (await totalParts(db, tontineId))
 }
 
 /** Les tontines d'un utilisateur, avec son rôle — assez pour peindre le tableau de bord. */
-export function mesTontines(db: Db, userId: string) {
-  return db
+export async function mesTontines(db: Db, userId: string) {
+  return await db
     .select({
       id: tontines.id,
       name: tontines.name,
@@ -227,29 +224,26 @@ export function mesTontines(db: Db, userId: string) {
       eq(memberships.userId, userId),
       inArray(memberships.status, ['active', 'pending_approval', 'invited']),
     ))
-    .all()
 }
 
 /** Compte les membres actifs — sert au contrôle de démarrage. */
-export function membresActifs(db: Db, tontineId: string): number {
-  const [ligne] = db
+export async function membresActifs(db: Db, tontineId: string): Promise<number> {
+  const [ligne] = await db
     .select({ n: count() })
     .from(memberships)
     .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active')))
-    .all()
 
   return ligne?.n ?? 0
 }
 
 /** Le tour courant : le premier qui n'est pas clos. */
-export function tourCourant(db: Db, tontineId: string) {
-  const [tour] = db
+export async function tourCourant(db: Db, tontineId: string) {
+  const [tour] = await db
     .select()
     .from(rounds)
     .where(and(eq(rounds.tontineId, tontineId), inArray(rounds.status, ['collecting', 'payout_pending'])))
     .orderBy(rounds.index)
     .limit(1)
-    .all()
 
   return tour ?? null
 }
@@ -267,8 +261,8 @@ export function tourCourant(db: Db, tontineId: string) {
  * cours ne s'annule pas : elle va au bout de son cycle, la table d'états le
  * garantit.
  */
-export function annulerTontine(db: Db, tontineId: string, acteurId: string, motif: string) {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function annulerTontine(db: Db, tontineId: string, acteurId: string, motif: string) {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   if (tontine.status === 'draft') {
@@ -280,9 +274,9 @@ export function annulerTontine(db: Db, tontineId: string, acteurId: string, moti
     throw apiError('INVALID_TRANSITION', 'Seule une tontine publiée et non démarrée peut être annulée.', { field: 'status' })
   }
 
-  db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
@@ -291,7 +285,7 @@ export function annulerTontine(db: Db, tontineId: string, acteurId: string, moti
 
   // Le nom de la tontine n'entre pas dans le texte : un nom peut contenir un
   // nombre, et la garde de la règle 21 le prendrait pour un montant.
-  notifierTontine(db, tontineId, {
+  await notifierTontine(db, tontineId, {
     type: 'tontine_annulee',
     title: 'Tontine annulée',
     body: 'Une tontine que tu avais rejointe a été annulée avant son démarrage. Rien n’était dû.',
@@ -306,8 +300,8 @@ export function annulerTontine(db: Db, tontineId: string, acteurId: string, moti
  * bord — pas du registre, qui reste lisible et exportable — pour que la liste
  * ne s'allonge pas d'année en année. Le geste est du président, et il s'écrit.
  */
-export function archiverTontine(db: Db, tontineId: string, acteurId: string) {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function archiverTontine(db: Db, tontineId: string, acteurId: string) {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   if (tontine.status !== 'closed') {
@@ -315,9 +309,9 @@ export function archiverTontine(db: Db, tontineId: string, acteurId: string) {
   }
   assertTransition('tontine', tontine.status, 'archived')
 
-  db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set({ status: 'archived' }).where(eq(tontines.id, tontineId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
@@ -336,8 +330,8 @@ export function archiverTontine(db: Db, tontineId: string, acteurId: string) {
  * Tout autre état est refusé : dès qu'une tontine est publiée, d'autres
  * personnes la voient, et sa fin doit s'écrire — c'est `annulerTontine`.
  */
-export function supprimerBrouillon(db: Db, tontineId: string) {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function supprimerBrouillon(db: Db, tontineId: string) {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   if (tontine.status !== 'draft') {
@@ -348,5 +342,5 @@ export function supprimerBrouillon(db: Db, tontineId: string) {
     )
   }
 
-  db.delete(tontines).where(eq(tontines.id, tontineId)).run()
+  await db.delete(tontines).where(eq(tontines.id, tontineId))
 }

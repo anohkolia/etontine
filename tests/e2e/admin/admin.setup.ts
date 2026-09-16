@@ -23,7 +23,7 @@ setup('prépare la session d’administration', async ({ page, baseURL }) => {
   // `NUXT_ADMIN_PHONES` est transmis au serveur par `playwright.config.ts` ;
   // le processus de test le lit ici pour viser le même numéro.
   process.env.NUXT_ADMIN_PHONES ??= '+2250500000001'
-  creerComptesAdministrateurs()
+  await creerComptesAdministrateurs()
 
   const numero = '0500000001'
   const e164 = '+2250500000001'
@@ -33,7 +33,7 @@ setup('prépare la session d’administration', async ({ page, baseURL }) => {
   // serveur : c'est une garde de production, on ne la désactive pas. On nettoie
   // seulement l'état que les tests ont eux-mêmes produit, comme on remet une
   // base à zéro entre deux exécutions.
-  useDb().delete(otpRequests).where(eq(otpRequests.phone, e164)).run()
+  await useDb().delete(otpRequests).where(eq(otpRequests.phone, e164))
 
   const demande = await page.request.post(`${baseURL}/api/auth/request`, {
     data: { phone: numero },

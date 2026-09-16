@@ -1,33 +1,54 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import Database from 'better-sqlite3'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { PGlite } from '@electric-sql/pglite'
+import { drizzle } from 'drizzle-orm/pglite'
+import { migrate } from 'drizzle-orm/pglite/migrator'
+import type { Db } from '../../server/db/index.ts'
 import * as schema from '../../server/db/schema.ts'
 import { MIGRATIONS_DIR } from '../../server/db/migrator.ts'
 
-export type TestDb = ReturnType<typeof drizzle<typeof schema>>
+export type TestDb = Db
 
 /**
- * Base éphémère, migrée, pour un test. Sur disque plutôt qu'en mémoire : c'est
- * le même moteur, les mêmes contraintes de clés étrangères et les mêmes
- * comportements de transaction qu'en production.
+ * Base éphémère, migrée, pour un test : **Postgres en mémoire** (PGlite).
+ *
+ * Le même moteur qu'en production — Supabase est un Postgres —, les mêmes
+ * migrations, les mêmes contraintes de clés étrangères et de transaction, sans
+ * rien à lancer à côté. Chaque test part d'une base vide : un test qui en
+ * salit un autre ne peut pas exister.
+ *
+ * Le schéma est migré une fois, puis **copié** : PGlite met ~1 s à démarrer,
+ * une base neuve par test serait insupportable. On garde une instance par
+ * fichier de test et l'on vide les tables entre deux — c'est ce que fait
+ * `cleanup`.
  */
-export function createTestDb(): { db: TestDb, sqlite: Database.Database, cleanup: () => void } {
-  const dossier = mkdtempSync(join(tmpdir(), 'tontine-test-'))
-  const sqlite = new Database(join(dossier, 'test.sqlite'))
-  sqlite.pragma('foreign_keys = ON')
+let partagee: { pg: PGlite, db: Db } | null = null
 
-  const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: MIGRATIONS_DIR })
+async function instance(): Promise<{ pg: PGlite, db: Db }> {
+  if (!partagee) {
+    const pg = await PGlite.create()
+    const db = drizzle(pg, { schema }) as unknown as Db
+    await migrate(db as never, { migrationsFolder: MIGRATIONS_DIR })
+    partagee = { pg, db }
+  }
+  return partagee
+}
 
+/** Les tables applicatives, dans l'ordre : on les vide toutes d'un coup. */
+async function viderTables(pg: PGlite): Promise<void> {
+  const { rows } = await pg.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
+  )
+  const noms = rows.map(r => `"${r.table_name}"`)
+  if (noms.length > 0) await pg.exec(`TRUNCATE TABLE ${noms.join(', ')} RESTART IDENTITY CASCADE`)
+}
+
+export async function createTestDb(): Promise<{ db: TestDb, pg: PGlite, cleanup: () => Promise<void> }> {
+  const { pg, db } = await instance()
+  await viderTables(pg)
   return {
     db,
-    sqlite,
-    cleanup: () => {
-      sqlite.close()
-      rmSync(dossier, { recursive: true, force: true })
+    pg,
+    cleanup: async () => {
+      await viderTables(pg)
     },
   }
 }

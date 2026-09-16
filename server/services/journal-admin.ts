@@ -21,14 +21,14 @@ export interface Administrateur {
  * Le journal est **append-only**, comme le registre : ni mise à jour ni
  * suppression.
  */
-export function journaliser(
+export async function journaliser(
   db: Db,
   admin: Administrateur,
   action: string,
   targetUserId: string | null,
   payload: Record<string, unknown>,
-): void {
-  db.insert(adminAudit).values({
+): Promise<void> {
+  await db.insert(adminAudit).values({
     id: randomUUID(),
     actorId: admin.id,
     // Le numéro est figé au moment de l'écriture : si l'administrateur change
@@ -37,5 +37,5 @@ export function journaliser(
     action,
     targetUserId,
     payload,
-  }).run()
+  })
 }

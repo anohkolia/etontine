@@ -63,13 +63,13 @@ export default defineEventHandler(async (event) => {
 
   const approbationImmediate = !isProduction()
 
-  useDb().update(users).set({
+  await useDb().update(users).set({
     kycDocumentUrl: parsed.data.documentUrl,
     kycSelfieUrl: parsed.data.selfieUrl,
     kycSubmittedAt: new Date(),
     kycStatus: approbationImmediate ? 'approved' : 'pending_review',
     ...(approbationImmediate && user.kycLevel < 2 ? { kycLevel: 2 } : {}),
-  }).where(eq(users.id, user.id)).run()
+  }).where(eq(users.id, user.id))
 
   return {
     status: approbationImmediate ? 'approved' as const : 'pending_review' as const,

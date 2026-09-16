@@ -5,10 +5,10 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   await createTestUser(db, 'u1', '+2250707000001')
@@ -68,7 +68,7 @@ describe('idempotence — acceptation T05', () => {
     // Réutiliser une clé pour autre chose n'est pas un rejeu, c'est un bug
     // d'appelant : on refuse au lieu de renvoyer la réponse d'une autre opération.
     await expect(
-      runIdempotent(db, { ...params, body: { name: 'Autre' } }, creerTontine('quatre')),
+      await runIdempotent(db, { ...params, body: { name: 'Autre' } }, creerTontine('quatre')),
     ).rejects.toMatchObject({
       statusCode: 409,
       data: { error: { code: 'IDEMPOTENCY_CONFLICT' } },

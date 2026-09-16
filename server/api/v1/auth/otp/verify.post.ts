@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 
   await createSession(event, userId)
 
-  const [user] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   return {
     isNewUser,
     user: {

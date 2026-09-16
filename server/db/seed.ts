@@ -77,7 +77,7 @@ function jour(decalage: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-function nettoyer() {
+async function nettoyer() {
   // Le nettoyage vise le **numéro de téléphone**, pas l'identifiant : le
   // numéro est la clé métier stable, alors qu'un identifiant de seed peut
   // changer. Nettoyer par identifiant laisserait des utilisateurs orphelins
@@ -85,47 +85,46 @@ function nettoyer() {
   // ce qui est exactement arrivé la première fois.
   const telephones = MEMBRES.map(m => m.phone)
 
-  const anciens = db
+  const anciens = await db
     .select({ id: t.users.id })
     .from(t.users)
     .where(inArray(t.users.phone, telephones))
-    .all()
 
   // L'effacement part des tontines : le reste suit en cascade.
-  db.delete(t.tontines).where(eq(t.tontines.id, ID.tontine)).run()
+  await db.delete(t.tontines).where(eq(t.tontines.id, ID.tontine))
   for (const u of anciens) {
-    db.delete(t.tontines).where(eq(t.tontines.createdBy, u.id)).run()
+    await db.delete(t.tontines).where(eq(t.tontines.createdBy, u.id))
   }
-  db.delete(t.users).where(inArray(t.users.phone, telephones)).run()
+  await db.delete(t.users).where(inArray(t.users.phone, telephones))
 }
 
-function semer() {
+async function semer() {
   const maintenant = new Date()
 
   for (const m of MEMBRES) {
     // Le membre géré n'a pas encore de compte : on ne crée son utilisateur que
     // s'il en a un. C'est le cas réel à traiter en T12.
     if (m.gere) continue
-    db.insert(t.users).values({
+    await db.insert(t.users).values({
       id: m.id,
       phone: m.phone,
       firstName: m.firstName,
       lastName: m.lastName,
       kycLevel: m.role === 'president' ? 2 : 1,
       createdAt: maintenant,
-    }).run()
+    })
   }
 
-  db.insert(t.collectionChannels).values({
+  await db.insert(t.collectionChannels).values({
     id: ID.channel,
     userId: ID.users[0],
     provider: 'wave',
     msisdn: '+2250707000001',
     holderName: 'Aya Koné',
     verifiedAt: maintenant,
-  }).run()
+  })
 
-  db.insert(t.tontines).values({
+  await db.insert(t.tontines).values({
     id: ID.tontine,
     name: 'Tontine des tantines',
     description: 'Tontine mensuelle du quartier.',
@@ -143,12 +142,12 @@ function semer() {
     status: 'running',
     createdBy: ID.users[0],
     rotationFrozenAt: maintenant,
-  }).run()
+  })
 
-  db.insert(t.tontineChannels).values({
+  await db.insert(t.tontineChannels).values({
     tontineId: ID.tontine,
     channelId: ID.channel,
-  }).run()
+  })
 
   // Memberships, puis parts. Une part = une position dans la rotation.
   let position = 1
@@ -156,7 +155,7 @@ function semer() {
 
   for (const m of MEMBRES) {
     const membershipId = derive('a', MEMBRES.indexOf(m), 0)
-    db.insert(t.memberships).values({
+    await db.insert(t.memberships).values({
       id: membershipId,
       tontineId: ID.tontine,
       userId: m.gere ? null : m.id,
@@ -165,17 +164,17 @@ function semer() {
       role: m.role,
       status: 'active',
       joinedAt: maintenant,
-    }).run()
+    })
 
     const shareIds: string[] = []
     for (let i = 0; i < m.parts; i++) {
       const shareId = derive('b', MEMBRES.indexOf(m), i)
-      db.insert(t.shares).values({
+      await db.insert(t.shares).values({
         id: shareId,
         tontineId: ID.tontine,
         membershipId,
         rotationPosition: position++,
-      }).run()
+      })
       shareIds.push(shareId)
     }
     partsParMembre.push({ membershipId, shareIds, nom: `${m.firstName} ${m.lastName}` })
@@ -201,7 +200,7 @@ function semer() {
     const roundId = derive('c', tour.index, 0)
     const beneficiaire = toutesLesParts[tour.index - 1]!
 
-    db.insert(t.rounds).values({
+    await db.insert(t.rounds).values({
       id: roundId,
       tontineId: ID.tontine,
       index: tour.index,
@@ -210,12 +209,12 @@ function semer() {
       expectedAmount: POT_ATTENDU,
       status: tour.statut,
       closedAt: tour.statut === 'closed' ? maintenant : null,
-    }).run()
+    })
 
-    toutesLesParts.forEach((part, i) => {
+    toutesLesParts.forEach(async (part, i) => {
       // Le bénéficiaire du tour cotise **aussi** : ne pas l'exclure.
       const statut = statutDeCotisation(tour.statut, i)
-      db.insert(t.contributions).values({
+      await db.insert(t.contributions).values({
         id: derive('d', tour.index, i),
         roundId,
         shareId: part.shareId,
@@ -224,11 +223,11 @@ function semer() {
         confirmedAmount: statut === 'confirmed' ? MONTANT_PART : 0,
         status: statut,
         dueDate: tour.echeance,
-      }).run()
+      })
     })
 
     if (tour.statut === 'closed') {
-      db.insert(t.payouts).values({
+      await db.insert(t.payouts).values({
         id: derive('e', tour.index, 0),
         roundId,
         beneficiaryMembershipId: beneficiaire.membershipId,
@@ -239,7 +238,7 @@ function semer() {
         declaredBy: ID.users[1],
         acknowledgedAt: maintenant,
         status: 'acknowledged',
-      }).run()
+      })
     }
   }
 }
@@ -254,8 +253,8 @@ function statutDeCotisation(statutTour: 'closed' | 'collecting' | 'pending', i: 
   return grille[i] ?? 'due'
 }
 
-nettoyer()
-semer()
+await nettoyer()
+await semer()
 
 console.log(
   `Seed posé : « Tontine des tantines » — ${MEMBRES.length} membres, `

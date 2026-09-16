@@ -54,10 +54,10 @@ function verifierAbsenceDeMontant(input: NotificationInput): void {
 }
 
 /** Notifie un utilisateur. */
-export function notifier(db: Db, userId: string, input: NotificationInput): void {
+export async function notifier(db: Db, userId: string, input: NotificationInput): Promise<void> {
   verifierAbsenceDeMontant(input)
 
-  db.insert(notifications).values({
+  await db.insert(notifications).values({
     id: randomUUID(),
     userId,
     tontineId: input.tontineId ?? null,
@@ -65,7 +65,7 @@ export function notifier(db: Db, userId: string, input: NotificationInput): void
     title: input.title,
     body: input.body,
     url: input.url ?? null,
-  }).run()
+  })
 }
 
 /**
@@ -75,13 +75,13 @@ export function notifier(db: Db, userId: string, input: NotificationInput): void
  * compte à notifier. Ils sont joints par SMS, hors périmètre MVP ; les ignorer
  * ici est délibéré, pas un oubli.
  */
-export function notifierTontine(
+export async function notifierTontine(
   db: Db,
   tontineId: string,
   input: NotificationInput,
   options: { sauf?: string[] } = {},
-): number {
-  const destinataires = db
+): Promise<number> {
+  const destinataires = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
@@ -90,24 +90,22 @@ export function notifierTontine(
       eq(memberships.status, 'active'),
       isNotNull(memberships.userId),
     ))
-    .all()
 
   let envoyees = 0
   for (const d of destinataires) {
     if (!d.userId || options.sauf?.includes(d.userId)) continue
-    notifier(db, d.userId, { ...input, tontineId })
+    await notifier(db, d.userId, { ...input, tontineId })
     envoyees++
   }
   return envoyees
 }
 
 /** Notifications non lues d'un utilisateur. */
-export function notificationsNonLues(db: Db, userId: string) {
-  return db
+export async function notificationsNonLues(db: Db, userId: string) {
+  return await db
     .select()
     .from(notifications)
     .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
-    .all()
 }
 
 /**
@@ -120,7 +118,7 @@ export function notificationsNonLues(db: Db, userId: string) {
  * porte la bannière jusqu'au système ; quelqu'un qui l'a ratée, ou dont le
  * navigateur n'en reçoit pas, n'avait aucun recours.
  */
-export function mesNotifications(
+export async function mesNotifications(
   db: Db,
   userId: string,
   options: { limit?: number, cursor?: number } = {},
@@ -132,13 +130,12 @@ export function mesNotifications(
     conditions.push(lt(notifications.createdAt, new Date(options.cursor)))
   }
 
-  const lignes = db
+  const lignes = await db
     .select()
     .from(notifications)
     .where(and(...conditions))
     .orderBy(desc(notifications.createdAt))
     .limit(limite + 1)
-    .all()
 
   const items = lignes.slice(0, limite)
 
@@ -148,7 +145,7 @@ export function mesNotifications(
       ? String(items.at(-1)?.createdAt.getTime() ?? '')
       : null,
     /** Le compteur porte sur **tout**, pas sur la page rendue. */
-    unread: notificationsNonLues(db, userId).length,
+    unread: (await notificationsNonLues(db, userId)).length,
   }
 }
 
@@ -159,22 +156,20 @@ export function mesNotifications(
  * on a vu. Avec, seulement celles-là, et toujours restreintes à leur
  * destinataire : personne ne marque lues les notifications d'un autre.
  */
-export function marquerLues(db: Db, userId: string, ids?: string[]): number {
+export async function marquerLues(db: Db, userId: string, ids?: string[]): Promise<number> {
   const conditions = [eq(notifications.userId, userId), isNull(notifications.readAt)]
   if (ids?.length) conditions.push(inArray(notifications.id, ids))
 
-  const concernees = db
+  const concernees = await db
     .select({ id: notifications.id })
     .from(notifications)
     .where(and(...conditions))
-    .all()
 
   if (concernees.length === 0) return 0
 
-  db.update(notifications)
+  await db.update(notifications)
     .set({ readAt: new Date() })
     .where(inArray(notifications.id, concernees.map(n => n.id)))
-    .run()
 
   return concernees.length
 }

@@ -141,7 +141,7 @@ test('une tontine terminée est rangée à part, puis archivée', async ({ page 
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ], { nom: 'Tontine finie' })
   await page.request.post(`/api/v1/tontines/${id}/start`)
-  terminerTontine(id)
+  await terminerTontine(id)
 
   await page.goto('/app')
   await waitForHydration(page)

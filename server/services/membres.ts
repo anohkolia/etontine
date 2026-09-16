@@ -18,14 +18,14 @@ type Db = ReturnType<typeof useDb>
  * ligne, et le bureau saisit le groupe tel quel. Le membre reçoit ensuite un
  * SMS de confirmation ; jusque-là, `user_id` reste nul.
  */
-export function ajouterMembreGere(db: Db, tontineId: string, input: {
+export async function ajouterMembreGere(db: Db, tontineId: string, input: {
   name: string
   phone: string
   shares: number
 }) {
   const membershipId = randomUUID()
 
-  db.insert(memberships).values({
+  await db.insert(memberships).values({
     id: membershipId,
     tontineId,
     userId: null,
@@ -34,9 +34,9 @@ export function ajouterMembreGere(db: Db, tontineId: string, input: {
     role: 'member',
     status: 'active',
     joinedAt: new Date(),
-  }).run()
+  })
 
-  attribuerParts(db, tontineId, membershipId, input.shares)
+  await attribuerParts(db, tontineId, membershipId, input.shares)
   return membershipId
 }
 
@@ -49,14 +49,13 @@ export function ajouterMembreGere(db: Db, tontineId: string, input: {
  * `memberships` : c'est la source d'erreur n°1 du modèle, et la contourner
  * casse à la fois l'ordre de passage et le calcul du pot.
  */
-export function attribuerParts(db: Db, tontineId: string, membershipId: string, nombre: number) {
+export async function attribuerParts(db: Db, tontineId: string, membershipId: string, nombre: number) {
   if (nombre < 1) throw apiError('VALIDATION_ERROR', 'Un membre a au moins une part.', { field: 'shares' })
 
-  const existantes = db
+  const existantes = await db
     .select()
     .from(shares)
     .where(eq(shares.membershipId, membershipId))
-    .all()
 
   if (existantes.length === nombre) return
 
@@ -64,27 +63,27 @@ export function attribuerParts(db: Db, tontineId: string, membershipId: string, 
     // On retire les parts les plus récentes, pas les plus anciennes : la
     // position acquise en premier est celle qui compte.
     const aRetirer = existantes.slice(nombre).map(s => s.id)
-    db.delete(shares).where(inArray(shares.id, aRetirer)).run()
+    await db.delete(shares).where(inArray(shares.id, aRetirer))
     return
   }
 
-  const toutes = db.select().from(shares).where(eq(shares.tontineId, tontineId)).all()
+  const toutes = await db.select().from(shares).where(eq(shares.tontineId, tontineId))
   let position = Math.max(0, ...toutes.map(s => s.rotationPosition))
 
   for (let i = existantes.length; i < nombre; i++) {
     position++
-    db.insert(shares).values({
+    await db.insert(shares).values({
       id: randomUUID(),
       tontineId,
       membershipId,
       rotationPosition: position,
-    }).run()
+    })
   }
 }
 
 /** Les parts d'une tontine, dans l'ordre de rotation. */
-export function rotationDe(db: Db, tontineId: string) {
-  return db
+export async function rotationDe(db: Db, tontineId: string) {
+  return (await db
     .select({
       shareId: shares.id,
       rotationPosition: shares.rotationPosition,
@@ -100,8 +99,7 @@ export function rotationDe(db: Db, tontineId: string) {
     .innerJoin(memberships, eq(memberships.id, shares.membershipId))
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(shares.tontineId, tontineId))
-    .orderBy(asc(shares.rotationPosition))
-    .all()
+    .orderBy(asc(shares.rotationPosition)))
     .map(p => ({
       ...p,
       // L'écran d'ordre de passage nomme des personnes : sans le compte, une
@@ -118,9 +116,9 @@ export function rotationDe(db: Db, tontineId: string) {
  * inscrit », sans numéro, pour quiconque était arrivé par lien — c'est-à-dire
  * précisément les personnes sur lesquelles le président doit se prononcer.
  */
-export function membresDe(db: Db, tontineId: string) {
-  const parts = rotationDe(db, tontineId)
-  const lignes = db
+export async function membresDe(db: Db, tontineId: string) {
+  const parts = await rotationDe(db, tontineId)
+  const lignes = await db
     .select({
       membership: memberships,
       firstName: users.firstName,
@@ -130,9 +128,8 @@ export function membresDe(db: Db, tontineId: string) {
     .from(memberships)
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.tontineId, tontineId))
-    .all()
 
-  return lignes.map(({ membership: m, firstName, lastName, userPhone }) => ({
+  return await Promise.all(lignes.map(async ({ membership: m, firstName, lastName, userPhone }) => ({
     id: m.id,
     userId: m.userId,
     name: [firstName, lastName].filter(Boolean).join(' ') || m.managedName,
@@ -144,8 +141,8 @@ export function membresDe(db: Db, tontineId: string) {
     shares: parts.filter(p => p.membershipId === m.id).length,
     // Ce qu'une sortie laisserait derrière : le montrer **avant** de faire
     // sortir quelqu'un, pas après.
-    resteDu: resteDu(db, m.id),
-  }))
+    resteDu: await resteDu(db, m.id),
+  })))
 }
 
 export interface ResultatRotation {
@@ -163,13 +160,13 @@ export interface ResultatRotation {
  * client serait invérifiable, donc contestable — et le premier à passer est
  * toujours suspecté d'avoir arrangé le résultat.
  */
-export function definirRotation(
+export async function definirRotation(
   db: Db,
   tontineId: string,
   acteurId: string,
   input: { mode: 'fixed' | 'draw', order?: string[] },
-): ResultatRotation {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+): Promise<ResultatRotation> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   if (tontine.rotationFrozenAt) {
@@ -180,7 +177,7 @@ export function definirRotation(
     )
   }
 
-  const parts = db.select().from(shares).where(eq(shares.tontineId, tontineId)).all()
+  const parts = await db.select().from(shares).where(eq(shares.tontineId, tontineId))
   if (parts.length === 0) {
     throw apiError('VALIDATION_ERROR', 'Aucune part à ordonner.', { field: 'shares' })
   }
@@ -212,18 +209,18 @@ export function definirRotation(
     ordre = fourni
   }
 
-  ordre.forEach((shareId, index) => {
+  ordre.forEach(async (shareId, index) => {
     // Positions temporaires négatives d'abord : sans cela, réordonner heurte
     // la contrainte d'unicité `(tontine_id, rotation_position)` en cours de route.
-    db.update(shares).set({ rotationPosition: -(index + 1) }).where(eq(shares.id, shareId)).run()
+    await db.update(shares).set({ rotationPosition: -(index + 1) }).where(eq(shares.id, shareId))
   })
-  ordre.forEach((shareId, index) => {
-    db.update(shares).set({ rotationPosition: index + 1 }).where(eq(shares.id, shareId)).run()
+  ordre.forEach(async (shareId, index) => {
+    await db.update(shares).set({ rotationPosition: index + 1 }).where(eq(shares.id, shareId))
   })
 
-  db.update(tontines).set({ rotationMode: input.mode }).where(eq(tontines.id, tontineId)).run()
+  await db.update(tontines).set({ rotationMode: input.mode }).where(eq(tontines.id, tontineId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'rotation_changed',
     actorId: acteurId,
@@ -240,9 +237,9 @@ export function definirRotation(
 }
 
 /** Le nom affichable d'une adhésion : le compte s'il existe, la saisie du bureau sinon. */
-function nomDe(db: Db, m: typeof memberships.$inferSelect): string {
+async function nomDe(db: Db, m: typeof memberships.$inferSelect): Promise<string> {
   if (m.userId) {
-    const [u] = db.select().from(users).where(eq(users.id, m.userId)).limit(1).all()
+    const [u] = await db.select().from(users).where(eq(users.id, m.userId)).limit(1)
     const complet = [u?.firstName, u?.lastName].filter(Boolean).join(' ')
     if (complet) return complet
   }
@@ -275,22 +272,21 @@ const LIBELLE_ROLE: Record<MembershipRole, string> = {
  * « bureau d'une seule personne » (§2.4) ne le compte pas — il ne regarde que
  * les adhésions qui portent un compte. Le rôle prend effet au rattachement.
  */
-export function definirRole(
+export async function definirRole(
   db: Db,
   tontineId: string,
   membershipId: string,
   role: MembershipRole,
   acteurId: string,
 ) {
-  const [m] = db
+  const [m] = await db
     .select()
     .from(memberships)
     .where(and(eq(memberships.id, membershipId), eq(memberships.tontineId, tontineId)))
     .limit(1)
-    .all()
   if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
-  if (role === 'president') return transfererPresidence(db, tontineId, membershipId, acteurId)
+  if (role === 'president') return await transfererPresidence(db, tontineId, membershipId, acteurId)
 
   if (m.role === role) return
 
@@ -306,23 +302,23 @@ export function definirRole(
     )
   }
 
-  db.update(memberships).set({ role }).where(eq(memberships.id, membershipId)).run()
+  await db.update(memberships).set({ role }).where(eq(memberships.id, membershipId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
     payload: {
       changement: 'role_modifie',
       membershipId,
-      name: nomDe(db, m),
+      name: await nomDe(db, m),
       de: m.role,
       vers: role,
     },
   })
 
   if (m.userId) {
-    notifier(db, m.userId, {
+    await notifier(db, m.userId, {
       type: 'role_modifie',
       tontineId,
       title: 'Ton rôle a changé',
@@ -344,18 +340,17 @@ export function definirRole(
  * bougent pas, un rôle n'est pas une part. Tout le groupe est prévenu — c'est
  * la personne à qui l'on envoie de l'argent qui change.
  */
-export function transfererPresidence(
+export async function transfererPresidence(
   db: Db,
   tontineId: string,
   versMembershipId: string,
   acteurId: string,
 ) {
-  const [cible] = db
+  const [cible] = await db
     .select()
     .from(memberships)
     .where(and(eq(memberships.id, versMembershipId), eq(memberships.tontineId, tontineId)))
     .limit(1)
-    .all()
   if (!cible) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
   if (cible.role === 'president') return
@@ -372,7 +367,7 @@ export function transfererPresidence(
     )
   }
 
-  const [actuel] = db
+  const [actuel] = await db
     .select()
     .from(memberships)
     .where(and(
@@ -381,28 +376,27 @@ export function transfererPresidence(
       eq(memberships.status, 'active'),
     ))
     .limit(1)
-    .all()
 
   if (actuel) {
-    db.update(memberships).set({ role: 'member' }).where(eq(memberships.id, actuel.id)).run()
+    await db.update(memberships).set({ role: 'member' }).where(eq(memberships.id, actuel.id))
   }
-  db.update(memberships).set({ role: 'president' }).where(eq(memberships.id, cible.id)).run()
+  await db.update(memberships).set({ role: 'president' }).where(eq(memberships.id, cible.id))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     type: 'settings_changed',
     actorId: acteurId,
     payload: {
       changement: 'presidence_transferee',
-      de: actuel ? { membershipId: actuel.id, name: nomDe(db, actuel) } : null,
-      vers: { membershipId: cible.id, name: nomDe(db, cible) },
+      de: actuel ? { membershipId: actuel.id, name: await nomDe(db, actuel) } : null,
+      vers: { membershipId: cible.id, name: await nomDe(db, cible) },
     },
   })
 
-  notifierTontine(db, tontineId, {
+  await notifierTontine(db, tontineId, {
     type: 'presidence_transferee',
     title: 'La présidence a changé de mains',
-    body: `${nomDe(db, cible)} préside désormais la tontine.`,
+    body: `${(await nomDe(db, cible))} préside désormais la tontine.`,
     url: `/app/tontine/${tontineId}/membres`,
   })
 }
@@ -420,8 +414,8 @@ export function transfererPresidence(
  * publication** : le groupe n'est pas notifié, seul le registre en garde la
  * trace, avec ce qui reste dû.
  */
-export function declarerDefaillant(db: Db, membershipId: string, acteurId: string) {
-  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+export async function declarerDefaillant(db: Db, membershipId: string, acteurId: string) {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
   if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
   if (m.role === 'president') {
@@ -430,7 +424,7 @@ export function declarerDefaillant(db: Db, membershipId: string, acteurId: strin
 
   assertTransition('membership', m.status, 'defaulted')
 
-  if (!aDejaPrisLaMain(db, membershipId)) {
+  if (!(await aDejaPrisLaMain(db, membershipId))) {
     throw apiError(
       'FORBIDDEN',
       'Ce membre n’a pas encore pris la main sur un tour : un retard n’est pas une défaillance.',
@@ -438,15 +432,15 @@ export function declarerDefaillant(db: Db, membershipId: string, acteurId: strin
     )
   }
 
-  const du = resteDu(db, membershipId)
+  const du = await resteDu(db, membershipId)
 
-  db.update(memberships).set({ status: 'defaulted' }).where(eq(memberships.id, membershipId)).run()
+  await db.update(memberships).set({ status: 'defaulted' }).where(eq(memberships.id, membershipId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: m.tontineId,
     type: 'settings_changed',
     actorId: acteurId,
-    payload: { changement: 'membre_defaillant', membershipId, name: nomDe(db, m), resteDu: du },
+    payload: { changement: 'membre_defaillant', membershipId, name: await nomDe(db, m), resteDu: du },
   })
 
   return { membershipId, resteDu: du }
@@ -458,23 +452,21 @@ export function declarerDefaillant(db: Db, membershipId: string, acteurId: strin
  * Un tour clos dont il était bénéficiaire, ou un versement au moins déclaré à
  * son nom : dans les deux cas l'argent est parti vers lui.
  */
-export function aDejaPrisLaMain(db: Db, membershipId: string): boolean {
-  const sesParts = db.select({ id: shares.id }).from(shares).where(eq(shares.membershipId, membershipId)).all()
+export async function aDejaPrisLaMain(db: Db, membershipId: string): Promise<boolean> {
+  const sesParts = await db.select({ id: shares.id }).from(shares).where(eq(shares.membershipId, membershipId))
   if (sesParts.length === 0) return false
 
-  const sesTours = db
+  const sesTours = await db
     .select({ id: rounds.id, status: rounds.status })
     .from(rounds)
     .where(inArray(rounds.beneficiaryShareId, sesParts.map(p => p.id)))
-    .all()
 
   if (sesTours.some(t => t.status === 'closed')) return true
 
-  const versements = db
+  const versements = await db
     .select({ status: payouts.status })
     .from(payouts)
     .where(eq(payouts.beneficiaryMembershipId, membershipId))
-    .all()
 
   return versements.some(v => v.status === 'declared' || v.status === 'acknowledged')
 }
@@ -487,8 +479,8 @@ export function aDejaPrisLaMain(db: Db, membershipId: string): boolean {
  * qui l'inscrit au registre. Le recopier serait deux calculs d'argent dont rien
  * ne garantirait qu'ils disent la même chose.
  */
-export function resteDu(db: Db, membershipId: string): number {
-  return db
+export async function resteDu(db: Db, membershipId: string): Promise<number> {
+  return (await db
     .select({
       expected: contributions.expectedAmount,
       confirmed: contributions.confirmedAmount,
@@ -498,8 +490,7 @@ export function resteDu(db: Db, membershipId: string): number {
     .where(and(
       eq(contributions.membershipId, membershipId),
       ne(rounds.status, 'closed'),
-    ))
-    .all()
+    )))
     .reduce((n, c) => n + Math.max(0, c.expected - c.confirmed), 0)
 }
 
@@ -515,8 +506,8 @@ export function resteDu(db: Db, membershipId: string): number {
  * de confirmer, de contre-valider et de clore. Il faudrait d'abord passer la
  * présidence, ce qui est un autre geste.
  */
-export function retirerMembre(db: Db, membershipId: string, acteurId: string) {
-  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+export async function retirerMembre(db: Db, membershipId: string, acteurId: string) {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
   if (!m) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
   if (m.role === 'president') {
@@ -529,11 +520,11 @@ export function retirerMembre(db: Db, membershipId: string, acteurId: string) {
 
   assertTransition('membership', m.status, 'left')
 
-  const du = resteDu(db, membershipId)
+  const du = await resteDu(db, membershipId)
 
-  db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId)).run()
+  await db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: m.tontineId,
     type: 'member_left',
     // Celui qui **agit**, pas celui qui part. L'ancien repli sur l'identifiant
@@ -549,11 +540,10 @@ export function retirerMembre(db: Db, membershipId: string, acteurId: string) {
 }
 
 /** Compte les adhésions actives — contrôle avant démarrage. */
-export function comptesActifs(db: Db, tontineId: string): number {
-  return db
+export async function comptesActifs(db: Db, tontineId: string): Promise<number> {
+  return (await db
     .select()
     .from(memberships)
-    .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active')))
-    .all()
+    .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active'))))
     .length
 }
