@@ -11,14 +11,14 @@ export default defineEventHandler(async (event) => {
   if (!roundId) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const db = useDb()
-  const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds)
-    .where(eq(rounds.id, roundId)).limit(1).all()
+  const [tour] = await db.select({ tontineId: rounds.tontineId }).from(rounds)
+    .where(eq(rounds.id, roundId)).limit(1)
 
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
   await requireMembership(event, tour.tontineId)
 
   const filtre = getQuery(event).status
-  const lignes = db
+  const lignes = await db
     .select({
       id: contributions.id,
       membershipId: contributions.membershipId,
@@ -37,7 +37,6 @@ export default defineEventHandler(async (event) => {
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(contributions.roundId, roundId))
     .orderBy(asc(shares.rotationPosition))
-    .all()
 
   const items = lignes
     .filter(l => (typeof filtre === 'string' ? l.status === filtre : true))

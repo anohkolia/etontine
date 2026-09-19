@@ -58,8 +58,8 @@ export function calculerAmende(
 }
 
 /** Les règles d'amende d'une tontine. */
-export function reglesDe(db: Db, tontineId: string): ReglesAmende {
-  const [t] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function reglesDe(db: Db, tontineId: string): Promise<ReglesAmende> {
+  const [t] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!t) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   return {
@@ -81,14 +81,14 @@ export function reglesDe(db: Db, tontineId: string): ReglesAmende {
  * Le montant est **fourni par l'appelant** et non recalculé ici : le président
  * peut décider d'appliquer moins que le barème.
  */
-export function appliquerAmende(
+export async function appliquerAmende(
   db: Db,
   contributionId: string,
   presidentId: string,
   montant: number,
   motif?: string,
 ) {
-  const [ligne] = db
+  const [ligne] = await db
     .select({
       contribution: contributions,
       tontineId: rounds.tontineId,
@@ -99,7 +99,6 @@ export function appliquerAmende(
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
@@ -107,27 +106,26 @@ export function appliquerAmende(
     throw apiError('VALIDATION_ERROR', 'Le montant de l’amende doit être positif.', { field: 'amount' })
   }
 
-  const dejaAppliquee = db
+  const dejaAppliquee = await db
     .select()
     .from(penalties)
     .where(and(eq(penalties.contributionId, contributionId), eq(penalties.status, 'applied')))
-    .all()
 
   if (dejaAppliquee.length > 0) {
     throw apiError('INVALID_TRANSITION', 'Une amende est déjà appliquée sur cette cotisation.')
   }
 
   const penaltyId = randomUUID()
-  db.insert(penalties).values({
+  await db.insert(penalties).values({
     id: penaltyId,
     contributionId,
     amount: montant,
     status: 'applied',
     reason: motif ?? null,
     appliedBy: presidentId,
-  }).run()
+  })
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: ligne.tontineId,
     roundId: ligne.roundId,
     type: 'penalty_applied',
@@ -135,16 +133,15 @@ export function appliquerAmende(
     payload: { penaltyId, contributionId, amount: montant, reason: motif ?? null },
   })
 
-  const [membre] = db
+  const [membre] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, ligne.membershipId))
     .limit(1)
-    .all()
 
   if (membre?.userId) {
     // Aucun montant dans la notification (règle 21).
-    notifier(db, membre.userId, {
+    await notifier(db, membre.userId, {
       type: 'amende_appliquee',
       tontineId: ligne.tontineId,
       title: 'Une amende de retard a été appliquée',
@@ -163,32 +160,30 @@ export function appliquerAmende(
  * c'est ce qui fait dire que « le bureau arrange ses amis ». Le motif part au
  * registre, lisible par tout le groupe.
  */
-export function annulerAmende(db: Db, penaltyId: string, acteurId: string, motif: string) {
+export async function annulerAmende(db: Db, penaltyId: string, acteurId: string, motif: string) {
   if (!motif || motif.trim().length < 5) {
     throw apiError('VALIDATION_ERROR', 'Explique brièvement pourquoi l’amende est annulée.', { field: 'reason' })
   }
 
-  const [amende] = db.select().from(penalties).where(eq(penalties.id, penaltyId)).limit(1).all()
+  const [amende] = await db.select().from(penalties).where(eq(penalties.id, penaltyId)).limit(1)
   if (!amende) throw apiError('NOT_FOUND', 'Amende introuvable.')
 
   if (amende.status === 'waived') {
     throw apiError('INVALID_TRANSITION', 'Cette amende est déjà annulée.')
   }
 
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId, roundId: rounds.id })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, amende.contributionId))
     .limit(1)
-    .all()
 
-  db.update(penalties)
+  await db.update(penalties)
     .set({ status: 'waived', waivedBy: acteurId, waiveReason: motif.trim() })
     .where(eq(penalties.id, penaltyId))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: ligne!.tontineId,
     roundId: ligne!.roundId,
     type: 'penalty_waived',
@@ -200,8 +195,8 @@ export function annulerAmende(db: Db, penaltyId: string, acteurId: string, motif
 }
 
 /** Les amendes d'une tontine, appliquées comme annulées. */
-export function amendesDe(db: Db, tontineId: string) {
-  return db
+export async function amendesDe(db: Db, tontineId: string) {
+  return await db
     .select({
       penalty: penalties,
       contributionId: contributions.id,
@@ -214,5 +209,4 @@ export function amendesDe(db: Db, tontineId: string) {
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
     .where(eq(rounds.tontineId, tontineId))
-    .all()
 }

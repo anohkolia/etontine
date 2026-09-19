@@ -28,6 +28,14 @@ const APP_MEMBRE = 'http://localhost:3000'
 test.slow()
 
 /** Un président qui a demandé le palier Standard et attend une décision. */
+/**
+ * Un contexte vierge pour le membre : le cookie de session du back-office vaut
+ * pour `localhost` sans distinction de port, et l'écran de connexion de
+ * l'application renvoie désormais quiconque est déjà connecté vers `/app` —
+ * l'administrateur serait pris pour le membre.
+ */
+const SANS_SESSION = { storageState: { cookies: [], origins: [] } }
+
 async function deposerUneDemande(page: Page): Promise<string> {
   const numero = numeroDeTest()
 
@@ -51,7 +59,7 @@ async function deposerUneDemande(page: Page): Promise<string> {
 }
 
 test('l’administrateur approuve une demande et le palier est posé', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUneDemande(membre)
 
@@ -70,7 +78,7 @@ test('l’administrateur approuve une demande et le palier est posé', async ({ 
   await expect(page.locator('[data-testid^="demande-"]').filter({ hasText: numero }))
     .toHaveCount(0)
 
-  const [compte] = useDb().select().from(users).where(eq(users.phone, numero)).all()
+  const [compte] = await useDb().select().from(users).where(eq(users.phone, numero))
   expect(compte!.planTier).toBe('standard')
   expect(compte!.planUntil).not.toBeNull()
 
@@ -84,7 +92,7 @@ test('l’administrateur approuve une demande et le palier est posé', async ({ 
 })
 
 test('un refus sans motif est impossible, et le motif parvient au président', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUneDemande(membre)
 
@@ -103,7 +111,7 @@ test('un refus sans motif est impossible, et le motif parvient au président', a
   await expect(page.locator('[data-testid^="demande-"]').filter({ hasText: numero }))
     .toHaveCount(0)
 
-  const [compte] = useDb().select().from(users).where(eq(users.phone, numero)).all()
+  const [compte] = await useDb().select().from(users).where(eq(users.phone, numero))
   expect(compte!.planTier).toBe('free')
 
   await membre.goto(`${APP_MEMBRE}/app/abonnement`)

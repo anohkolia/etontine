@@ -7,13 +7,25 @@
  * pas accepter de recevoir des notifications. Les fusionner reviendrait à
  * extorquer le second en échange du premier.
  */
+import { profileInput } from '#shared/schemas'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const session = useSessionStore()
 const route = useRoute()
 
-const prenom = ref(session.user?.firstName ?? '')
-const nom = ref(session.user?.lastName ?? '')
+/**
+ * Le nom, validé par le schéma que le serveur applique (`profileInput`) :
+ * deux lettres au moins, cinquante au plus, et l'erreur sous le champ avant
+ * l'envoi plutôt qu'un `422` en bas d'écran après.
+ */
+const identite = useFormulaire(profileInput, {
+  firstName: session.user?.firstName ?? '',
+  lastName: session.user?.lastName ?? '',
+})
+const [prenom, prenomAttrs] = identite.champ('firstName')
+const [nom, nomAttrs] = identite.champ('lastName')
 const enregistrement = ref(false)
 const messageProfil = ref<string | null>(null)
 const erreur = ref<string | null>(null)
@@ -29,7 +41,7 @@ const palierDemande = computed(() => Number(route.query.palier ?? 0))
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -56,14 +68,16 @@ onMounted(charger)
 async function enregistrerProfil() {
   erreur.value = null
   messageProfil.value = null
+  const valeurs = await identite.valider()
+  if (!valeurs) return
   enregistrement.value = true
   try {
     await $fetch('/api/v1/me', {
       method: 'PATCH',
-      body: { firstName: prenom.value, lastName: nom.value },
+      body: { firstName: valeurs.firstName, lastName: valeurs.lastName },
     })
     await session.charger(true)
-    messageProfil.value = 'Profil enregistré.'
+    messageProfil.value = t('profil.index.profil_enregistre')
 
     const redirection = route.query.redirect
     if (typeof redirection === 'string' && (session.user?.kycLevel ?? 0) >= palierDemande.value) {
@@ -107,13 +121,107 @@ async function retirerPin() {
     pin.value = ''
     pinActuel.value = ''
     await session.charger(true)
-    messagePin.value = 'Code de verrouillage retiré.'
+    messagePin.value = t('profil.index.code_de_verrouillage_retire')
   }
   catch (e) {
     messagePin.value = message(e)
   }
   finally {
     retraitEnCours.value = false
+  }
+}
+
+/**
+ * Code oublié : le retrait sans le code n'est accepté par le serveur que dans
+ * les dix minutes qui suivent une connexion par SMS. L'écran de verrouillage y
+ * envoie ; ici, on termine le geste.
+ */
+async function retirerPinOublie() {
+  messagePin.value = null
+  retraitEnCours.value = true
+  try {
+    await $fetch('/api/v1/auth/pin', { method: 'DELETE', body: {} })
+    pin.value = ''
+    pinActuel.value = ''
+    await session.charger(true)
+    messagePin.value = t('profil.index.code_de_verrouillage_retire_2')
+  }
+  catch (e) {
+    messagePin.value = message(e)
+  }
+  finally {
+    retraitEnCours.value = false
+  }
+}
+
+/**
+ * Changement de numéro. Deux temps, comme la connexion : le nouveau numéro,
+ * puis le code reçu dessus. C'est le nouveau qu'on prouve — l'ancien peut
+ * être perdu avec la SIM.
+ */
+const { format: formatTel, extraire, estComplet } = usePhoneMask()
+const changementOuvert = ref(false)
+const etapeNumero = ref<'numero' | 'code'>('numero')
+const nouveauNumero = ref('')
+const codeNumero = ref('')
+const codeDevNumero = ref<string | null>(null)
+const numeroEnCours = ref(false)
+const messageNumero = ref<string | null>(null)
+const erreurNumero = ref(false)
+
+const nouveauNumeroAffiche = computed(() => formatTel(nouveauNumero.value))
+const nouveauNumeroValide = computed(() => estComplet(nouveauNumero.value))
+
+function onSaisieNouveauNumero(evenement: Event) {
+  const champ = evenement.target as HTMLInputElement
+  nouveauNumero.value = extraire(champ.value)
+  champ.value = formatTel(nouveauNumero.value)
+}
+
+async function demanderCodeNumero() {
+  messageNumero.value = null
+  erreurNumero.value = false
+  numeroEnCours.value = true
+  try {
+    const reponse = await $fetch<{ devCode?: string }>('/api/v1/me/phone/request', {
+      method: 'POST',
+      body: { phone: nouveauNumero.value },
+    })
+    codeDevNumero.value = reponse.devCode ?? null
+    etapeNumero.value = 'code'
+  }
+  catch (e) {
+    messageNumero.value = message(e)
+    erreurNumero.value = true
+  }
+  finally {
+    numeroEnCours.value = false
+  }
+}
+
+async function validerNumero() {
+  messageNumero.value = null
+  erreurNumero.value = false
+  numeroEnCours.value = true
+  try {
+    await $fetch('/api/v1/me/phone/verify', {
+      method: 'POST',
+      body: { phone: nouveauNumero.value, code: codeNumero.value },
+    })
+    await session.charger(true)
+    changementOuvert.value = false
+    etapeNumero.value = 'numero'
+    nouveauNumero.value = ''
+    codeNumero.value = ''
+    messageProfil.value = t('profil.index.numero_change_les_versements')
+  }
+  catch (e) {
+    messageNumero.value = message(e)
+    erreurNumero.value = true
+    codeNumero.value = ''
+  }
+  finally {
+    numeroEnCours.value = false
   }
 }
 
@@ -127,7 +235,10 @@ async function definirPin() {
     pin.value = ''
     pinActuel.value = ''
     await session.charger(true)
-    messagePin.value = 'Code de verrouillage enregistré.'
+    // Celui qui vient de poser le code n'a pas à le ressaisir dans la seconde :
+    // l'onglet est déverrouillé, le verrou jouera à la prochaine ouverture.
+    useVerrou().deverrouiller()
+    messagePin.value = t('profil.index.code_de_verrouillage_enregistre')
   }
   catch (e) {
     messagePin.value = message(e)
@@ -135,10 +246,10 @@ async function definirPin() {
 }
 
 useEnTete(() => ({
-  titre: 'Mon profil',
+  titre: t('commun.mon_profil'),
   sousTitre: session.user?.phone ?? undefined,
 }))
-useHead({ title: 'Mon profil — eTontine' })
+useHead({ title: t('profil.index.mon_profil_etontine') })
 </script>
 
 <template>
@@ -167,7 +278,7 @@ useHead({ title: 'Mon profil — eTontine' })
           class="mt-0.5 shrink-0"
           aria-hidden="true"
         />
-        Renseigne ton nom complet pour continuer.
+        {{ $t('profil.index.renseigne_ton_nom_complet') }}
       </p>
 
       <!-- Carte d'identité, reprise de l'en-tête de profil du template.
@@ -187,7 +298,7 @@ useHead({ title: 'Mon profil — eTontine' })
         />
         <div class="min-w-0">
           <h2 class="truncate text-lg font-bold text-ink">
-            {{ [session.user?.firstName, session.user?.lastName].filter(Boolean).join(' ') || 'Profil à compléter' }}
+            {{ [session.user?.firstName, session.user?.lastName].filter(Boolean).join(' ') || $t('profil.index.profil_a_completer') }}
           </h2>
           <p class="tabular truncate text-sm text-ink-muted">
             {{ session.user?.phone }}
@@ -204,7 +315,7 @@ useHead({ title: 'Mon profil — eTontine' })
                 size="0.875rem"
                 aria-hidden="true"
               />
-              Identité à vérifier
+              {{ $t('profil.index.identite_a_verifier') }}
             </NuxtLink>
             <span
               v-else
@@ -216,7 +327,7 @@ useHead({ title: 'Mon profil — eTontine' })
                 size="0.875rem"
                 aria-hidden="true"
               />
-              Identité vérifiée
+              {{ $t('profil.index.identite_verifiee') }}
             </span>
           </p>
         </div>
@@ -225,11 +336,97 @@ useHead({ title: 'Mon profil — eTontine' })
       <!-- Identité -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
-          Identité
+          {{ $t('profil.index.identite_2') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Ton numéro : <span class="font-medium text-ink">{{ session.user?.phone }}</span>
+          {{ $t('profil.index.ton_numero') }} <span
+            class="font-medium text-ink"
+            data-testid="numero-actuel"
+          >{{ session.user?.phone }}</span>
+          <button
+            type="button"
+            class="ml-2 min-h-touch text-sm text-brand underline underline-offset-4"
+            data-testid="bouton-changer-numero"
+            @click="changementOuvert = !changementOuvert"
+          >
+            {{ changementOuvert ? $t('commun.annuler') : $t('profil.index.changer') }}
+          </button>
         </p>
+
+        <!-- Changement de numéro : un code sur le nouveau, puis un gel de
+             quarante-huit heures sur les versements vers ce membre. Le numéro
+             est l'identifiant du compte et l'adresse du pot — pas un champ
+             de formulaire ordinaire. -->
+        <form
+          v-if="changementOuvert"
+          class="flex flex-col gap-3 rounded-control bg-surface-muted p-3"
+          data-testid="formulaire-numero"
+          @submit.prevent="etapeNumero === 'numero' ? demanderCodeNumero() : validerNumero()"
+        >
+          <template v-if="etapeNumero === 'numero'">
+            <label
+              class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+              for="nouveau-numero"
+            >
+              {{ $t('profil.index.nouveau_numero') }}
+              <span class="flex items-stretch gap-2">
+                <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface px-3 text-base font-semibold text-ink">
+                  +225
+                </span>
+                <InputText
+                  id="nouveau-numero"
+                  :value="nouveauNumeroAffiche"
+                  inputmode="tel"
+                  autocomplete="tel"
+                  placeholder="07 07 12 34 56"
+                  class="tabular-nums"
+                  data-testid="champ-nouveau-numero"
+                  @input="onSaisieNouveauNumero"
+                />
+              </span>
+            </label>
+            <p class="text-sm text-ink-subtle">
+              {{ $t('profil.index.un_code_sera_envoye') }}
+            </p>
+          </template>
+
+          <template v-else>
+            <p class="text-sm text-ink-muted">
+              {{ $t('profil.index.code_envoye_au') }} <span class="font-medium text-ink">{{ nouveauNumeroAffiche }}</span>.
+            </p>
+            <InputOtp
+              v-model="codeNumero"
+              :length="6"
+              integer-only
+              data-testid="champ-code-numero"
+            />
+            <p
+              v-if="codeDevNumero"
+              class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
+              data-testid="code-dev-numero"
+            >
+              {{ $t('profil.index.developpement_code') }} <strong>{{ codeDevNumero }}</strong>
+            </p>
+          </template>
+
+          <p
+            v-if="messageNumero"
+            :role="erreurNumero ? 'alert' : 'status'"
+            class="text-sm"
+            :class="erreurNumero ? 'text-disputed-ink' : 'text-confirmed-ink'"
+            data-testid="message-numero"
+          >
+            {{ messageNumero }}
+          </p>
+
+          <Button
+            type="submit"
+            :label="numeroEnCours ? $t('commun.envoi_en_cours') : etapeNumero === 'numero' ? $t('commun.recevoir_le_code') : $t('profil.index.valider_le_nouveau_numero')"
+            :disabled="numeroEnCours || (etapeNumero === 'numero' ? !nouveauNumeroValide : codeNumero.length !== 6)"
+            class="bg-brand text-brand-ink hover:bg-brand-strong"
+            data-testid="bouton-valider-numero"
+          />
+        </form>
 
         <form
           class="flex flex-col gap-3"
@@ -239,24 +436,38 @@ useHead({ title: 'Mon profil — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="prenom"
           >
-            Prénom
+            {{ $t('profil.index.prenom') }}
             <InputText
               id="prenom"
               v-model="prenom"
+              v-bind="prenomAttrs"
               autocomplete="given-name"
+              :aria-invalid="Boolean(identite.erreur('firstName'))"
+              :aria-describedby="identite.erreur('firstName') ? 'erreur-prenom' : undefined"
               data-testid="champ-prenom"
+            />
+            <ErreurChamp
+              id="erreur-prenom"
+              :message="identite.erreur('firstName')"
             />
           </label>
           <label
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="nom"
           >
-            Nom
+            {{ $t('profil.index.nom') }}
             <InputText
               id="nom"
               v-model="nom"
+              v-bind="nomAttrs"
               autocomplete="family-name"
+              :aria-invalid="Boolean(identite.erreur('lastName'))"
+              :aria-describedby="identite.erreur('lastName') ? 'erreur-nom' : undefined"
               data-testid="champ-nom"
+            />
+            <ErreurChamp
+              id="erreur-nom"
+              :message="identite.erreur('lastName')"
             />
           </label>
 
@@ -278,7 +489,7 @@ useHead({ title: 'Mon profil — eTontine' })
 
           <Button
             type="submit"
-            :label="enregistrement ? 'Enregistrement…' : 'Enregistrer'"
+            :label="enregistrement ? $t('profil.index.enregistrement') : $t('profil.index.enregistrer')"
             :disabled="enregistrement"
             class="bg-brand text-brand-ink hover:bg-brand-strong"
             data-testid="bouton-enregistrer-profil"
@@ -289,7 +500,7 @@ useHead({ title: 'Mon profil — eTontine' })
       <!-- Consentements : deux cases séparées, jamais une seule -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
-          Mes choix
+          {{ $t('profil.index.mes_choix') }}
         </h2>
 
         <label class="flex min-h-touch items-start gap-3 text-sm">
@@ -301,9 +512,18 @@ useHead({ title: 'Mon profil — eTontine' })
             @change="basculerConsentement('data', ($event.target as HTMLInputElement).checked)"
           >
           <span>
-            <span class="font-medium text-ink">Traitement de mes données</span>
+            <span class="font-medium text-ink">{{ $t('profil.index.traitement_de_mes_donnees') }}</span>
             <span class="block text-ink-muted">
-              Nécessaire pour tenir le registre de mes tontines.
+              {{ $t('profil.index.necessaire_pour_tenir_le') }}
+              <!-- On consent à quelque chose qu'on peut lire : sans le lien,
+                   la case demandait la confiance, pas le consentement. -->
+              <NuxtLink
+                to="/legal/confidentialite"
+                class="text-brand underline underline-offset-4"
+                data-testid="lien-politique-confidentialite"
+              >
+                {{ $t('profil.index.ce_que_l_on') }}
+              </NuxtLink>
             </span>
           </span>
         </label>
@@ -317,10 +537,9 @@ useHead({ title: 'Mon profil — eTontine' })
             @change="basculerConsentement('notifications', ($event.target as HTMLInputElement).checked)"
           >
           <span>
-            <span class="font-medium text-ink">Notifications</span>
+            <span class="font-medium text-ink">{{ $t('profil.index.notifications') }}</span>
             <span class="block text-ink-muted">
-              Rappels de cotisation et activité de mes tontines. Refusable sans
-              perdre l’accès à l’application.
+              {{ $t('profil.index.rappels_de_cotisation_et') }}
             </span>
           </span>
         </label>
@@ -329,11 +548,10 @@ useHead({ title: 'Mon profil — eTontine' })
       <!-- Verrouillage -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
-          Verrouillage
+          {{ $t('profil.index.verrouillage') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Un code à quatre chiffres pour ouvrir l’application. Les téléphones se
-          prêtent — le registre de ta tontine, non.
+          {{ $t('profil.index.un_code_a_quatre') }}
         </p>
 
         <form
@@ -345,7 +563,7 @@ useHead({ title: 'Mon profil — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="pin-actuel"
           >
-            Code actuel
+            {{ $t('profil.index.code_actuel') }}
             <InputText
               id="pin-actuel"
               v-model="pinActuel"
@@ -360,7 +578,7 @@ useHead({ title: 'Mon profil — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="pin-nouveau"
           >
-            {{ session.user?.hasPin ? 'Nouveau code' : 'Code' }}
+            {{ session.user?.hasPin ? $t('profil.index.nouveau_code') : $t('profil.index.code') }}
             <InputText
               id="pin-nouveau"
               v-model="pin"
@@ -382,7 +600,7 @@ useHead({ title: 'Mon profil — eTontine' })
 
           <Button
             type="submit"
-            :label="session.user?.hasPin ? 'Changer le code' : 'Définir le code'"
+            :label="session.user?.hasPin ? $t('profil.index.changer_le_code') : $t('profil.index.definir_le_code')"
             :disabled="pin.length < 4"
             class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
             data-testid="bouton-pin"
@@ -393,12 +611,24 @@ useHead({ title: 'Mon profil — eTontine' })
           <Button
             v-if="session.user?.hasPin"
             type="button"
-            :label="retraitEnCours ? 'Retrait…' : 'Retirer le code'"
+            :label="retraitEnCours ? $t('profil.index.retrait') : $t('profil.index.retirer_le_code')"
             :disabled="retraitEnCours || pinActuel.length < 4"
             class="text-ink-muted hover:text-ink"
             data-testid="bouton-retirer-pin"
             @click="retirerPin"
           />
+
+          <!-- La porte de sortie de « code oublié » : après une connexion SMS
+               récente, le serveur accepte le retrait sans l'ancien code. -->
+          <button
+            v-if="session.user?.hasPin"
+            type="button"
+            class="min-h-touch text-left text-sm text-ink-muted underline underline-offset-4"
+            data-testid="bouton-pin-oublie"
+            @click="retirerPinOublie"
+          >
+            {{ $t('profil.index.code_oublie_le_retirer') }}
+          </button>
         </form>
       </section>
 
@@ -412,7 +642,7 @@ useHead({ title: 'Mon profil — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Mes numéros de collecte
+        {{ $t('profil.index.mes_numeros_de_collecte') }}
       </NuxtLink>
 
       <NuxtLink
@@ -425,7 +655,7 @@ useHead({ title: 'Mon profil — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Mon abonnement
+        {{ $t('profil.index.mon_abonnement') }}
       </NuxtLink>
 
       <NuxtLink
@@ -438,7 +668,7 @@ useHead({ title: 'Mon profil — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Mes données personnelles
+        {{ $t('profil.index.mes_donnees_personnelles') }}
       </NuxtLink>
 
       <button
@@ -452,7 +682,7 @@ useHead({ title: 'Mon profil — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Me déconnecter
+        {{ $t('profil.index.me_deconnecter') }}
       </button>
     </template>
   </div>

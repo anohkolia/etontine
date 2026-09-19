@@ -21,9 +21,9 @@ export default defineEventHandler(async (event) => {
   const { user } = await requireMembership(event, tontineId, ['president'])
 
   const db = useDb()
-  verifierQuotaMembres(db, tontineId)
+  await verifierQuotaMembres(db, tontineId)
 
-  const invitation = creerInvitation(db, tontineId, user.id)
+  const invitation = await creerInvitation(db, tontineId, user.id)
 
   const base = process.env.NUXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
   return { ...invitation, url: `${base}/join/${invitation.token}` }

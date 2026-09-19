@@ -14,6 +14,6 @@ export default defineTask({
     description: 'Marque en retard les cotisations dont le délai de grâce est dépassé',
   },
   async run() {
-    return { result: { marquees: marquerRetards(useDb()) } }
+    return { result: { marquees: await marquerRetards(useDb()) } }
   },
 })

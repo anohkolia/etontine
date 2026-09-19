@@ -10,12 +10,12 @@ import { requireUser } from '../../../../utils/auth.ts'
  * donne. Sinon, deux endroits calculeraient le même quota, et le jour où ils
  * divergeraient, c'est l'écran qui aurait tort en silence.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
   const db = useDb()
 
-  const etat = etatAbonnement(db, user)
-  const decision = derniereDecision(db, user.id)
+  const etat = await etatAbonnement(db, user)
+  const decision = await derniereDecision(db, user.id)
 
   return {
     ...etat,

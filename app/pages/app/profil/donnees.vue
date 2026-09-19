@@ -8,6 +8,7 @@
  * retient et pouvoir agir dessus.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 interface Blocage {
   tontineId: string
@@ -44,31 +45,30 @@ async function supprimer() {
   catch (e) {
     const data = (e as { data?: { blockers?: Blocage[], error?: { message?: string } } }).data
     blocages.value = data?.blockers ?? null
-    erreur.value = data?.error?.message ?? 'Suppression impossible.'
+    erreur.value = data?.error?.message ?? t('profil.donnees.suppression_impossible')
     etat.value = 'repos'
   }
 }
 
 useEnTete(() => ({
-  titre: 'Mes données personnelles',
-  sousTitre: 'Export et suppression',
-  retour: { to: '/app/profil', label: 'Mon profil' },
+  titre: t('profil.donnees.mes_donnees_personnelles'),
+  sousTitre: t('profil.donnees.export_et_suppression'),
+  retour: { to: '/app/profil', label: t('commun.mon_profil') },
 }))
-useHead({ title: 'Mes données — eTontine' })
+useHead({ title: t('profil.donnees.mes_donnees_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
     <section class="flex flex-col gap-3 card-surface p-4">
       <h2 class="font-semibold text-ink">
-        Exporter
+        {{ $t('profil.donnees.exporter') }}
       </h2>
       <p class="text-sm text-ink-muted">
-        Un fichier avec ton profil, tes adhésions et tes cotisations. Il ne
-        contient rien sur les autres membres.
+        {{ $t('profil.donnees.un_fichier_avec_ton') }}
       </p>
       <Button
-        label="Télécharger mes données"
+        :label="$t('profil.donnees.telecharger_mes_donnees')"
         class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
         data-testid="bouton-export"
         @click="telecharger"
@@ -77,10 +77,10 @@ useHead({ title: 'Mes données — eTontine' })
 
     <section class="flex flex-col gap-3 card-surface p-4">
       <h2 class="font-semibold text-ink">
-        Supprimer mon compte
+        {{ $t('profil.donnees.supprimer_mon_compte') }}
       </h2>
       <p class="text-sm text-ink-muted">
-        Définitif. Tes tontines en cours doivent d’abord être réglées.
+        {{ $t('profil.donnees.definitif_tes_tontines_en') }}
       </p>
 
       <div
@@ -96,7 +96,7 @@ useHead({ title: 'Mes données — eTontine' })
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Ces engagements doivent être réglés avant la suppression :
+          {{ $t('profil.donnees.ces_engagements_doivent_etre') }}
         </p>
         <ul class="flex flex-col gap-1 pl-6">
           <li
@@ -120,7 +120,7 @@ useHead({ title: 'Mes données — eTontine' })
 
       <template v-if="etat === 'repos'">
         <Button
-          label="Supprimer mon compte"
+          :label="$t('profil.donnees.supprimer_mon_compte')"
           class="border border-disputed-ink bg-surface text-disputed-ink hover:bg-disputed-surface"
           data-testid="bouton-supprimer"
           @click="etat = 'confirmation'"
@@ -128,16 +128,16 @@ useHead({ title: 'Mes données — eTontine' })
       </template>
       <template v-else>
         <p class="text-sm font-medium text-ink">
-          Confirmer la suppression définitive de ton compte ?
+          {{ $t('profil.donnees.confirmer_la_suppression_definitive') }}
         </p>
         <div class="flex flex-col gap-2 sm:flex-row">
           <Button
-            label="Annuler"
+            :label="$t('profil.donnees.annuler')"
             class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
             @click="etat = 'repos'"
           />
           <Button
-            :label="etat === 'envoi' ? 'Suppression…' : 'Oui, supprimer'"
+            :label="etat === 'envoi' ? $t('profil.donnees.suppression') : $t('commun.oui_supprimer')"
             :disabled="etat === 'envoi'"
             class="bg-disputed-ink text-surface sm:flex-1"
             data-testid="bouton-confirmer-suppression"

@@ -44,6 +44,7 @@ const props = defineProps<{
 
 const { copie, copier } = useCopie()
 const { copie: copieRef, copier: copierRef } = useCopie()
+const { canal: motDuCanal } = useLibelle()
 
 const canalChoisi = ref(props.channels[0]?.id ?? '')
 const canal = computed(() => props.channels.find(c => c.id === canalChoisi.value) ?? props.channels[0])
@@ -55,7 +56,7 @@ const canal = computed(() => props.channels.find(c => c.id === canalChoisi.value
  */
 function nomOperateur(provider: string): string {
   const canal = asCanal(provider)
-  return canal ? channelPresentation(canal).label : provider
+  return canal ? motDuCanal(canal, channelPresentation(canal).label) : provider
 }
 
 /**
@@ -84,7 +85,7 @@ const gele = computed(() => {
       data-testid="selecteur-canal"
     >
       <legend class="pb-1 text-sm font-medium text-ink-muted">
-        Par quel service envoies-tu ?
+        {{ $t('ui.OuEnvoyer.par_quel_service_envoies') }}
       </legend>
       <!-- Cartes sélectionnables plutôt que boutons radio nus, repris de
            l'écran de paiement du template : la zone cliquable fait toute la
@@ -125,7 +126,7 @@ const gele = computed(() => {
            approximatif. C'est ce chiffre-là que le membre doit taper. -->
       <div class="card-surface flex flex-col gap-1 p-4">
         <p class="text-sm text-ink-muted">
-          Montant à envoyer
+          {{ $t('ui.OuEnvoyer.montant_a_envoyer') }}
         </p>
         <AmountDisplay
           :amount="expectedAmount"
@@ -138,7 +139,7 @@ const gele = computed(() => {
       <div class="card-surface flex flex-col gap-3 p-4">
         <div class="flex flex-col gap-1">
           <p class="text-sm text-ink-muted">
-            Au nom de
+            {{ $t('ui.OuEnvoyer.au_nom_de') }}
           </p>
           <!-- Toujours affiché. C'est ce que le membre vérifie dans son
                application de paiement avant de valider. -->
@@ -149,14 +150,13 @@ const gele = computed(() => {
             {{ canal.holderName }}
           </p>
           <p class="text-sm text-ink-subtle">
-            Vérifie que ce nom s’affiche bien dans {{ nomOperateur(canal.provider) }}
-            avant de valider ton envoi.
+            {{ $t('ui.OuEnvoyer.verifie_que_ce_nom', { p0: nomOperateur(canal.provider) }) }}
           </p>
         </div>
 
         <div class="flex flex-col gap-2">
           <p class="text-sm text-ink-muted">
-            Numéro
+            {{ $t('ui.OuEnvoyer.numero') }}
           </p>
           <p
             class="font-mono text-2xl font-bold tracking-wider tabular-nums text-ink"
@@ -175,7 +175,7 @@ const gele = computed(() => {
               size="1rem"
               aria-hidden="true"
             />
-            {{ copie ? 'Numéro copié' : 'Copier le numéro' }}
+            {{ copie ? $t('ui.OuEnvoyer.numero_copie') : $t('ui.OuEnvoyer.copier_le_numero') }}
           </button>
         </div>
 
@@ -191,15 +191,14 @@ const gele = computed(() => {
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Ce numéro de collecte a changé récemment. Vérifie auprès du bureau
-          avant d’envoyer.
+          {{ $t('ui.OuEnvoyer.ce_numero_de_collecte') }}
         </p>
       </div>
 
       <!-- Référence -->
       <div class="card-surface flex flex-col gap-2 p-4">
         <p class="text-sm text-ink-muted">
-          Référence à mettre en commentaire
+          {{ $t('ui.OuEnvoyer.reference_a_mettre_en') }}
         </p>
         <p
           class="font-mono text-xl font-bold tracking-wider text-ink"
@@ -208,7 +207,7 @@ const gele = computed(() => {
           {{ reference }}
         </p>
         <p class="text-sm text-ink-subtle">
-          Elle permet au trésorier de reconnaître ton envoi parmi les autres.
+          {{ $t('ui.OuEnvoyer.elle_permet_au_tresorier') }}
         </p>
         <button
           type="button"
@@ -221,7 +220,7 @@ const gele = computed(() => {
             size="1rem"
             aria-hidden="true"
           />
-          {{ copieRef ? 'Référence copiée' : 'Copier la référence' }}
+          {{ copieRef ? $t('ui.OuEnvoyer.reference_copiee') : $t('ui.OuEnvoyer.copier_la_reference') }}
         </button>
       </div>
 
@@ -238,7 +237,7 @@ const gele = computed(() => {
           size="1rem"
           aria-hidden="true"
         />
-        Ouvrir {{ nomOperateur(canal.provider) }}
+        {{ $t('ui.OuEnvoyer.ouvrir_p0', { p0: nomOperateur(canal.provider) }) }}
       </a>
     </template>
   </div>

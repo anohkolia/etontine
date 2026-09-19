@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
   if (!roundId) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const db = useDb()
-  const [tour] = db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1).all()
+  const [tour] = await db.select({ tontineId: rounds.tontineId }).from(rounds).where(eq(rounds.id, roundId)).limit(1)
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   const { user } = await requireMembership(event, tour.tontineId)
@@ -28,6 +28,6 @@ export default defineEventHandler(async (event) => {
   const parsed = acknowledgePayoutInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return withIdempotency(event, user.id, parsed.data, () =>
-    accuserReception(db, roundId, user.id, parsed.data.receivedAmount))
+  return await withIdempotency(event, user.id, parsed.data, async () =>
+    await accuserReception(db, roundId, user.id, parsed.data.receivedAmount))
 })

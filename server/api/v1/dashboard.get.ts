@@ -10,7 +10,7 @@ import { requireUser } from '../../utils/auth.ts'
  * la différence entre un écran qui s'affiche et un membre qui referme
  * l'application.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
-  return tableauDeBord(useDb(), user.id)
+  return await tableauDeBord(useDb(), user.id)
 })

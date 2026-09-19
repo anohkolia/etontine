@@ -16,5 +16,5 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   await requireMembership(event, tontineId)
-  return verifyLedger(useDb(), tontineId)
+  return await verifyLedger(useDb(), tontineId)
 })

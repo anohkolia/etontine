@@ -27,13 +27,15 @@
  */
 import type { NatureHorsLigne } from '../../composables/useNatureHorsLigne'
 
+const { t } = useI18n()
+
 const { nature } = defineProps<{ nature?: NatureHorsLigne }>()
 
 const declaree = useNatureHorsLigne()
 const consigne = computed(() => ({
-  'saisie': 'Ce que tu saisis est gardé et partira au retour du réseau.',
-  'lecture': 'Cette page reste lisible. Le reste attend le retour du réseau.',
-  'reseau-requis': 'Cette étape a besoin du réseau. Reprends dès qu’il revient.',
+  'saisie': t('ui.OfflineBanner.ce_que_tu_saisis'),
+  'lecture': t('ui.OfflineBanner.cette_page_reste_lisible'),
+  'reseau-requis': t('ui.OfflineBanner.cette_etape_a_besoin'),
 }[nature ?? declaree.value]))
 
 const online = useOnline()
@@ -77,13 +79,13 @@ onMounted(async () => {
           aria-hidden="true"
         />
         <p>
-          <strong class="font-semibold">Hors ligne.</strong>
+          <strong class="font-semibold">{{ $t('ui.OfflineBanner.hors_ligne') }}</strong>
           {{ consigne }}
           <span
             v-if="enAttente.length > 0"
             data-testid="file-en-attente"
           >
-            {{ enAttente.length }} envoi(s) en attente.
+            {{ $t('ui.OfflineBanner.p0_envoi_s_en', { p0: enAttente.length }) }}
           </span>
         </p>
       </div>
@@ -103,7 +105,7 @@ onMounted(async () => {
         class="shrink-0 animate-spin"
         aria-hidden="true"
       />
-      <p>Envoi de {{ enAttente.length }} saisie(s) en attente…</p>
+      <p>{{ $t('ui.OfflineBanner.envoi_de_p0_saisie', { p0: enAttente.length }) }}</p>
     </div>
   </div>
 </template>

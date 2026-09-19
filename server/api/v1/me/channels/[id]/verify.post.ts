@@ -5,7 +5,7 @@ import { otpCode } from '../../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../../db/index.ts'
 import { collectionChannels } from '../../../../../db/schema.ts'
 import { marquerVerifie } from '../../../../../services/canaux.ts'
-import { requestOtp, verifyOtp } from '../../../../../services/otp.ts'
+import { consommerCode, requestOtp } from '../../../../../services/otp.ts'
 import { requireUser } from '../../../../../utils/auth.ts'
 import { apiError, validationError } from '../../../../../utils/errors.ts'
 
@@ -25,12 +25,11 @@ export default defineEventHandler(async (event) => {
   if (!id) throw apiError('NOT_FOUND', 'Canal introuvable.')
 
   const db = useDb()
-  const [canal] = db
+  const [canal] = await db
     .select()
     .from(collectionChannels)
     .where(and(eq(collectionChannels.id, id), eq(collectionChannels.userId, user.id)))
     .limit(1)
-    .all()
 
   if (!canal) throw apiError('NOT_FOUND', 'Canal introuvable.')
 
@@ -40,11 +39,13 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) {
     // Pas de code fourni : on en envoie un.
     if (corps && Object.keys(corps).length > 0) throw validationError(parsed.error)
-    return requestOtp(db, canal.msisdn, 'sms')
+    return await requestOtp(db, canal.msisdn, 'sms')
   }
 
-  await verifyOtp(db, canal.msisdn, parsed.data.code)
-  marquerVerifie(db, id)
+  // Consommer le code, sans créer de compte : `verifyOtp` ouvrait un compte
+  // fantôme au numéro de collecte, qui n'est pas forcément celui d'un membre.
+  await consommerCode(db, canal.msisdn, parsed.data.code)
+  await marquerVerifie(db, id)
 
   return { id, verified: true }
 })

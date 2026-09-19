@@ -8,7 +8,10 @@
  * la contre-validation au-delà du seuil contre le détournement, et l'accusé de
  * réception du bénéficiaire contre le quitus auto-délivré.
  */
+import { acknowledgePayoutInput, declarePayoutInput, preparePayoutInput } from '#shared/schemas'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -61,14 +64,83 @@ const enCours = ref(false)
  */
 const termine = ref(false)
 
-const quatreChiffres = ref('')
+/**
+ * Les trois formulaires du versement, chacun validé par le schéma que le
+ * serveur applique : quatre chiffres exactement pour préparer, un canal connu
+ * pour déclarer, un montant entier et positif pour accuser réception.
+ */
+const preparation = useFormulaire(preparePayoutInput, { beneficiaryPhoneLast4: '', acceptIncompletePot: false })
+const [quatreChiffres, quatreChiffresAttrs] = preparation.champ('beneficiaryPhoneLast4')
+const [assumerIncomplet] = preparation.champ('acceptIncompletePot')
+const declarationVersement = useFormulaire(declarePayoutInput, { channel: 'wave', providerRef: undefined })
+const [canalVersement, canalVersementAttrs] = declarationVersement.champ('channel')
+const [referenceVersement, referenceVersementAttrs] = declarationVersement.champ('providerRef')
+const accuse = useFormulaire(acknowledgePayoutInput, { receivedAmount: 0 })
+const [montantRecu] = accuse.champ('receivedAmount')
 const motifCloture = ref('')
 /** Le tour vient d'être clos sans accusé : ce n'est pas la même fin. */
 const closSansAccuse = ref(false)
-const assumerIncomplet = ref(false)
-const canalVersement = ref<'wave' | 'orange' | 'mtn' | 'moov' | 'cash'>('wave')
-const referenceVersement = ref('')
-const montantRecu = ref(0)
+
+/**
+ * La capture de l'envoi du pot.
+ *
+ * L'API l'acceptait depuis le début (`proofUrl`) et le formulaire ne la
+ * proposait pas — alors que c'est le plus gros envoi du cycle, et le premier
+ * qu'on conteste. Compressée avant l'envoi, comme une preuve de cotisation.
+ */
+const { compresser } = useCompressionImage()
+const preuveVersement = ref<File | null>(null)
+const poidsPreuveVersement = ref<number | null>(null)
+
+async function choisirPreuveVersement(evenement: Event) {
+  const fichier = (evenement.target as HTMLInputElement).files?.[0]
+  if (!fichier) return
+  try {
+    const compresse = await compresser(fichier)
+    preuveVersement.value = compresse
+    poidsPreuveVersement.value = compresse.size
+  }
+  catch (e) {
+    erreur.value = (e as Error).message
+  }
+}
+
+async function preparer() {
+  const valeurs = await preparation.valider()
+  if (!valeurs) return
+  await appeler('prepare', valeurs)
+}
+
+async function accuserReception() {
+  const valeurs = await accuse.valider()
+  if (!valeurs) return
+  await appeler('acknowledge', valeurs)
+}
+
+async function declarerVersement() {
+  erreur.value = null
+  if (!referenceVersement.value?.trim()) declarationVersement.setFieldValue('providerRef', undefined, false)
+  const valeurs = await declarationVersement.valider()
+  if (!valeurs) return
+  let proofUrl: string | undefined
+  if (preuveVersement.value) {
+    enCours.value = true
+    try {
+      const formulaire = new FormData()
+      formulaire.append('file', preuveVersement.value)
+      const depot = await $fetch<{ url: string }>('/api/v1/uploads/proof', { method: 'POST', body: formulaire })
+      proofUrl = depot.url
+    }
+    catch (e) {
+      erreur.value = message(e)
+      enCours.value = false
+      return
+    }
+  }
+  await appeler('declare', { ...valeurs, proofUrl })
+  preuveVersement.value = null
+  poidsPreuveVersement.value = null
+}
 
 const estBureau = computed(() => monRole.value === 'president' || monRole.value === 'treasurer')
 const estPresident = computed(() => monRole.value === 'president')
@@ -92,7 +164,7 @@ const jeSuisBeneficiaire = computed(() =>
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -111,7 +183,7 @@ async function charger() {
     }
 
     versement.value = await $fetch<EtatVersement>(`/api/v1/rounds/${detail.currentRound.id}/payout`)
-    montantRecu.value = versement.value.payout?.amount ?? versement.value.collected
+    accuse.setFieldValue('receivedAmount', versement.value.payout?.amount ?? versement.value.collected, false)
     etat.value = 'contenu'
   }
   catch (e) {
@@ -171,10 +243,10 @@ onMounted(async () => {
 })
 
 useEnTete(() => ({
-  titre: 'Verser le pot',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.versement.verser_le_pot'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Verser le pot — eTontine' })
+useHead({ title: t('tontine.versement.verser_le_pot_etontine') })
 </script>
 
 <template>
@@ -195,8 +267,8 @@ useHead({ title: 'Verser le pot — eTontine' })
 
     <EmptyState
       v-else-if="etat === 'vide'"
-      title="Aucun tour en cours"
-      description="Il n’y a pas de pot à verser pour l’instant."
+      :title="$t('tontine.versement.aucun_tour_en_cours')"
+      :description="$t('tontine.versement.il_n_y_a')"
       icon="lucide:package"
     />
 
@@ -210,7 +282,7 @@ useHead({ title: 'Verser le pot — eTontine' })
         status="acknowledged"
       />
       <p class="text-sm text-ink-muted">
-        Tu as confirmé avoir reçu le pot. Le tour est clos.
+        {{ $t('tontine.versement.tu_as_confirme_avoir') }}
       </p>
     </section>
 
@@ -218,12 +290,12 @@ useHead({ title: 'Verser le pot — eTontine' })
       <!-- Pot constitué face au pot attendu -->
       <section class="flex flex-col gap-3 card-surface p-4">
         <h2 class="font-semibold text-ink">
-          Tour {{ versement.roundIndex }}
+          {{ $t('tontine.versement.tour_p0', { p0: versement.roundIndex }) }}
         </h2>
 
         <div class="flex flex-col gap-1">
           <p class="text-sm text-ink-muted">
-            Pot constitué
+            {{ $t('tontine.versement.pot_constitue') }}
           </p>
           <AmountDisplay
             :amount="versement.collected"
@@ -231,16 +303,16 @@ useHead({ title: 'Verser le pot — eTontine' })
             data-testid="pot-constitue"
           />
           <p class="text-sm text-ink-muted">
-            sur <AmountDisplay
+            {{ $t('tontine.versement.sur') }} <AmountDisplay
               :amount="versement.expected"
               size="sm"
-            /> attendus
+            /> {{ $t('tontine.versement.attendus') }}
           </p>
         </div>
 
         <ProgressBar
           :value="Math.round((versement.collected / versement.expected) * 100)"
-          :aria-label="`Pot constitué à ${Math.round((versement.collected / versement.expected) * 100)} %`"
+          :aria-label="$t('tontine.versement.pot_constitue_a', { p0: Math.round((versement.collected / versement.expected) * 100) })"
         />
 
         <div
@@ -255,7 +327,7 @@ useHead({ title: 'Verser le pot — eTontine' })
               class="mt-0.5 shrink-0"
               aria-hidden="true"
             />
-            {{ versement.missing.length }} cotisation(s) non soldée(s)
+            {{ $t('tontine.versement.p0_cotisation_s_non', { p0: versement.missing.length }) }}
           </p>
           <ul class="flex flex-col gap-1 pl-6">
             <li
@@ -263,7 +335,7 @@ useHead({ title: 'Verser le pot — eTontine' })
               :key="manquant.membershipId"
               class="list-disc"
             >
-              {{ manquant.name }} — il reste
+              {{ $t('tontine.versement.p0_il_reste', { p0: manquant.name }) }}
               <AmountDisplay
                 :amount="manquant.remaining"
                 size="sm"
@@ -276,7 +348,7 @@ useHead({ title: 'Verser le pot — eTontine' })
       <!-- Bénéficiaire -->
       <section class="flex flex-col gap-2 card-surface p-4">
         <h2 class="font-semibold text-ink">
-          Qui prend la main
+          {{ $t('tontine.versement.qui_prend_la_main') }}
         </h2>
         <p
           class="text-lg font-semibold text-ink"
@@ -303,8 +375,7 @@ useHead({ title: 'Verser le pot — eTontine' })
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Ce numéro a changé il y a moins de 48 heures. Appelle le bénéficiaire
-          pour le vérifier avant d’envoyer quoi que ce soit.
+          {{ $t('tontine.versement.ce_numero_a_change') }}
         </p>
       </section>
 
@@ -324,25 +395,27 @@ useHead({ title: 'Verser le pot — eTontine' })
         data-testid="etape-preparation"
       >
         <h2 class="font-semibold text-ink">
-          Préparer le versement
+          {{ $t('tontine.versement.preparer_le_versement') }}
         </h2>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="quatre-chiffres"
         >
-          Les quatre derniers chiffres du numéro du bénéficiaire
+          {{ $t('tontine.versement.les_quatre_derniers_chiffres') }}
           <InputText
             id="quatre-chiffres"
             v-model="quatreChiffres"
+            v-bind="quatreChiffresAttrs"
             inputmode="numeric"
             maxlength="4"
             class="text-xl tracking-widest tabular-nums"
+            :aria-invalid="Boolean(preparation.erreur('beneficiaryPhoneLast4'))"
             data-testid="champ-quatre-chiffres"
           />
+          <ErreurChamp :message="preparation.erreur('beneficiaryPhoneLast4')" />
           <span class="text-sm font-normal text-ink-subtle">
-            Ressaisis-les depuis ton téléphone, pas depuis cet écran. C’est ce
-            qui empêche d’envoyer au mauvais numéro.
+            {{ $t('tontine.versement.ressaisis_les_depuis_ton') }}
           </span>
         </label>
 
@@ -357,9 +430,9 @@ useHead({ title: 'Verser le pot — eTontine' })
             data-testid="case-pot-incomplet"
           >
           <span>
-            <span class="font-medium text-ink">J’assume un pot incomplet</span>
+            <span class="font-medium text-ink">{{ $t('tontine.versement.j_assume_un_pot') }}</span>
             <span class="block text-ink-muted">
-              Le montant manquant sera inscrit au registre, visible de tous.
+              {{ $t('tontine.versement.le_montant_manquant_sera') }}
             </span>
           </span>
         </label>
@@ -368,19 +441,15 @@ useHead({ title: 'Verser le pot — eTontine' })
           v-else-if="versement.shortfall > 0"
           class="rounded-control bg-late-surface p-3 text-sm text-late-ink"
         >
-          Le pot n’est pas complet. Seul le président peut décider de verser
-          quand même.
+          {{ $t('tontine.versement.le_pot_n_est') }}
         </p>
 
         <Button
-          :label="enCours ? 'Préparation…' : 'Préparer le versement'"
-          :disabled="enCours || quatreChiffres.length !== 4 || (versement.shortfall > 0 && !assumerIncomplet)"
+          :label="enCours ? $t('commun.preparation_en_cours') : $t('tontine.versement.preparer_le_versement')"
+          :disabled="enCours || (quatreChiffres ?? '').length !== 4 || (versement.shortfall > 0 && !assumerIncomplet)"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-preparer"
-          @click="appeler('prepare', {
-            beneficiaryPhoneLast4: quatreChiffres,
-            acceptIncompletePot: assumerIncomplet,
-          })"
+          @click="preparer"
         />
       </section>
 
@@ -392,17 +461,15 @@ useHead({ title: 'Verser le pot — eTontine' })
         data-testid="etape-contre-validation"
       >
         <h2 class="font-semibold text-ink">
-          Contre-validation
+          {{ $t('tontine.versement.contre_validation') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Ce montant dépasse le seuil de la tontine. Une seconde personne doit
-          valider avant l’envoi : le président, le censeur, ou celui qui prend
-          la main ce tour-ci.
+          {{ $t('tontine.versement.ce_montant_depasse_le') }}
         </p>
 
         <Button
           v-if="peutContreValider"
-          :label="enCours ? 'Validation…' : 'Contre-valider'"
+          :label="enCours ? $t('tontine.versement.validation') : $t('tontine.versement.contre_valider')"
           :disabled="enCours"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-contre-valider"
@@ -413,8 +480,7 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="rounded-control bg-surface-muted p-3 text-sm text-ink-muted"
           data-testid="attente-contre-validation"
         >
-          En attente d’une autre personne. Celui qui a préparé le versement ne
-          peut pas le contre-valider lui-même.
+          {{ $t('tontine.versement.en_attente_d_une') }}
         </p>
       </section>
 
@@ -428,10 +494,10 @@ useHead({ title: 'Verser le pot — eTontine' })
         data-testid="etape-declaration-versement"
       >
         <h2 class="font-semibold text-ink">
-          Déclarer l’envoi
+          {{ $t('tontine.versement.declarer_l_envoi') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Envoie le pot depuis ton application de paiement, puis déclare-le ici.
+          {{ $t('tontine.versement.envoie_le_pot_depuis') }}
         </p>
 
         <!-- Dit franchement ce qui n'aura pas lieu, plutôt que de laisser
@@ -448,9 +514,7 @@ useHead({ title: 'Verser le pot — eTontine' })
             aria-hidden="true"
           />
           <span>
-            Ce montant demanderait une contre-validation, mais tu es la seule
-            personne en mesure de la donner sur ce tour. Le versement peut
-            partir, et le registre gardera qu’il n’a été vu que par toi.
+            {{ $t('tontine.versement.ce_montant_demanderait_une') }}
           </span>
         </p>
 
@@ -458,18 +522,19 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="canal-versement"
         >
-          Par quel moyen ?
+          {{ $t('tontine.versement.par_quel_moyen') }}
           <select
             id="canal-versement"
             v-model="canalVersement"
+            v-bind="canalVersementAttrs"
             class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-base text-ink"
             data-testid="champ-canal-versement"
           >
-            <option value="wave">Wave</option>
-            <option value="orange">Orange Money</option>
-            <option value="mtn">MTN MoMo</option>
-            <option value="moov">Moov Money</option>
-            <option value="cash">Espèces</option>
+            <option value="wave">{{ $t('tontine.versement.wave') }}</option>
+            <option value="orange">{{ $t('tontine.versement.orange_money') }}</option>
+            <option value="mtn">{{ $t('tontine.versement.mtn_momo') }}</option>
+            <option value="moov">{{ $t('tontine.versement.moov_money') }}</option>
+            <option value="cash">{{ $t('tontine.versement.especes') }}</option>
           </select>
         </label>
 
@@ -477,23 +542,46 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="reference-versement"
         >
-          Référence de la transaction (facultatif)
+          {{ $t('tontine.versement.reference_de_la_transaction') }}
           <InputText
             id="reference-versement"
             v-model="referenceVersement"
+            v-bind="referenceVersementAttrs"
+            maxlength="64"
+            :aria-invalid="Boolean(declarationVersement.erreur('providerRef'))"
             data-testid="champ-reference-versement"
           />
+          <ErreurChamp :message="declarationVersement.erreur('providerRef')" />
+        </label>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="preuve-versement"
+        >
+          {{ $t('tontine.versement.capture_de_l_envoi') }}
+          <input
+            id="preuve-versement"
+            type="file"
+            accept="image/*"
+            class="min-h-touch text-sm text-ink"
+            data-testid="champ-preuve-versement"
+            @change="choisirPreuveVersement"
+          >
+          <span
+            v-if="poidsPreuveVersement !== null"
+            class="text-sm font-normal text-ink-subtle"
+            data-testid="poids-preuve-versement"
+          >
+            {{ $t('tontine.versement.capture_prete_p0_ko', { p0: Math.round(poidsPreuveVersement / 1024) }) }}
+          </span>
         </label>
 
         <Button
-          :label="enCours ? 'Envoi…' : 'J’ai envoyé le pot'"
+          :label="enCours ? $t('commun.envoi_en_cours') : $t('tontine.versement.j_ai_envoye_le')"
           :disabled="enCours"
           class="bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-declarer-versement"
-          @click="appeler('declare', {
-            channel: canalVersement,
-            providerRef: referenceVersement || undefined,
-          })"
+          @click="declarerVersement"
         />
       </section>
 
@@ -504,35 +592,36 @@ useHead({ title: 'Verser le pot — eTontine' })
         data-testid="etape-accuse"
       >
         <h2 class="font-semibold text-ink">
-          Accusé de réception
+          {{ $t('tontine.versement.accuse_de_reception') }}
         </h2>
 
         <template v-if="jeSuisBeneficiaire">
           <p class="text-sm text-ink-muted">
-            As-tu bien reçu le pot ? Ressaisis le montant reçu : c’est cette
-            confirmation qui clôt le tour.
+            {{ $t('tontine.versement.as_tu_bien_recu') }}
           </p>
 
           <label
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="montant-recu"
           >
-            Montant reçu (FCFA)
+            {{ $t('tontine.versement.montant_recu_fcfa') }}
             <InputText
               id="montant-recu"
               :value="montantRecu"
               inputmode="numeric"
+              :aria-invalid="Boolean(accuse.erreur('receivedAmount'))"
               data-testid="champ-montant-recu"
               @input="montantRecu = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
             />
+            <ErreurChamp :message="accuse.erreur('receivedAmount')" />
           </label>
 
           <Button
-            :label="enCours ? 'Envoi…' : 'J’ai bien reçu le pot'"
-            :disabled="enCours || montantRecu <= 0"
+            :label="enCours ? $t('commun.envoi_en_cours') : $t('tontine.versement.j_ai_bien_recu')"
+            :disabled="enCours || (montantRecu ?? 0) <= 0"
             class="bg-brand text-brand-ink hover:bg-brand-strong"
             data-testid="bouton-accuser-reception"
-            @click="appeler('acknowledge', { receivedAmount: montantRecu })"
+            @click="accuserReception"
           />
         </template>
 
@@ -541,8 +630,7 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
           data-testid="attente-accuse"
         >
-          Le pot est envoyé. Le tour restera ouvert tant que
-          {{ versement.beneficiary.name }} n’aura pas confirmé l’avoir reçu.
+          {{ $t('tontine.versement.le_pot_est_envoye', { p0: versement.beneficiary.name }) }}
         </p>
 
         <p
@@ -550,9 +638,7 @@ useHead({ title: 'Verser le pot — eTontine' })
           class="rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
           data-testid="accuse-impossible"
         >
-          {{ versement.beneficiary.name }} n’a pas l’application : personne ne
-          peut poser l’accusé de réception à sa place. Le président peut clore
-          le tour en disant pourquoi.
+          {{ $t('tontine.versement.p0_n_a_pas', { p0: versement.beneficiary.name }) }}
         </p>
       </section>
 
@@ -563,29 +649,27 @@ useHead({ title: 'Verser le pot — eTontine' })
         data-testid="etape-cloture-forcee"
       >
         <h2 class="font-semibold text-ink">
-          Clore le tour sans accusé
+          {{ $t('tontine.versement.clore_le_tour_sans') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          À n’utiliser que si le bénéficiaire ne peut pas confirmer lui-même.
-          Le versement restera marqué « déclaré » — personne n’aura accusé
-          réception — et ton motif sera inscrit au registre.
+          {{ $t('tontine.versement.a_n_utiliser_que') }}
         </p>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="motif-cloture"
         >
-          Pourquoi ?
+          {{ $t('tontine.versement.pourquoi') }}
           <InputText
             id="motif-cloture"
             v-model="motifCloture"
-            placeholder="Yao a reçu le pot, il n’a pas l’application"
+            :placeholder="$t('tontine.versement.yao_a_recu_le')"
             data-testid="champ-motif-cloture"
           />
         </label>
 
         <Button
-          :label="enCours ? 'Clôture…' : 'Clore le tour'"
+          :label="enCours ? $t('commun.cloture_en_cours') : $t('tontine.versement.clore_le_tour')"
           :disabled="enCours || motifCloture.trim().length < 5"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
           data-testid="bouton-clore-tour"
@@ -603,8 +687,7 @@ useHead({ title: 'Verser le pot — eTontine' })
           status="declared"
         />
         <p class="text-sm text-ink-muted">
-          Le tour est clos. Le versement reste marqué « déclaré » : personne
-          n’a accusé réception, et le registre garde ton motif.
+          {{ $t('tontine.versement.le_tour_est_clos') }}
         </p>
       </section>
 
@@ -618,7 +701,7 @@ useHead({ title: 'Verser le pot — eTontine' })
           status="acknowledged"
         />
         <p class="text-sm text-ink-muted">
-          Le bénéficiaire a accusé réception. Le tour est clos.
+          {{ $t('tontine.versement.le_beneficiaire_a_accuse') }}
         </p>
       </section>
     </template>

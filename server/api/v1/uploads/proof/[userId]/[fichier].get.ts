@@ -29,26 +29,24 @@ export default defineEventHandler(async (event) => {
     // l'appelant est trésorier ou président.
     const db = useDb()
 
-    const siennes = db
+    const siennes = (await db
       .select({ tontineId: memberships.tontineId })
       .from(memberships)
       .where(and(
         eq(memberships.userId, user.id),
         eq(memberships.status, 'active'),
         inArray(memberships.role, ['treasurer', 'president']),
-      ))
-      .all()
+      )))
       .map(m => m.tontineId)
 
     const commune = siennes.length > 0
-      && db
+      && (await db
         .select({ id: memberships.id })
         .from(memberships)
         .where(and(
           eq(memberships.userId, proprietaire),
           inArray(memberships.tontineId, siennes),
-        ))
-        .all()
+        )))
         .length > 0
 
     if (!commune) throw apiError('NOT_FOUND', 'Pièce introuvable.')

@@ -20,22 +20,21 @@ type Db = ReturnType<typeof useDb>
  *
  * Idempotente : la relancer ne crée rien de neuf.
  */
-export function creerComptesAdministrateurs(db: Db = useDb()): { crees: string[], existants: string[] } {
+export async function creerComptesAdministrateurs(db: Db = useDb()): Promise<{ crees: string[], existants: string[] }> {
   const numeros = numerosAdministrateurs()
   if (numeros.length === 0) return { crees: [], existants: [] }
 
-  const deja = db
+  const deja = (await db
     .select({ phone: users.phone })
     .from(users)
-    .where(inArray(users.phone, numeros))
-    .all()
+    .where(inArray(users.phone, numeros)))
     .map(u => u.phone)
 
   const crees: string[] = []
 
   for (const phone of numeros) {
     if (deja.includes(phone)) continue
-    db.insert(users).values({ id: randomUUID(), phone, kycLevel: 0 }).run()
+    await db.insert(users).values({ id: randomUUID(), phone, kycLevel: 0 })
     crees.push(phone)
   }
 

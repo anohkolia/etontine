@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  ajouterMembreGere, attribuerParts, definirRotation, membresDe, resteDu, retirerMembre, rotationDe,
+  ajouterMembreGere, definirRotation, membresDe, resteDu, retirerMembre, rotationDe,
 } from '../../server/services/membres.ts'
 import { melangerAvecGraine, verifierTirage } from '../../server/services/rotation.ts'
 import { dateDuTour, demarrerTontine } from '../../server/services/tours.ts'
@@ -12,131 +12,127 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 let T: string
 
 const PRESIDENT = 'e0000000-0000-4000-8000-000000000001'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
   await createTestUser(db, PRESIDENT, '+2250707000001')
-  T = creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' })
-  majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
+  T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
+  await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
-  // Le président est déjà adhérent : on lui attribue sa part.
-  const [msPresident] = db.select().from(memberships).where(eq(memberships.tontineId, T)).all()
-  attribuerParts(db, T, msPresident!.id, 1)
+  // Le président est déjà adhérent, sans part : il préside, il ne cotise pas.
 
   // Un canal vérifié, puis publication : `demarrerTontine` exige `open`, et
   // sauter la publication reviendrait à tester une transition qui n'existe pas.
-  const canal = creerCanal(db, PRESIDENT, {
+  const canal = await creerCanal(db, PRESIDENT, {
     provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya Koné',
   })
-  marquerVerifie(db, canal)
-  definirCanaux(db, T, [canal], PRESIDENT)
-  publier(db, T)
+  await marquerVerifie(db, canal)
+  await definirCanaux(db, T, [canal], PRESIDENT)
+  await publier(db, T)
 })
 
 afterEach(() => cleanup())
 
-/** Six membres, dont Yao Brou à **deux parts** — sept parts au total. */
-function groupeAvecDoublePart() {
-  ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707000002', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
-  const yao = ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707000004', shares: 2 })
-  ajouterMembreGere(db, T, { name: 'Mariam Touré', phone: '+2250707000005', shares: 1 })
-  ajouterMembreGere(db, T, { name: 'Ibrahim Sanogo', phone: '+2250707000006', shares: 1 })
+/** Six cotisants, dont Yao Brou à **deux parts** — sept parts au total. Le président n'en a pas. */
+async function groupeAvecDoublePart() {
+  await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707000002', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
+  const yao = await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707000004', shares: 2 })
+  await ajouterMembreGere(db, T, { name: 'Mariam Touré', phone: '+2250707000005', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Ibrahim Sanogo', phone: '+2250707000006', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Aminata Coulibaly', phone: '+2250707000007', shares: 1 })
   return yao
 }
 
 describe('double part — le test central du modèle (T11)', () => {
-  it('occupe deux positions distinctes dans la rotation', () => {
-    const yao = groupeAvecDoublePart()
-    const parts = rotationDe(db, T).filter(p => p.membershipId === yao)
+  it('occupe deux positions distinctes dans la rotation', async () => {
+    const yao = await groupeAvecDoublePart()
+    const parts = (await rotationDe(db, T)).filter(p => p.membershipId === yao)
 
     expect(parts).toHaveLength(2)
     expect(parts[0]!.rotationPosition).not.toBe(parts[1]!.rotationPosition)
   })
 
-  it('apparaît deux fois dans la rotation, et une seule dans la liste des membres', () => {
-    const yao = groupeAvecDoublePart()
+  it('apparaît deux fois dans la rotation, et une seule dans la liste des membres', async () => {
+    const yao = await groupeAvecDoublePart()
 
     // La rotation raisonne sur les parts…
-    expect(rotationDe(db, T).filter(p => p.membershipId === yao)).toHaveLength(2)
+    expect((await rotationDe(db, T)).filter(p => p.membershipId === yao)).toHaveLength(2)
 
     // …et la liste des membres sur les adhésions, en indiquant les deux positions.
-    const membres = membresDe(db, T)
+    const membres = await membresDe(db, T)
     const fiche = membres.find(m => m.id === yao)
     expect(fiche!.shares).toBe(2)
     expect(fiche!.positions).toHaveLength(2)
     expect(membres.filter(m => m.id === yao)).toHaveLength(1)
   })
 
-  it('génère deux cotisations par tour', () => {
-    const yao = groupeAvecDoublePart()
-    const resultat = demarrerTontine(db, T, PRESIDENT)
+  it('génère deux cotisations par tour', async () => {
+    const yao = await groupeAvecDoublePart()
+    const resultat = await demarrerTontine(db, T, PRESIDENT)
 
     // Sept parts → sept tours, et sept cotisations par tour.
     expect(resultat.rounds).toBe(7)
     expect(resultat.contributions).toBe(49)
 
-    const tours = db.select().from(rounds).where(eq(rounds.tontineId, T)).all()
+    const tours = await db.select().from(rounds).where(eq(rounds.tontineId, T))
     for (const tour of tours) {
-      const siennes = db
+      const siennes = (await db
         .select()
         .from(contributions)
-        .where(eq(contributions.roundId, tour.id))
-        .all()
+        .where(eq(contributions.roundId, tour.id)))
         .filter(c => c.membershipId === yao)
 
       expect(siennes, `tour ${tour.index}`).toHaveLength(2)
     }
   })
 
-  it('prend la main deux fois sur le cycle', () => {
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('prend la main deux fois sur le cycle', async () => {
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
     const sesParts = new Set(
-      rotationDe(db, T).filter(p => p.membershipId === yao).map(p => p.shareId),
+      (await rotationDe(db, T)).filter(p => p.membershipId === yao).map(p => p.shareId),
     )
-    const sesTours = db
+    const sesTours = (await db
       .select()
       .from(rounds)
-      .where(eq(rounds.tontineId, T))
-      .all()
+      .where(eq(rounds.tontineId, T)))
       .filter(r => sesParts.has(r.beneficiaryShareId))
 
     expect(sesTours).toHaveLength(2)
   })
 
-  it('cotise aussi le tour où il prend la main', () => {
+  it('cotise aussi le tour où il prend la main', async () => {
     // Usage ivoirien : le bénéficiaire cotise, et le net lui revient au
     // versement. L'exclure fausserait le pot de tout le monde.
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
     const sesParts = new Set(
-      rotationDe(db, T).filter(p => p.membershipId === yao).map(p => p.shareId),
+      (await rotationDe(db, T)).filter(p => p.membershipId === yao).map(p => p.shareId),
     )
-    const sonTour = db
+    const sonTour = (await db
       .select()
       .from(rounds)
-      .where(eq(rounds.tontineId, T))
-      .all()
+      .where(eq(rounds.tontineId, T)))
       .find(r => sesParts.has(r.beneficiaryShareId))!
 
-    const cotisations = db.select().from(contributions).where(eq(contributions.roundId, sonTour.id)).all()
+    const cotisations = await db.select().from(contributions).where(eq(contributions.roundId, sonTour.id))
     expect(cotisations.filter(c => c.membershipId === yao)).toHaveLength(2)
     expect(cotisations).toHaveLength(7)
   })
 
-  it('pèse deux parts dans le pot attendu', () => {
-    groupeAvecDoublePart()
-    const { expectedAmount } = demarrerTontine(db, T, PRESIDENT)
+  it('pèse deux parts dans le pot attendu', async () => {
+    await groupeAvecDoublePart()
+    const { expectedAmount } = await demarrerTontine(db, T, PRESIDENT)
 
     // 7 parts × 25 000 = 175 000, et non 6 membres × 25 000.
     expect(expectedAmount).toBe(175_000)
@@ -144,12 +140,12 @@ describe('double part — le test central du modèle (T11)', () => {
 })
 
 describe('tirage au sort — preuve anti-soupçon', () => {
-  beforeEach(() => groupeAvecDoublePart())
+  beforeEach(async () => await groupeAvecDoublePart())
 
-  it('écrit la graine et le résultat au registre', () => {
-    const resultat = definirRotation(db, T, PRESIDENT, { mode: 'draw' })
+  it('écrit la graine et le résultat au registre', async () => {
+    const resultat = await definirRotation(db, T, PRESIDENT, { mode: 'draw' })
 
-    const [ecriture] = db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'rotation_changed')).all()
+    const [ecriture] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'rotation_changed'))
     expect(ecriture).toBeDefined()
 
     const payload = ecriture!.payload as { seed: string, order: string[], mode: string }
@@ -158,9 +154,9 @@ describe('tirage au sort — preuve anti-soupçon', () => {
     expect(payload.order).toEqual(resultat.order)
   })
 
-  it('permet de rejouer le tirage et de retrouver le même ordre', () => {
-    definirRotation(db, T, PRESIDENT, { mode: 'draw' })
-    const [ecriture] = db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'rotation_changed')).all()
+  it('permet de rejouer le tirage et de retrouver le même ordre', async () => {
+    await definirRotation(db, T, PRESIDENT, { mode: 'draw' })
+    const [ecriture] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'rotation_changed'))
     const payload = ecriture!.payload as { seed: string, order: string[], sharesAtDraw: string[] }
 
     // C'est toute la valeur du dispositif : un membre qui doute rejoue la
@@ -187,53 +183,53 @@ describe('tirage au sort — preuve anti-soupçon', () => {
     expect(new Set(melange).size).toBe(20)
   })
 
-  it('attribue des positions consécutives à partir de 1', () => {
-    definirRotation(db, T, PRESIDENT, { mode: 'draw' })
-    const positions = rotationDe(db, T).map(p => p.rotationPosition)
+  it('attribue des positions consécutives à partir de 1', async () => {
+    await definirRotation(db, T, PRESIDENT, { mode: 'draw' })
+    const positions = (await rotationDe(db, T)).map(p => p.rotationPosition)
     expect(positions).toEqual([1, 2, 3, 4, 5, 6, 7])
   })
 
-  it('refuse un ordre fixe incomplet', () => {
-    const parts = rotationDe(db, T).map(p => p.shareId)
-    expect(() => definirRotation(db, T, PRESIDENT, { mode: 'fixed', order: parts.slice(0, 3) }))
+  it('refuse un ordre fixe incomplet', async () => {
+    const parts = (await rotationDe(db, T)).map(p => p.shareId)
+    await expect(definirRotation(db, T, PRESIDENT, { mode: 'fixed', order: parts.slice(0, 3) })).rejects
       .toThrow(expect.objectContaining({ statusCode: 422 }))
   })
 })
 
 describe('ordre figé après le démarrage', () => {
-  it('refuse de modifier l’ordre une fois la tontine lancée', () => {
-    groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('refuse de modifier l’ordre une fois la tontine lancée', async () => {
+    await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
     // Acceptation T11 : après `start`, l'ordre n'est plus modifiable sans
     // contre-validation. Le déplacer en cours de cycle avantagerait quelqu'un
     // au détriment d'un autre, sur un pot déjà partiellement cotisé.
-    expect(() => definirRotation(db, T, PRESIDENT, { mode: 'draw' })).toThrow(
+    await expect(definirRotation(db, T, PRESIDENT, { mode: 'draw' })).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('pose la date de gel au démarrage', () => {
-    groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('pose la date de gel au démarrage', async () => {
+    await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
-    const [t] = db.select().from(tontines).where(eq(tontines.id, T)).all()
+    const [t] = await db.select().from(tontines).where(eq(tontines.id, T))
     expect(t!.rotationFrozenAt).not.toBeNull()
     expect(t!.status).toBe('running')
   })
 
-  it('refuse de démarrer à moins de trois membres actifs', () => {
-    ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
-    expect(() => demarrerTontine(db, T, PRESIDENT)).toThrow(
+  it('refuse de démarrer à moins de trois membres actifs', async () => {
+    await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
+    await expect(demarrerTontine(db, T, PRESIDENT)).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('n’ouvre que le premier tour', () => {
-    groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('n’ouvre que le premier tour', async () => {
+    await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
-    const tours = db.select().from(rounds).where(eq(rounds.tontineId, T)).all()
+    const tours = await db.select().from(rounds).where(eq(rounds.tontineId, T))
     expect(tours.find(t => t.index === 1)!.status).toBe('collecting')
     expect(tours.filter(t => t.index > 1).every(t => t.status === 'pending')).toBe(true)
   })
@@ -273,67 +269,67 @@ describe('dates des tours — les quatre fréquences', () => {
 })
 
 describe('sortie d’un membre — « avec calcul de ce qui est dû »', () => {
-  it('chiffre ce qu’il laisse derrière lui', () => {
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('chiffre ce qu’il laisse derrière lui', async () => {
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
     // Sept tours, deux parts : quatorze cotisations de 25 000 à son nom, et
     // aucune n'est confirmée.
-    expect(resteDu(db, yao)).toBe(14 * 25_000)
+    expect(await resteDu(db, yao)).toBe(14 * 25_000)
   })
 
-  it('inscrit le montant au registre avec le départ', () => {
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('inscrit le montant au registre avec le départ', async () => {
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
-    const resultat = retirerMembre(db, yao, PRESIDENT)
+    const resultat = await retirerMembre(db, yao, PRESIDENT)
     expect(resultat.resteDu).toBe(14 * 25_000)
 
     // Une adhésion qui disparaît sans chiffre, c'est le groupe qui découvre le
     // trou au tour suivant sans trace de qui devait quoi.
-    const [ecriture] = db.select().from(ledgerEntries).all().filter(e => e.type === 'member_left')
+    const [ecriture] = (await db.select().from(ledgerEntries)).filter(e => e.type === 'member_left')
     expect((ecriture!.payload as { resteDu: number }).resteDu).toBe(14 * 25_000)
   })
 
-  it('ne compte pas les tours déjà clos', () => {
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('ne compte pas les tours déjà clos', async () => {
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
-    const premier = db.select().from(rounds).all().find(r => r.index === 1)!
-    db.update(rounds).set({ status: 'closed' }).where(eq(rounds.id, premier.id)).run()
+    const premier = (await db.select().from(rounds)).find(r => r.index === 1)!
+    await db.update(rounds).set({ status: 'closed' }).where(eq(rounds.id, premier.id))
 
     // Un tour clos est soldé : ce qui n'a pas été versé y est un impayé
     // constaté, pas une dette à venir.
-    expect(resteDu(db, yao)).toBe(12 * 25_000)
+    expect(await resteDu(db, yao)).toBe(12 * 25_000)
   })
 
-  it('sort un membre géré sans casser le registre', () => {
-    const yao = groupeAvecDoublePart()
+  it('sort un membre géré sans casser le registre', async () => {
+    const yao = await groupeAvecDoublePart()
 
     // L'acteur inscrit au registre est celui qui **agit**, pas celui qui part :
     // un membre géré n'a pas de compte, et l'y mettre violait la clé étrangère.
-    expect(() => retirerMembre(db, yao, PRESIDENT)).not.toThrow()
+    await retirerMembre(db, yao, PRESIDENT)
 
-    const [ecriture] = db.select().from(ledgerEntries).all().filter(e => e.type === 'member_left')
+    const [ecriture] = (await db.select().from(ledgerEntries)).filter(e => e.type === 'member_left')
     expect(ecriture!.actorId).toBe(PRESIDENT)
   })
 
-  it('refuse de faire sortir le président', () => {
-    groupeAvecDoublePart()
-    const [msPresident] = db.select().from(memberships).where(eq(memberships.role, 'president')).all()
+  it('refuse de faire sortir le président', async () => {
+    await groupeAvecDoublePart()
+    const [msPresident] = await db.select().from(memberships).where(eq(memberships.role, 'president'))
 
     // La tontine perdrait le seul rôle capable de confirmer, de contre-valider
     // et de clore.
-    expect(() => retirerMembre(db, msPresident!.id, PRESIDENT)).toThrow(
+    await expect(retirerMembre(db, msPresident!.id, PRESIDENT)).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('expose le reste dû dans la liste des membres', () => {
-    const yao = groupeAvecDoublePart()
-    demarrerTontine(db, T, PRESIDENT)
+  it('expose le reste dû dans la liste des membres', async () => {
+    const yao = await groupeAvecDoublePart()
+    await demarrerTontine(db, T, PRESIDENT)
 
-    const membre = membresDe(db, T).find(m => m.id === yao)!
+    const membre = (await membresDe(db, T)).find(m => m.id === yao)!
     expect(membre.resteDu).toBe(14 * 25_000)
   })
 })

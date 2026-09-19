@@ -9,9 +9,9 @@ import { apiError } from '../../../../utils/errors.ts'
  * C'est le point d'entrée du produit : on reçoit un lien par WhatsApp et on
  * doit pouvoir juger avant de créer un compte.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const token = getRouterParam(event, 'token')
   if (!token) throw apiError('NOT_FOUND', 'Lien d’invitation introuvable.')
 
-  return apercuInvitation(useDb(), token)
+  return await apercuInvitation(useDb(), token)
 })

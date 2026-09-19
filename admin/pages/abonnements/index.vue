@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { referenceDeReglement } from '#shared/constants/abonnement'
+
 /**
  * File des demandes d'abonnement.
  *
@@ -180,6 +182,12 @@ useHead({ title: 'Abonnements — Administration' })
             <span class="text-sm text-ink-subtle">
               Demandé le {{ formatDate(demande.createdAt) }}
             </span>
+            <!-- La référence que le président cite au règlement : c'est par
+                 elle qu'on rapproche un envoi reçu d'une demande. -->
+            <span
+              class="font-mono text-sm font-semibold text-ink"
+              :data-testid="`reference-${demande.id}`"
+            >{{ referenceDeReglement(demande.id) }}</span>
           </div>
 
           <div class="flex flex-col items-end gap-0.5 text-right">

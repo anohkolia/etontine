@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, notificationPreferences, rounds, shares, tontines, users,
@@ -40,15 +40,14 @@ export function minuteDuJour(instant: Date): number {
 }
 
 /** Les préférences d'un membre pour une tontine, avec repli sur ses réglages généraux. */
-export function preferencesDe(db: Db, userId: string, tontineId: string) {
-  const lignes = db
+export async function preferencesDe(db: Db, userId: string, tontineId: string) {
+  const lignes = await db
     .select()
     .from(notificationPreferences)
     .where(and(
       eq(notificationPreferences.userId, userId),
       or(eq(notificationPreferences.tontineId, tontineId), isNull(notificationPreferences.tontineId)),
     ))
-    .all()
 
   // Le réglage propre à la tontine l'emporte sur le réglage général.
   const specifique = lignes.find(l => l.tontineId === tontineId)
@@ -78,16 +77,15 @@ export interface RappelEnvoye {
  * Les plages de silence sont respectées **par membre** : quelqu'un qui dort le
  * jour parce qu'il travaille la nuit peut décaler la sienne.
  */
-export function envoyerRappels(db: Db, maintenant: Date = new Date()): RappelEnvoye[] {
+export async function envoyerRappels(db: Db, maintenant: Date = new Date()): Promise<RappelEnvoye[]> {
   const envoyes: RappelEnvoye[] = []
   const minute = minuteDuJour(maintenant)
 
-  const toursOuverts = db
+  const toursOuverts = await db
     .select({ round: rounds, tontine: tontines })
     .from(rounds)
     .innerJoin(tontines, eq(tontines.id, rounds.tontineId))
     .where(and(eq(rounds.status, 'collecting'), eq(tontines.status, 'running')))
-    .all()
 
   for (const { round, tontine } of toursOuverts) {
     const echeance = new Date(`${round.dueDate}T00:00:00Z`)
@@ -98,22 +96,25 @@ export function envoyerRappels(db: Db, maintenant: Date = new Date()): RappelEnv
 
     if (!JOURS_DE_RAPPEL.includes(joursAvant)) continue
 
-    const aRelancer = db
+    // Un membre déclaré défaillant n'est plus relancé automatiquement
+    // (docs/data-model.md §2.2) : ce qu'il doit est au registre, et le
+    // rappeler chaque semaine n'y changerait rien.
+    const aRelancer = await db
       .select({ membershipId: contributions.membershipId, userId: memberships.userId })
       .from(contributions)
       .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
       .where(and(
         eq(contributions.roundId, round.id),
         inArray(contributions.status, ['due', 'late']),
+        ne(memberships.status, 'defaulted'),
       ))
-      .all()
 
     // Un membre à double part n'est relancé qu'une fois : deux notifications
     // identiques à la seconde près donnent l'impression d'un bug.
     const destinataires = new Set(aRelancer.map(r => r.userId).filter(Boolean) as string[])
 
     for (const userId of destinataires) {
-      const prefs = preferencesDe(db, userId, tontine.id)
+      const prefs = await preferencesDe(db, userId, tontine.id)
       if (!prefs.remindersEnabled) continue
 
       if (estEnSilence(
@@ -121,7 +122,7 @@ export function envoyerRappels(db: Db, maintenant: Date = new Date()): RappelEnv
         minute,
       )) continue
 
-      notifier(db, userId, {
+      await notifier(db, userId, {
         type: 'rappel_cotisation',
         tontineId: tontine.id,
         title: joursAvant === 0 ? 'Ta cotisation est due aujourd’hui' : 'Ta cotisation approche',
@@ -161,21 +162,20 @@ export interface RelanceWhatsApp {
  * Le message **ne contient pas de montant** : il part sur WhatsApp, qui affiche
  * un aperçu sur l'écran verrouillé, comme une notification.
  */
-export function relancesWhatsApp(db: Db, tontineId: string): RelanceWhatsApp[] {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+export async function relancesWhatsApp(db: Db, tontineId: string): Promise<RelanceWhatsApp[]> {
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) return []
 
-  const [tourOuvert] = db
+  const [tourOuvert] = await db
     .select()
     .from(rounds)
     .where(and(eq(rounds.tontineId, tontineId), eq(rounds.status, 'collecting')))
     .orderBy(asc(rounds.index))
     .limit(1)
-    .all()
 
   if (!tourOuvert) return []
 
-  const retardataires = db
+  const retardataires = await db
     .select({
       membershipId: memberships.id,
       managedName: memberships.managedName,
@@ -192,7 +192,6 @@ export function relancesWhatsApp(db: Db, tontineId: string): RelanceWhatsApp[] {
       eq(contributions.roundId, tourOuvert.id),
       inArray(contributions.status, ['due', 'late']),
     ))
-    .all()
 
   const vus = new Set<string>()
 

@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   await requireMembership(event, tontineId)
-  const tours = toursDe(useDb(), tontineId)
+  const tours = await toursDe(useDb(), tontineId)
 
   return {
     items: tours,

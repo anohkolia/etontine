@@ -16,6 +16,8 @@ const props = defineProps<{
 }>()
 
 const presentation = computed(() => channelPresentation(props.canal))
+const { canal: motDuCanal } = useLibelle()
+const mot = computed(() => motDuCanal(props.canal, presentation.value.label))
 </script>
 
 <template>
@@ -35,6 +37,6 @@ const presentation = computed(() => channelPresentation(props.canal))
       :size="compact ? '0.875rem' : '1rem'"
       aria-hidden="true"
     />
-    {{ presentation.label }}
+    {{ mot }}
   </span>
 </template>

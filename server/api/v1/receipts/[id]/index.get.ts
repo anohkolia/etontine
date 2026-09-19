@@ -9,12 +9,12 @@ import { apiError } from '../../../../utils/errors.ts'
  * On le partage par WhatsApp, et celui qui le reçoit n'est pas forcément
  * membre. La signature et l'expiration remplacent l'authentification.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw apiError('NOT_FOUND', 'Reçu introuvable.')
 
   const q = getQuery(event)
   verifierSignature(id, String(q.exp ?? ''), String(q.sig ?? ''))
 
-  return recu(useDb(), id)
+  return await recu(useDb(), id)
 })

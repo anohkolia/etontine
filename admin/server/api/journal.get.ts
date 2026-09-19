@@ -8,7 +8,7 @@ import { requireAdmin } from '../utils/garde.ts'
  * Consultable par tout administrateur, y compris pour ses propres actions :
  * un journal que seul son auteur peut relire ne contrôle rien.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   requireAdmin(event)
-  return { entrees: journalAdministration(useDb()) }
+  return { entrees: await journalAdministration(useDb()) }
 })

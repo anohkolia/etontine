@@ -10,14 +10,14 @@ import { apiError } from '../../../../utils/errors.ts'
  * 40 Ko — on est très en dessous, parce qu'aucune police n'est embarquée
  * (règle 16 : police système uniquement).
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw apiError('NOT_FOUND', 'Reçu introuvable.')
 
   const q = getQuery(event)
   verifierSignature(id, String(q.exp ?? ''), String(q.sig ?? ''))
 
-  const svg = recuSvg(recu(useDb(), id))
+  const svg = recuSvg(await recu(useDb(), id))
 
   setHeader(event, 'content-type', 'image/svg+xml')
   setHeader(event, 'cache-control', 'public, max-age=3600')

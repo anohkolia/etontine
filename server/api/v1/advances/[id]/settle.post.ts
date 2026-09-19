@@ -19,16 +19,15 @@ export default defineEventHandler(async (event) => {
   if (!avanceId) throw apiError('NOT_FOUND', 'Avance introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId })
     .from(advances)
     .innerJoin(rounds, eq(rounds.id, advances.roundId))
     .where(eq(advances.id, avanceId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Avance introuvable.')
 
   await requireMembership(event, ligne.tontineId, ['treasurer', 'president'])
-  return solderAvance(db, avanceId)
+  return await solderAvance(db, avanceId)
 })

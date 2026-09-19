@@ -25,10 +25,10 @@ export const ESPECES_NON_CONFIRMEES_HEURES = 72
  *
  * Idempotente : une déclaration déjà escaladée n'est pas retraitée.
  */
-export function escaladerDeclarations(db: Db, maintenant: Date = new Date()): number {
+export async function escaladerDeclarations(db: Db, maintenant: Date = new Date()): Promise<number> {
   const limite = new Date(maintenant.getTime() - ESCALADE_HEURES * 3_600_000)
 
-  const enSouffrance = db
+  const enSouffrance = await db
     .select({
       declaration: paymentDeclarations,
       contributionId: contributions.id,
@@ -44,17 +44,15 @@ export function escaladerDeclarations(db: Db, maintenant: Date = new Date()): nu
       isNull(paymentDeclarations.escalatedAt),
       lt(paymentDeclarations.declaredAt, limite),
     ))
-    .all()
 
   for (const ligne of enSouffrance) {
-    db.update(paymentDeclarations)
+    await db.update(paymentDeclarations)
       .set({ escalatedAt: maintenant })
       .where(eq(paymentDeclarations.id, ligne.declaration.id))
-      .run()
 
     // Écriture au registre : l'alerte devient consultable par **tout** membre
     // actif, pas seulement par le bureau.
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId: ligne.tontineId,
       roundId: ligne.roundId,
       type: 'declaration_escalated',
@@ -68,7 +66,7 @@ export function escaladerDeclarations(db: Db, maintenant: Date = new Date()): nu
       },
     })
 
-    notifierTontine(db, ligne.tontineId, {
+    await notifierTontine(db, ligne.tontineId, {
       type: 'declaration_escaladee',
       title: 'Une déclaration attend depuis deux jours',
       body: 'Une cotisation déclarée n’a toujours pas été confirmée. Elle est signalée au registre.',
@@ -89,10 +87,10 @@ export function escaladerDeclarations(db: Db, maintenant: Date = new Date()): nu
  * La différence compte : accuser à tort casse une tontine aussi sûrement que
  * voler dedans.
  */
-export function signalerEspecesNonConfirmees(db: Db, maintenant: Date = new Date()): number {
+export async function signalerEspecesNonConfirmees(db: Db, maintenant: Date = new Date()): Promise<number> {
   const limite = new Date(maintenant.getTime() - ESPECES_NON_CONFIRMEES_HEURES * 3_600_000)
 
-  const sansReponse = db
+  const sansReponse = await db
     .select({
       declaration: paymentDeclarations,
       contributionId: contributions.id,
@@ -110,15 +108,13 @@ export function signalerEspecesNonConfirmees(db: Db, maintenant: Date = new Date
       isNull(paymentDeclarations.unconfirmedFlaggedAt),
       lt(paymentDeclarations.declaredAt, limite),
     ))
-    .all()
 
   for (const ligne of sansReponse) {
-    db.update(paymentDeclarations)
+    await db.update(paymentDeclarations)
       .set({ unconfirmedFlaggedAt: maintenant })
       .where(eq(paymentDeclarations.id, ligne.declaration.id))
-      .run()
 
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId: ligne.tontineId,
       roundId: ligne.roundId,
       type: 'cash_unconfirmed',
@@ -130,15 +126,14 @@ export function signalerEspecesNonConfirmees(db: Db, maintenant: Date = new Date
       },
     })
 
-    const [membre] = db
+    const [membre] = await db
       .select({ userId: memberships.userId })
       .from(memberships)
       .where(eq(memberships.id, ligne.membershipId))
       .limit(1)
-      .all()
 
     if (membre?.userId) {
-      notifier(db, membre.userId, {
+      await notifier(db, membre.userId, {
         type: 'especes_non_confirmees',
         tontineId: ligne.tontineId,
         title: 'Un versement attend ta confirmation',
@@ -157,8 +152,8 @@ export function signalerEspecesNonConfirmees(db: Db, maintenant: Date = new Date
  * C'est la contrepartie de la déclaration d'espèces par le trésorier. Le membre
  * n'a pas envoyé lui-même ; il doit pouvoir dire s'il reconnaît le versement.
  */
-export function reconnaitreVersement(db: Db, declarationId: string, membreUserId: string) {
-  const [ligne] = db
+export async function reconnaitreVersement(db: Db, declarationId: string, membreUserId: string) {
+  const [ligne] = await db
     .select({
       declaration: paymentDeclarations,
       tontineId: rounds.tontineId,
@@ -170,15 +165,13 @@ export function reconnaitreVersement(db: Db, declarationId: string, membreUserId
     .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!ligne) return { ok: false as const, raison: 'introuvable' }
   if (ligne.membershipUserId !== membreUserId) return { ok: false as const, raison: 'pas_le_sien' }
 
-  db.update(paymentDeclarations)
+  await db.update(paymentDeclarations)
     .set({ memberAcknowledgedAt: new Date() })
     .where(eq(paymentDeclarations.id, declarationId))
-    .run()
 
   return { ok: true as const }
 }

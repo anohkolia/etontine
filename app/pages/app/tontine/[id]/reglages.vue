@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TontineEmoji } from '#shared/constants/tontine'
 import { TONTINE_EMOJIS } from '#shared/constants/tontine'
+import { tontineDraftInput, tontineFinanceInput, tontineRulesInput } from '#shared/schemas'
 
 /**
  * Réglages d'une tontine — président.
@@ -24,6 +25,7 @@ import { TONTINE_EMOJIS } from '#shared/constants/tontine'
  * pour certains déjà versés. L'écran le dit au lieu de griser en silence.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -48,6 +50,7 @@ interface Detail {
   status: 'draft' | 'open' | 'running' | 'closed' | 'archived'
   shareAmount: number
   frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly'
+  startDate: string
   penaltyAmount: number
   penaltyPeriod: 'once' | 'per_day'
   graceDays: number
@@ -57,10 +60,10 @@ interface Detail {
 }
 
 const FREQUENCE: Record<Detail['frequency'], string> = {
-  daily: 'Journalière',
-  weekly: 'Hebdomadaire',
-  biweekly: 'Tous les quinze jours',
-  monthly: 'Mensuelle',
+  daily: t('tontine.reglages.journaliere'),
+  weekly: t('tontine.reglages.hebdomadaire'),
+  biweekly: t('tontine.reglages.tous_les_quinze_jours'),
+  monthly: t('tontine.reglages.mensuelle'),
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur' | 'refus'>('chargement')
@@ -79,6 +82,7 @@ const form = reactive({
   // Réglages d'argent : modifiables tant que la tontine n'a pas démarré.
   shareAmount: 0,
   frequency: 'monthly' as Detail['frequency'],
+  startDate: '',
   penaltyAmount: 0,
   penaltyPeriod: 'once' as 'once' | 'per_day',
   graceDays: 0,
@@ -89,6 +93,14 @@ const EMOJIS = TONTINE_EMOJIS
 
 const canauxVerifies = computed(() => mesCanaux.value.filter(c => c.verifiedAt))
 const lancee = computed(() => tontine.value?.status === 'running')
+
+/**
+ * La date du premier tour se change ici jusqu'au démarrage. Elle n'était
+ * modifiable nulle part : fixée au brouillon, elle était souvent déjà passée
+ * quand le groupe était enfin au complet, et le tour 1 naissait en retard.
+ */
+const aujourdhui = new Date().toISOString().slice(0, 10)
+const dateValide = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.startDate) && form.startDate >= aujourdhui)
 
 /** Le nom est un réglage de présentation, sauf qu'il figure dans les invitations. */
 const nomModifiable = computed(() => tontine.value?.status === 'draft')
@@ -115,7 +127,7 @@ const gelEnCours = computed(() =>
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -144,6 +156,7 @@ async function charger() {
       collectionChannelIds: detail.channels.map(c => c.id),
       shareAmount: detail.shareAmount,
       frequency: detail.frequency,
+      startDate: detail.startDate,
       penaltyAmount: detail.penaltyAmount,
       penaltyPeriod: detail.penaltyPeriod,
       graceDays: detail.graceDays,
@@ -157,9 +170,35 @@ async function charger() {
   }
 }
 
+/**
+ * Les mêmes schémas que le serveur, appliqués avant l'envoi : le nom, les
+ * réglages d'argent et les règles d'amende. L'erreur s'affiche sous le champ.
+ */
+const validationInfos = useFormulaire(tontineDraftInput.pick({ name: true, description: true, locality: true }))
+const validationArgent = useFormulaire(tontineFinanceInput.pick({ shareAmount: true, frequency: true }))
+// Sans le plafond, que cet écran n'édite pas : le raffinement « une amende
+// journalière a un plafond » est celui du wizard, où le plafond se saisit.
+const validationRegles = useFormulaire(tontineRulesInput.innerType().pick({ penaltyAmount: true, penaltyPeriod: true, graceDays: true }))
+
+async function reglagesValides(): Promise<boolean> {
+  validationInfos.setValues({
+    name: form.name, description: form.description || undefined, locality: form.locality || undefined,
+  }, false)
+  if ((await validationInfos.valider()) === null) return false
+  if (lancee.value) return true
+
+  validationArgent.setValues({ shareAmount: form.shareAmount, frequency: form.frequency }, false)
+  validationRegles.setValues({
+    penaltyAmount: form.penaltyAmount, penaltyPeriod: form.penaltyPeriod, graceDays: form.graceDays,
+  }, false)
+  const [argent, regles] = await Promise.all([validationArgent.valider(), validationRegles.valider()])
+  return argent !== null && regles !== null
+}
+
 async function enregistrer() {
   erreur.value = null
   succes.value = null
+  if (!(await reglagesValides())) return
   enCours.value = true
   try {
     const corps: Record<string, unknown> = {
@@ -176,6 +215,7 @@ async function enregistrer() {
       Object.assign(corps, {
         shareAmount: form.shareAmount,
         frequency: form.frequency,
+        startDate: form.startDate,
         penaltyAmount: form.penaltyAmount,
         penaltyPeriod: form.penaltyPeriod,
         graceDays: form.graceDays,
@@ -185,8 +225,8 @@ async function enregistrer() {
 
     await $fetch(`/api/v1/tontines/${tontineId}`, { method: 'PATCH', body: corps })
     succes.value = canalChange.value
-      ? 'Réglages enregistrés. Tous les membres viennent d’être prévenus du changement de numéro.'
-      : 'Réglages enregistrés.'
+      ? t('tontine.reglages.reglages_enregistres_tous_les')
+      : t('tontine.reglages.reglages_enregistres')
     await charger()
   }
   catch (e) {
@@ -197,19 +237,62 @@ async function enregistrer() {
   }
 }
 
+/**
+ * Fin de vie d'une tontine, selon son état.
+ *
+ * Aucun de ces trois gestes n'existait : une tontine publiée qui ne démarrait
+ * jamais gardait sa place au quota pour toujours, un brouillon créé par erreur
+ * restait dans la base, et un cycle fini s'affichait à l'accueil sans fin.
+ */
+const finOuverte = ref(false)
+const finEnCours = ref(false)
+const motifAnnulation = ref('')
+
+// Types de retour explicites : sans eux, l'inférence des routes typées de
+// Nuxt part en récursion infinie sur ces adresses à segment dynamique.
+async function finDeVie(chemin: string, method: 'POST' | 'DELETE', body?: Record<string, unknown>) {
+  erreur.value = null
+  finEnCours.value = true
+  try {
+    await $fetch<{ ok: true }>(chemin, { method, body })
+    await navigateTo('/app')
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    finEnCours.value = false
+  }
+}
+
+function supprimerBrouillon() {
+  return finDeVie(`/api/v1/tontines/${tontineId}`, 'DELETE')
+}
+
+function annulerTontine() {
+  return finDeVie(`/api/v1/tontines/${tontineId}/cancel`, 'POST', { reason: motifAnnulation.value.trim() })
+}
+
+function archiverTontine() {
+  return finDeVie(`/api/v1/tontines/${tontineId}/archive`, 'POST')
+}
+
 onMounted(charger)
 
 useEnTete(() => ({
-  titre: 'Réglages',
+  titre: t('tontine.reglages.reglages'),
   sousTitre: tontine.value?.name,
-  retour: { to: `/app/tontine/${tontineId}`, label: 'La tontine' },
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Réglages — eTontine' })
+useHead({ title: t('tontine.reglages.reglages_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <TontineTabs :tontine-id="tontineId" />
+    <TontineTabs
+      :tontine-id="tontineId"
+      :role="tontine?.myRole"
+    />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -225,8 +308,8 @@ useHead({ title: 'Réglages — eTontine' })
 
     <EmptyState
       v-else-if="etat === 'refus'"
-      title="Réservé au président"
-      description="Seul le président modifie les réglages d’une tontine. Le bureau peut confirmer les cotisations et verser le pot."
+      :title="$t('tontine.reglages.reserve_au_president')"
+      :description="$t('tontine.reglages.seul_le_president_modifie')"
       icon="lucide:lock"
       data-testid="refus-reglages"
     />
@@ -266,32 +349,32 @@ useHead({ title: 'Réglages — eTontine' })
            Rien ici ne touche à un montant ni à un statut. -->
       <section class="card-surface flex flex-col gap-4 p-4">
         <h2 class="font-semibold text-ink">
-          Présentation
+          {{ $t('tontine.reglages.presentation') }}
         </h2>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="nom-tontine"
         >
-          Nom
+          {{ $t('tontine.reglages.nom') }}
           <InputText
             id="nom-tontine"
             v-model="form.name"
             :disabled="!nomModifiable"
             data-testid="champ-nom"
           />
+          <ErreurChamp :message="validationInfos.erreur('name')" />
           <span
             v-if="!nomModifiable"
             class="text-sm font-normal text-ink-subtle"
           >
-            Le nom est figé depuis la publication : il figure dans les
-            invitations déjà envoyées et sur les reçus déjà émis.
+            {{ $t('tontine.reglages.le_nom_est_fige') }}
           </span>
         </label>
 
         <fieldset class="flex flex-col gap-2">
           <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Image
+            {{ $t('tontine.reglages.image') }}
           </legend>
           <div class="flex flex-wrap gap-2">
             <button
@@ -313,7 +396,7 @@ useHead({ title: 'Réglages — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="lieu"
         >
-          Quartier ou lieu
+          {{ $t('tontine.reglages.quartier_ou_lieu') }}
           <InputText
             id="lieu"
             v-model="form.locality"
@@ -325,7 +408,7 @@ useHead({ title: 'Réglages — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="description"
         >
-          Description
+          {{ $t('tontine.reglages.description') }}
           <InputText
             id="description"
             v-model="form.description"
@@ -337,11 +420,10 @@ useHead({ title: 'Réglages — eTontine' })
       <!-- Canaux de collecte — règle 22. -->
       <section class="card-surface flex flex-col gap-4 p-4">
         <h2 class="font-semibold text-ink">
-          Numéro de collecte
+          {{ $t('tontine.reglages.numero_de_collecte') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          C’est là que tes membres envoient leurs cotisations. Ils y lisent le
-          nom du titulaire avant de valider.
+          {{ $t('tontine.reglages.c_est_la_que') }}
         </p>
 
         <p
@@ -356,14 +438,13 @@ useHead({ title: 'Réglages — eTontine' })
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Ce numéro a changé récemment. Il reste signalé aux membres jusqu’au
-          {{ formatDate(gelEnCours.frozenUntil!) }}.
+          {{ $t('tontine.reglages.ce_numero_a_change', { p0: formatDate(gelEnCours.frozenUntil!) }) }}
         </p>
 
         <EmptyState
           v-if="canauxVerifies.length === 0"
-          title="Aucun numéro vérifié"
-          description="Ajoute et vérifie un numéro de collecte pour pouvoir le rattacher à cette tontine."
+          :title="$t('tontine.reglages.aucun_numero_verifie')"
+          :description="$t('tontine.reglages.ajoute_et_verifie_un')"
           icon="lucide:smartphone"
         >
           <template #action>
@@ -377,7 +458,7 @@ useHead({ title: 'Réglages — eTontine' })
                 size="1rem"
                 aria-hidden="true"
               />
-              Ajouter un numéro
+              {{ $t('tontine.reglages.ajouter_un_numero') }}
             </NuxtLink>
           </template>
         </EmptyState>
@@ -415,7 +496,7 @@ useHead({ title: 'Réglages — eTontine' })
               size="1rem"
               aria-hidden="true"
             />
-            Ajouter un autre numéro
+            {{ $t('tontine.reglages.ajouter_un_autre_numero') }}
           </NuxtLink>
         </template>
 
@@ -434,12 +515,8 @@ useHead({ title: 'Réglages — eTontine' })
             aria-hidden="true"
           />
           <span>
-            <strong class="font-semibold">Tu changes le numéro de collecte d’une
-              tontine en cours.</strong>
-            Tous les membres seront prévenus, le changement sera inscrit au
-            registre, et le nouveau numéro restera signalé comme récent pendant
-            48 heures. C’est volontaire : c’est le geste que reproduirait
-            quelqu’un ayant pris la main sur ton compte.
+            <strong class="font-semibold">{{ $t('tontine.reglages.tu_changes_le_numero') }}</strong>
+            {{ $t('tontine.reglages.tous_les_membres_seront') }}
           </span>
         </p>
       </section>
@@ -447,7 +524,7 @@ useHead({ title: 'Réglages — eTontine' })
       <!-- Réglages d'argent : lecture seule une fois la tontine lancée. -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
-          Argent et règles
+          {{ $t('tontine.reglages.argent_et_regles') }}
         </h2>
 
         <p
@@ -461,8 +538,7 @@ useHead({ title: 'Réglages — eTontine' })
             class="mt-0.5 shrink-0"
             aria-hidden="true"
           />
-          Ces réglages sont figés depuis le démarrage. Les modifier réécrirait
-          des cotisations déjà calculées, et pour certaines déjà versées.
+          {{ $t('tontine.reglages.ces_reglages_sont_figes') }}
         </p>
 
         <!-- Avant le démarrage, ces réglages s'éditent ici. C'était le trou :
@@ -478,7 +554,7 @@ useHead({ title: 'Réglages — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="montant-part"
           >
-            Montant d’une part (FCFA)
+            {{ $t('tontine.reglages.montant_d_une_part') }}
             <InputText
               id="montant-part"
               :value="form.shareAmount"
@@ -486,13 +562,14 @@ useHead({ title: 'Réglages — eTontine' })
               data-testid="champ-montant-part"
               @input="form.shareAmount = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
             />
+            <ErreurChamp :message="validationArgent.erreur('shareAmount')" />
           </label>
 
           <label
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="frequence"
           >
-            Fréquence
+            {{ $t('tontine.reglages.frequence') }}
             <select
               id="frequence"
               v-model="form.frequency"
@@ -511,9 +588,35 @@ useHead({ title: 'Réglages — eTontine' })
 
           <label
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="date-demarrage"
+          >
+            {{ $t('tontine.reglages.date_du_premier_tour') }}
+            <input
+              id="date-demarrage"
+              v-model="form.startDate"
+              type="date"
+              :min="aujourdhui"
+              class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-ink"
+              data-testid="champ-date-demarrage"
+            >
+            <span class="text-sm font-normal text-ink-subtle">
+              {{ $t('tontine.reglages.toutes_les_echeances_en') }}
+            </span>
+            <span
+              v-if="!dateValide"
+              class="text-sm font-normal text-disputed-ink"
+              role="alert"
+              data-testid="erreur-date-demarrage"
+            >
+              {{ $t('tontine.reglages.la_date_ne_peut') }}
+            </span>
+          </label>
+
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="amende"
           >
-            Amende de retard (FCFA, 0 pour aucune)
+            {{ $t('tontine.reglages.amende_de_retard_fcfa') }}
             <InputText
               id="amende"
               :value="form.penaltyAmount"
@@ -527,7 +630,7 @@ useHead({ title: 'Réglages — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="periode-amende"
           >
-            Comment elle s’applique
+            {{ $t('tontine.reglages.comment_elle_s_applique') }}
             <select
               id="periode-amende"
               v-model="form.penaltyPeriod"
@@ -535,10 +638,10 @@ useHead({ title: 'Réglages — eTontine' })
               data-testid="champ-periode-amende"
             >
               <option value="once">
-                Une seule fois
+                {{ $t('tontine.reglages.une_seule_fois') }}
               </option>
               <option value="per_day">
-                Par jour de retard
+                {{ $t('tontine.reglages.par_jour_de_retard') }}
               </option>
             </select>
           </label>
@@ -547,7 +650,7 @@ useHead({ title: 'Réglages — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="delai-grace"
           >
-            Délai de grâce (jours)
+            {{ $t('tontine.reglages.delai_de_grace_jours') }}
             <InputText
               id="delai-grace"
               :value="form.graceDays"
@@ -555,9 +658,9 @@ useHead({ title: 'Réglages — eTontine' })
               data-testid="champ-delai-grace"
               @input="form.graceDays = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
             />
+            <ErreurChamp :message="validationRegles.erreur('graceDays')" />
             <span class="text-sm font-normal text-ink-subtle">
-              Marquer quelqu’un en retard dès le lendemain use la relance et
-              fait désinstaller l’application.
+              {{ $t('tontine.reglages.marquer_quelqu_un_en') }}
             </span>
           </label>
 
@@ -565,7 +668,7 @@ useHead({ title: 'Réglages — eTontine' })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="seuil-contre-validation"
           >
-            Contre-validation au-delà de (FCFA)
+            {{ $t('tontine.reglages.contre_validation_au_dela') }}
             <InputText
               id="seuil-contre-validation"
               :value="form.counterValidationThreshold"
@@ -574,8 +677,7 @@ useHead({ title: 'Réglages — eTontine' })
               @input="form.counterValidationThreshold = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
             />
             <span class="text-sm font-normal text-ink-subtle">
-              Au-dessus de ce montant, un versement demande une seconde paire
-              d’yeux avant de partir : le censeur, ou celui qui prend la main.
+              {{ $t('tontine.reglages.au_dessus_de_ce') }}
             </span>
           </label>
         </div>
@@ -586,7 +688,7 @@ useHead({ title: 'Réglages — eTontine' })
         >
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Montant d’une part
+              {{ $t('tontine.reglages.montant_d_une_part_2') }}
             </dt>
             <dd class="amount font-medium text-ink">
               {{ format(tontine.shareAmount) }}
@@ -594,7 +696,7 @@ useHead({ title: 'Réglages — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Fréquence
+              {{ $t('tontine.reglages.frequence') }}
             </dt>
             <dd class="font-medium text-ink">
               {{ FREQUENCE[tontine.frequency] }}
@@ -602,24 +704,24 @@ useHead({ title: 'Réglages — eTontine' })
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Amende
+              {{ $t('tontine.reglages.amende') }}
             </dt>
             <dd class="font-medium text-ink">
               <template v-if="tontine.penaltyAmount > 0">
                 {{ format(tontine.penaltyAmount) }}
-                {{ tontine.penaltyPeriod === 'per_day' ? 'par jour' : 'une fois' }}
+                {{ tontine.penaltyPeriod === 'per_day' ? $t('tontine.reglages.par_jour') : $t('tontine.reglages.une_fois') }}
               </template>
               <template v-else>
-                Aucune
+                {{ $t('tontine.reglages.aucune') }}
               </template>
             </dd>
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-ink-muted">
-              Délai de grâce
+              {{ $t('tontine.reglages.delai_de_grace') }}
             </dt>
             <dd class="tabular font-medium text-ink">
-              {{ tontine.graceDays }} jour{{ tontine.graceDays > 1 ? 's' : '' }}
+              {{ $t('tontine.reglages.p0_jour_p1', { p0: tontine.graceDays, p1: tontine.graceDays > 1 ? 's' : '' }) }}
             </dd>
           </div>
         </dl>
@@ -634,18 +736,115 @@ useHead({ title: 'Réglages — eTontine' })
           class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-5 text-sm font-semibold text-ink"
           data-testid="lien-configurer"
         >
-          Reprendre le wizard
+          {{ $t('tontine.reglages.reprendre_le_wizard') }}
         </NuxtLink>
       </section>
 
       <!-- Règle 13 : l'action primaire est en bas d'écran. -->
       <Button
-        :label="enCours ? 'Enregistrement…' : 'Enregistrer'"
-        :disabled="enCours"
+        :label="enCours ? $t('tontine.reglages.enregistrement') : $t('tontine.reglages.enregistrer')"
+        :disabled="enCours || (!lancee && !dateValide)"
         class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
         data-testid="bouton-enregistrer-reglages"
         @click="enregistrer"
       />
+
+      <!-- Fin de vie. Chaque état a sa sortie, et une seule : un brouillon se
+           supprime, une tontine publiée s'annule, une tontine terminée
+           s'archive. Une tontine en cours n'a pas de sortie — elle va au bout
+           de son cycle, et l'écran le dit plutôt que de cacher la section. -->
+      <section
+        class="flex flex-col gap-3 rounded-card border border-disputed-ink/20 p-4"
+        data-testid="zone-fin-de-vie"
+      >
+        <h2 class="font-semibold text-ink">
+          {{ tontine.status === 'draft' ? $t('tontine.reglages.supprimer_ce_brouillon')
+            : tontine.status === 'open' ? $t('tontine.reglages.annuler_cette_tontine')
+              : tontine.status === 'closed' ? $t('tontine.reglages.archiver_cette_tontine')
+                : $t('tontine.reglages.fin_de_la_tontine') }}
+        </h2>
+
+        <template v-if="tontine.status === 'draft'">
+          <p class="text-sm text-ink-muted">
+            {{ $t('tontine.reglages.personne_ne_l_a') }}
+          </p>
+          <Button
+            :label="finOuverte ? $t('commun.annuler') : $t('tontine.reglages.supprimer_le_brouillon')"
+            class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+            data-testid="bouton-supprimer-brouillon"
+            @click="finOuverte = !finOuverte"
+          />
+          <Button
+            v-if="finOuverte"
+            :label="finEnCours ? $t('tontine.reglages.suppression') : $t('commun.oui_supprimer')"
+            :disabled="finEnCours"
+            class="bg-disputed-ink text-surface"
+            data-testid="bouton-confirmer-suppression"
+            @click="supprimerBrouillon"
+          />
+        </template>
+
+        <template v-else-if="tontine.status === 'open'">
+          <p class="text-sm text-ink-muted">
+            {{ $t('tontine.reglages.la_tontine_n_a') }}
+          </p>
+          <Button
+            :label="finOuverte ? $t('commun.annuler') : $t('tontine.reglages.annuler_la_tontine')"
+            class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+            data-testid="bouton-annuler-tontine"
+            @click="finOuverte = !finOuverte"
+          />
+          <template v-if="finOuverte">
+            <label
+              class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+              for="motif-annulation"
+            >
+              {{ $t('tontine.reglages.motif_pour_les_membres') }}
+              <InputText
+                id="motif-annulation"
+                v-model="motifAnnulation"
+                :placeholder="$t('tontine.reglages.le_groupe_ne_s')"
+                data-testid="champ-motif-annulation"
+              />
+            </label>
+            <Button
+              :label="finEnCours ? $t('tontine.reglages.annulation') : $t('tontine.reglages.confirmer_l_annulation')"
+              :disabled="finEnCours || motifAnnulation.trim().length < 5"
+              class="bg-disputed-ink text-surface"
+              data-testid="bouton-confirmer-annulation"
+              @click="annulerTontine"
+            />
+          </template>
+        </template>
+
+        <template v-else-if="tontine.status === 'closed'">
+          <p class="text-sm text-ink-muted">
+            {{ $t('tontine.reglages.le_cycle_est_fini') }}
+          </p>
+          <Button
+            :label="finEnCours ? $t('tontine.reglages.archivage') : $t('tontine.reglages.archiver')"
+            :disabled="finEnCours"
+            class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
+            data-testid="bouton-archiver"
+            @click="archiverTontine"
+          />
+        </template>
+
+        <p
+          v-else-if="tontine.status === 'running'"
+          class="text-sm text-ink-muted"
+          data-testid="fin-impossible"
+        >
+          {{ $t('tontine.reglages.une_tontine_en_cours') }}
+        </p>
+
+        <p
+          v-else
+          class="text-sm text-ink-muted"
+        >
+          {{ $t('tontine.reglages.cette_tontine_est_archivee') }}
+        </p>
+      </section>
     </template>
   </div>
 </template>

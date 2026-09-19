@@ -11,6 +11,6 @@ export default defineEventHandler(async (event) => {
   const parsed = collectionChannelInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  const id = creerCanal(useDb(), user.id, parsed.data)
+  const id = await creerCanal(useDb(), user.id, parsed.data)
   return { id, verified: false }
 })

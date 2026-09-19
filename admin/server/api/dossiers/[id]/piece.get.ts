@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
   if (!id) throw apiError('NOT_FOUND', 'Pièce introuvable.')
 
   const db = useDb()
-  const url = urlPiece(db, id, type)
+  const url = await urlPiece(db, id, type)
   if (!url) throw apiError('NOT_FOUND', 'Pièce introuvable.')
 
   const emplacement = decomposerUrlPiece(url)
@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
   const piece = await lirePiece(emplacement.userId, emplacement.nom)
   if (!piece) throw apiError('NOT_FOUND', 'Pièce introuvable.')
 
-  journaliserConsultation(db, admin, id, type)
+  await journaliserConsultation(db, admin, id, type)
 
   setHeader(event, 'content-type', piece.type)
   setHeader(event, 'cache-control', 'no-store')

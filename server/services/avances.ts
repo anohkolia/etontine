@@ -19,7 +19,7 @@ type Db = ReturnType<typeof useDb>
  * L'avance n'est **pas** un paiement : elle ne modifie aucune cotisation. C'est
  * une reconnaissance de dette entre deux membres, tenue à part.
  */
-export function enregistrerAvance(db: Db, input: {
+export async function enregistrerAvance(db: Db, input: {
   roundId: string
   fromMembershipId: string
   toMembershipId: string
@@ -31,34 +31,33 @@ export function enregistrerAvance(db: Db, input: {
     })
   }
 
-  const [tour] = db.select().from(rounds).where(eq(rounds.id, input.roundId)).limit(1).all()
+  const [tour] = await db.select().from(rounds).where(eq(rounds.id, input.roundId)).limit(1)
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
   for (const id of [input.fromMembershipId, input.toMembershipId]) {
-    const [m] = db.select().from(memberships).where(eq(memberships.id, id)).limit(1).all()
+    const [m] = await db.select().from(memberships).where(eq(memberships.id, id)).limit(1)
     if (!m || m.tontineId !== tour.tontineId) {
       throw apiError('VALIDATION_ERROR', 'Membre inconnu dans cette tontine.', { field: 'membershipId' })
     }
   }
 
   const id = randomUUID()
-  db.insert(advances).values({
+  await db.insert(advances).values({
     id,
     roundId: input.roundId,
     fromMembershipId: input.fromMembershipId,
     toMembershipId: input.toMembershipId,
     amount: input.amount,
-  }).run()
+  })
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, input.toMembershipId))
     .limit(1)
-    .all()
 
   if (beneficiaire?.userId) {
-    notifier(db, beneficiaire.userId, {
+    await notifier(db, beneficiaire.userId, {
       type: 'avance_enregistree',
       tontineId: tour.tontineId,
       title: 'Une avance a été enregistrée à ton nom',
@@ -71,12 +70,12 @@ export function enregistrerAvance(db: Db, input: {
 }
 
 /** Solde une avance : la dette entre les deux membres est réglée. */
-export function solderAvance(db: Db, avanceId: string) {
-  const [avance] = db.select().from(advances).where(eq(advances.id, avanceId)).limit(1).all()
+export async function solderAvance(db: Db, avanceId: string) {
+  const [avance] = await db.select().from(advances).where(eq(advances.id, avanceId)).limit(1)
   if (!avance) throw apiError('NOT_FOUND', 'Avance introuvable.')
   if (avance.settledAt) throw apiError('INVALID_TRANSITION', 'Cette avance est déjà soldée.')
 
-  db.update(advances).set({ settledAt: new Date() }).where(eq(advances.id, avanceId)).run()
+  await db.update(advances).set({ settledAt: new Date() }).where(eq(advances.id, avanceId))
   return { id: avanceId, settled: true }
 }
 
@@ -86,9 +85,9 @@ export function solderAvance(db: Db, avanceId: string) {
  * Une avance sans noms ne dit rien : « 25 000 F, tour 3 » ne règle aucune
  * dispute. Ce qu'on vient y chercher, c'est **qui** a dépanné **qui**.
  */
-export function avancesDe(db: Db, tontineId: string) {
+export async function avancesDe(db: Db, tontineId: string) {
   const noms = new Map(
-    db
+    (await db
       .select({
         id: memberships.id,
         managedName: memberships.managedName,
@@ -97,20 +96,18 @@ export function avancesDe(db: Db, tontineId: string) {
       })
       .from(memberships)
       .leftJoin(users, eq(users.id, memberships.userId))
-      .where(eq(memberships.tontineId, tontineId))
-      .all()
+      .where(eq(memberships.tontineId, tontineId)))
       .map(m => [
         m.id,
         [m.firstName, m.lastName].filter(Boolean).join(' ') || m.managedName || 'Membre',
       ] as const),
   )
 
-  return db
+  return (await db
     .select({ advance: advances, roundIndex: rounds.index })
     .from(advances)
     .innerJoin(rounds, eq(rounds.id, advances.roundId))
-    .where(eq(rounds.tontineId, tontineId))
-    .all()
+    .where(eq(rounds.tontineId, tontineId)))
     .map(a => ({
       ...a,
       nomPreteur: noms.get(a.advance.fromMembershipId) ?? 'Membre',

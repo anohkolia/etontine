@@ -14,14 +14,14 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const ADMIN = { id: 'aaaa0000-0000-4000-8000-000000000001', phone: '+2250707001111' }
 const DEMANDEUR = 'aaaa0000-0000-4000-8000-000000000002'
 const AUTRE = 'aaaa0000-0000-4000-8000-000000000003'
 
 async function poserDossier(id: string, quand: Date) {
-  db.update(users).set({
+  await db.update(users).set({
     firstName: 'Aya',
     lastName: 'Koné',
     kycStatus: 'pending_review',
@@ -30,11 +30,11 @@ async function poserDossier(id: string, quand: Date) {
     kycSelfieUrl: '/api/v1/uploads/proof/aaaa0000-0000-4000-8000-000000000002/'
       + 'bbbb0000-0000-4000-8000-000000000002.jpg',
     kycSubmittedAt: quand,
-  }).where(eq(users.id, id)).run()
+  }).where(eq(users.id, id))
 }
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
@@ -83,7 +83,7 @@ describe('liste blanche des administrateurs', () => {
     // La propriété qui compte : écrire dans `users` ne donne pas les droits
     // d'administration. Une compromission de la base ne suffit pas.
     process.env.NUXT_ADMIN_PHONES = '+2250707001111'
-    db.update(users).set({ kycLevel: 3 }).where(eq(users.id, AUTRE)).run()
+    await db.update(users).set({ kycLevel: 3 }).where(eq(users.id, AUTRE))
 
     expect(estAdministrateur('+2250707003333')).toBe(false)
   })
@@ -95,12 +95,12 @@ describe('file des dossiers', () => {
     await poserDossier(AUTRE, new Date('2026-01-12T09:00:00Z'))
 
     // Une file triée à l'envers laisse les dossiers difficiles s'enfoncer.
-    expect(dossiersEnAttente(db).map(d => d.userId)).toEqual([DEMANDEUR, AUTRE])
+    expect((await dossiersEnAttente(db)).map(d => d.userId)).toEqual([DEMANDEUR, AUTRE])
   })
 
   it('ne montre pas où sont rangées les pièces', async () => {
     await poserDossier(DEMANDEUR, new Date())
-    const [d] = dossiersEnAttente(db)
+    const [d] = await dossiersEnAttente(db)
 
     expect(d!.hasDocument).toBe(true)
     expect(d!.hasSelfie).toBe(true)
@@ -110,28 +110,28 @@ describe('file des dossiers', () => {
   it('sépare les dossiers traités de ceux en attente', async () => {
     await poserDossier(DEMANDEUR, new Date())
     await poserDossier(AUTRE, new Date())
-    approuverDossier(db, DEMANDEUR, ADMIN)
+    await approuverDossier(db, DEMANDEUR, ADMIN)
 
-    expect(dossiersEnAttente(db).map(d => d.userId)).toEqual([AUTRE])
-    expect(dossiersTraites(db).map(d => d.userId)).toEqual([DEMANDEUR])
+    expect((await dossiersEnAttente(db)).map(d => d.userId)).toEqual([AUTRE])
+    expect((await dossiersTraites(db)).map(d => d.userId)).toEqual([DEMANDEUR])
   })
 })
 
 describe('approbation', () => {
-  beforeEach(async () => poserDossier(DEMANDEUR, new Date()))
+  beforeEach(async () => await poserDossier(DEMANDEUR, new Date()))
 
-  it('accorde le palier 2', () => {
-    approuverDossier(db, DEMANDEUR, ADMIN)
+  it('accorde le palier 2', async () => {
+    await approuverDossier(db, DEMANDEUR, ADMIN)
 
-    const d = dossier(db, DEMANDEUR)
+    const d = await dossier(db, DEMANDEUR)
     expect(d.kycStatus).toBe('approved')
     expect(d.kycLevel).toBe(2)
   })
 
-  it('journalise la décision avec son auteur', () => {
-    approuverDossier(db, DEMANDEUR, ADMIN)
+  it('journalise la décision avec son auteur', async () => {
+    await approuverDossier(db, DEMANDEUR, ADMIN)
 
-    const journal = journalAdministration(db)
+    const journal = await journalAdministration(db)
     expect(journal).toHaveLength(1)
     expect(journal[0]!.action).toBe('kyc_approuve')
     expect(journal[0]!.actorId).toBe(ADMIN.id)
@@ -140,10 +140,10 @@ describe('approbation', () => {
     expect(journal[0]!.targetUserId).toBe(DEMANDEUR)
   })
 
-  it('prévient la personne, sans montant', () => {
-    approuverDossier(db, DEMANDEUR, ADMIN)
+  it('prévient la personne, sans montant', async () => {
+    await approuverDossier(db, DEMANDEUR, ADMIN)
 
-    const envoyees = db.select().from(notifications).all().filter(n => n.userId === DEMANDEUR)
+    const envoyees = (await db.select().from(notifications)).filter(n => n.userId === DEMANDEUR)
     expect(envoyees).toHaveLength(1)
     expect(`${envoyees[0]!.title} ${envoyees[0]!.body}`).not.toMatch(/FCFA|\d{4}/)
   })
@@ -153,53 +153,53 @@ describe('approbation', () => {
     // délivre un quitus à soi-même.
     await poserDossier(ADMIN.id, new Date())
 
-    expect(() => approuverDossier(db, ADMIN.id, ADMIN)).toThrow(
+    await expect(approuverDossier(db, ADMIN.id, ADMIN)).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('refuse une seconde décision', () => {
-    approuverDossier(db, DEMANDEUR, ADMIN)
+  it('refuse une seconde décision', async () => {
+    await approuverDossier(db, DEMANDEUR, ADMIN)
 
-    expect(() => approuverDossier(db, DEMANDEUR, ADMIN)).toThrow(
+    await expect(approuverDossier(db, DEMANDEUR, ADMIN)).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
-    expect(() => rejeterDossier(db, DEMANDEUR, ADMIN, 'Motif suffisamment long')).toThrow(
+    await expect(rejeterDossier(db, DEMANDEUR, ADMIN, 'Motif suffisamment long')).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
 })
 
 describe('rejet', () => {
-  beforeEach(async () => poserDossier(DEMANDEUR, new Date()))
+  beforeEach(async () => await poserDossier(DEMANDEUR, new Date()))
 
-  it('exige un motif explicite', () => {
+  it('exige un motif explicite', async () => {
     // Un refus sans explication est un cul-de-sac : la personne redépose la
     // même chose et l'on repart pour un tour.
     for (const motif of ['', 'flou', 'illisible']) {
-      expect(() => rejeterDossier(db, DEMANDEUR, ADMIN, motif)).toThrow(
+      await expect(rejeterDossier(db, DEMANDEUR, ADMIN, motif)).rejects.toThrow(
         expect.objectContaining({ statusCode: 422 }),
       )
     }
   })
 
-  it('conserve le motif et le transmet', () => {
-    rejeterDossier(db, DEMANDEUR, ADMIN, 'La pièce est illisible : le numéro n’apparaît pas.')
+  it('conserve le motif et le transmet', async () => {
+    await rejeterDossier(db, DEMANDEUR, ADMIN, 'La pièce est illisible : le numéro n’apparaît pas.')
 
-    const d = dossier(db, DEMANDEUR)
+    const d = await dossier(db, DEMANDEUR)
     expect(d.kycStatus).toBe('rejected')
     expect(d.rejectionReason).toContain('illisible')
 
-    const envoyees = db.select().from(notifications).all().filter(n => n.userId === DEMANDEUR)
+    const envoyees = (await db.select().from(notifications)).filter(n => n.userId === DEMANDEUR)
     expect(envoyees).toHaveLength(1)
   })
 
-  it('ne retire pas un palier déjà acquis', () => {
-    db.update(users).set({ kycLevel: 2 }).where(eq(users.id, DEMANDEUR)).run()
-    rejeterDossier(db, DEMANDEUR, ADMIN, 'Le selfie ne correspond pas à la pièce.')
+  it('ne retire pas un palier déjà acquis', async () => {
+    await db.update(users).set({ kycLevel: 2 }).where(eq(users.id, DEMANDEUR))
+    await rejeterDossier(db, DEMANDEUR, ADMIN, 'Le selfie ne correspond pas à la pièce.')
 
     // Un dépôt raté ne fait pas perdre ce qui était déjà accordé.
-    expect(dossier(db, DEMANDEUR).kycLevel).toBe(2)
+    expect((await dossier(db, DEMANDEUR)).kycLevel).toBe(2)
   })
 })
 
@@ -207,10 +207,10 @@ describe('journal — consulter est une action', () => {
   it('consigne chaque consultation de pièce', async () => {
     await poserDossier(DEMANDEUR, new Date())
 
-    journaliserConsultation(db, ADMIN, DEMANDEUR, 'document')
-    journaliserConsultation(db, ADMIN, DEMANDEUR, 'selfie')
+    await journaliserConsultation(db, ADMIN, DEMANDEUR, 'document')
+    await journaliserConsultation(db, ADMIN, DEMANDEUR, 'selfie')
 
-    const journal = db.select().from(adminAudit).all()
+    const journal = await db.select().from(adminAudit)
     expect(journal).toHaveLength(2)
     expect(journal.every(e => e.action === 'kyc_piece_consultee')).toBe(true)
   })
@@ -218,8 +218,8 @@ describe('journal — consulter est une action', () => {
   it('rend l’adresse de la pièce, réservée au service', async () => {
     await poserDossier(DEMANDEUR, new Date())
 
-    expect(urlPiece(db, DEMANDEUR, 'document')).toContain('bbbb0000')
-    expect(urlPiece(db, AUTRE, 'document')).toBeNull()
+    expect(await urlPiece(db, DEMANDEUR, 'document')).toContain('bbbb0000')
+    expect(await urlPiece(db, AUTRE, 'document')).toBeNull()
   })
 })
 

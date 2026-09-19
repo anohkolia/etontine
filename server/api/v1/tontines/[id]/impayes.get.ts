@@ -21,9 +21,9 @@ export default defineEventHandler(async (event) => {
 
   const { membership } = await requireMembership(event, tontineId)
   const db = useDb()
-  const regles = reglesDe(db, tontineId)
+  const regles = await reglesDe(db, tontineId)
 
-  const enRetard = db
+  const enRetard = await db
     .select({
       contributionId: contributions.id,
       roundId: rounds.id,
@@ -47,12 +47,11 @@ export default defineEventHandler(async (event) => {
       eq(rounds.tontineId, tontineId),
       inArray(contributions.status, ['late', 'disputed']),
     ))
-    .all()
 
   // Les membres actifs, pour l'écran d'avance : il faut désigner qui dépanne.
   // Ils voyagent avec le reste plutôt que dans un second appel — c'est la
   // promesse de cette route, tout ce qu'il faut pour peindre l'écran d'un coup.
-  const membres = db
+  const membres = (await db
     .select({
       id: memberships.id,
       managedName: memberships.managedName,
@@ -61,8 +60,7 @@ export default defineEventHandler(async (event) => {
     })
     .from(memberships)
     .leftJoin(users, eq(users.id, memberships.userId))
-    .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active')))
-    .all()
+    .where(and(eq(memberships.tontineId, tontineId), eq(memberships.status, 'active'))))
     .map(m => ({
       id: m.id,
       nom: [m.firstName, m.lastName].filter(Boolean).join(' ') || m.managedName || 'Membre',
@@ -79,8 +77,8 @@ export default defineEventHandler(async (event) => {
       // Ce que le barème donnerait aujourd'hui. Aucune écriture, aucune dette.
       amendeCalculee: calculerAmende(regles, r.dueDate),
     })),
-    amendes: amendesDe(db, tontineId),
-    avances: avancesDe(db, tontineId),
-    litiges: litigesDe(db, tontineId),
+    amendes: await amendesDe(db, tontineId),
+    avances: await avancesDe(db, tontineId),
+    litiges: await litigesDe(db, tontineId),
   }
 })

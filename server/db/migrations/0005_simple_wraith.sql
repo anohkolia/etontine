@@ -1,1 +1,0 @@
-ALTER TABLE `tontines` ADD `emoji` text;

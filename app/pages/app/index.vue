@@ -15,6 +15,7 @@
  * Liste de cartes empilées, **jamais de tableau** (règle 11).
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const { formatRelativeDay } = useDate()
 const session = useSessionStore()
@@ -96,6 +97,18 @@ function vignette(t: TontineDuTableau): string {
  */
 const enVedette = computed(() => tontines.value.find(t => t.roundIndex !== null) ?? null)
 
+/**
+ * Les tontines terminées à part.
+ *
+ * Une tontine se clôt d'elle-même à son dernier tour, et restait ensuite dans
+ * la même liste que les tontines en cours, sous la mention « en cours ». Au
+ * bout de deux ans, l'écran d'accueil aurait été une liste de cycles finis.
+ * Elles restent consultables — registre, reçus, export — mais rangées.
+ */
+const enCours = computed(() => tontines.value.filter(t => t.status !== 'closed'))
+const terminees = computed(() => tontines.value.filter(t => t.status === 'closed'))
+const termineesOuvertes = ref(false)
+
 async function charger() {
   etat.value = 'chargement'
   try {
@@ -113,7 +126,7 @@ async function charger() {
   }
   catch (e) {
     erreur.value = (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-      ?? 'Impossible de joindre le serveur.'
+      ?? t('commun.serveur_injoignable')
     etat.value = 'erreur'
   }
 }
@@ -123,10 +136,10 @@ onMounted(charger)
 // « Akwaba » — la bienvenue, reprise du template. Le mot est compris d'Abidjan
 // à Bouaké et coûte moins cher en charge mentale qu'un « Bonjour » formel.
 useEnTete(() => ({
-  titre: session.user?.firstName ? `Akwaba, ${session.user.firstName}` : 'Akwaba',
-  sousTitre: 'Vue d’ensemble de tes tontines',
+  titre: session.user?.firstName ? `Akwaba, ${session.user.firstName}` : t('accueil.akwaba'),
+  sousTitre: t('accueil.vue_d_ensemble_de'),
 }))
-useHead({ title: 'Mes tontines — eTontine' })
+useHead({ title: t('accueil.mes_tontines_etontine') })
 </script>
 
 <template>
@@ -150,7 +163,7 @@ useHead({ title: 'Mes tontines — eTontine' })
         class="flex flex-col gap-3"
         data-testid="bloc-a-traiter"
       >
-        <SectionTitle>À traiter aujourd’hui</SectionTitle>
+        <SectionTitle>{{ $t('accueil.a_traiter_aujourd_hui') }}</SectionTitle>
 
         <ul class="flex flex-col gap-2">
           <li
@@ -198,15 +211,15 @@ useHead({ title: 'Mes tontines — eTontine' })
         class="grid grid-cols-2 gap-3"
       >
         <StatTile
-          label="À traiter"
+          :label="$t('accueil.a_traiter')"
           :value="String(aTraiter.length)"
-          :hint="aTraiter.length > 1 ? 'actions en attente' : 'action en attente'"
+          :hint="aTraiter.length > 1 ? $t('accueil.actions_en_attente') : $t('accueil.action_en_attente')"
           :ton="aTraiter.length > 0 ? 'alerte' : 'neutre'"
         />
         <StatTile
-          label="Mes tontines"
-          :value="String(tontines.length)"
-          hint="en cours"
+          :label="$t('accueil.mes_tontines')"
+          :value="String(enCours.length)"
+          :hint="terminees.length > 0 ? $t('accueil.en_cours_terminees', { n: terminees.length }, terminees.length) : $t('accueil.en_cours')"
         />
       </div>
 
@@ -232,9 +245,9 @@ useHead({ title: 'Mes tontines — eTontine' })
             aria-hidden="true"
           />
           <span>
-            Prend la main : <strong class="font-semibold">{{ enVedette.beneficiaryName }}</strong>
+            {{ $t('accueil.prend_la_main') }} <strong class="font-semibold">{{ enVedette.beneficiaryName }}</strong>
             <template v-if="enVedette.nextDueDate">
-              · échéance {{ formatRelativeDay(enVedette.nextDueDate) }}
+              {{ $t('accueil.echeance_p0', { p0: formatRelativeDay(enVedette.nextDueDate) }) }}
             </template>
           </span>
         </p>
@@ -248,7 +261,7 @@ useHead({ title: 'Mes tontines — eTontine' })
         class="flex flex-col gap-2"
         data-testid="demandes-en-attente"
       >
-        <SectionTitle>En attente d’accord</SectionTitle>
+        <SectionTitle>{{ $t('accueil.en_attente_d_accord') }}</SectionTitle>
         <ul class="flex flex-col gap-2">
           <li
             v-for="demande in demandes"
@@ -270,8 +283,7 @@ useHead({ title: 'Mes tontines — eTontine' })
                 {{ demande.emoji ? `${demande.emoji} ` : '' }}{{ demande.name }}
               </span>
               <span class="text-sm text-ink-muted">
-                Ta demande est partie. Le président doit l’accepter avant que tu
-                puisses cotiser.
+                {{ $t('accueil.ta_demande_est_partie') }}
               </span>
             </div>
           </li>
@@ -280,8 +292,8 @@ useHead({ title: 'Mes tontines — eTontine' })
 
       <EmptyState
         v-if="tontines.length === 0 && demandes.length === 0"
-        title="Tu n’as pas encore de tontine"
-        description="Crée la tienne, ou rejoins celle d’un proche avec le lien qu’il t’a envoyé."
+        :title="$t('accueil.tu_n_as_pas')"
+        :description="$t('accueil.cree_la_tienne_ou')"
         icon="lucide:hand-coins"
       >
         <template #action>
@@ -290,7 +302,7 @@ useHead({ title: 'Mes tontines — eTontine' })
             class="min-h-touch inline-flex items-center justify-center rounded-control bg-brand px-5 font-semibold text-brand-ink"
             data-testid="bouton-creer-tontine"
           >
-            Créer une tontine
+            {{ $t('accueil.creer_une_tontine') }}
           </NuxtLink>
         </template>
       </EmptyState>
@@ -300,7 +312,7 @@ useHead({ title: 'Mes tontines — eTontine' })
            alors rendre « Mes tontines » au-dessus d'une liste vide. -->
       <template v-else-if="tontines.length > 0">
         <SectionTitle>
-          Mes tontines
+          {{ $t('accueil.mes_tontines') }}
           <template #action>
             <NuxtLink
               to="/app/tontine/create"
@@ -312,7 +324,7 @@ useHead({ title: 'Mes tontines — eTontine' })
                 size="1rem"
                 aria-hidden="true"
               />
-              Nouvelle
+              {{ $t('accueil.nouvelle') }}
             </NuxtLink>
           </template>
         </SectionTitle>
@@ -323,7 +335,7 @@ useHead({ title: 'Mes tontines — eTontine' })
           data-testid="liste-tontines"
         >
           <li
-            v-for="tontine in tontines"
+            v-for="tontine in enCours"
             :key="tontine.id"
             class="card-surface flex flex-col gap-3 p-4"
             :data-testid="`carte-tontine-${tontine.id}`"
@@ -360,20 +372,20 @@ useHead({ title: 'Mes tontines — eTontine' })
               <div class="flex flex-col gap-1">
                 <div class="flex items-baseline justify-between gap-2 text-sm">
                   <span class="text-ink-muted">
-                    Tour {{ tontine.roundIndex }} · pot constitué
+                    {{ $t('accueil.tour_p0_pot_constitue', { p0: tontine.roundIndex }) }}
                   </span>
                   <span class="tabular text-ink-muted">{{ progression(tontine) }} %</span>
                 </div>
                 <ProgressBar
                   :value="progression(tontine)"
-                  :aria-label="`Pot constitué à ${progression(tontine)} %`"
+                  :aria-label="$t('accueil.pot_constitue_a', { p0: progression(tontine) })"
                 />
                 <p class="text-sm text-ink-muted">
                   <AmountDisplay
                     :amount="tontine.potCollected"
                     size="sm"
                   />
-                  sur
+                  {{ $t('accueil.sur') }}
                   <AmountDisplay
                     :amount="tontine.potExpected"
                     size="sm"
@@ -385,12 +397,17 @@ useHead({ title: 'Mes tontines — eTontine' })
                 v-if="tontine.beneficiaryName"
                 class="text-sm text-ink-muted"
               >
-                Prend la main : <span class="font-medium text-ink">{{ tontine.beneficiaryName }}</span>
+                {{ $t('accueil.prend_la_main') }} <span class="font-medium text-ink">{{ tontine.beneficiaryName }}</span>
               </p>
 
-              <div class="flex items-center justify-between gap-3 rounded-control bg-surface-muted p-3">
+              <!-- Le président ne cotise pas : « ce que je dois : 0 » se lirait
+                   comme une cotisation soldée, alors qu'il n'en a aucune. -->
+              <div
+                v-if="tontine.myRole !== 'president'"
+                class="flex items-center justify-between gap-3 rounded-control bg-surface-muted p-3"
+              >
                 <span class="flex flex-col">
-                  <span class="text-xs tracking-wide text-ink-muted uppercase">Ce que je dois</span>
+                  <span class="text-xs tracking-wide text-ink-muted uppercase">{{ $t('accueil.ce_que_je_dois') }}</span>
                   <AmountDisplay
                     :amount="tontine.myRemaining"
                     size="lg"
@@ -409,7 +426,7 @@ useHead({ title: 'Mes tontines — eTontine' })
                 v-if="tontine.nextDueDate"
                 class="text-sm text-ink-muted"
               >
-                Échéance {{ formatRelativeDay(tontine.nextDueDate) }}
+                {{ $t('accueil.echeance_p0_2', { p0: formatRelativeDay(tontine.nextDueDate) }) }}
               </p>
             </template>
 
@@ -421,24 +438,78 @@ useHead({ title: 'Mes tontines — eTontine' })
                 class="min-h-touch inline-flex items-center justify-center rounded-control bg-brand px-4 text-sm font-semibold text-brand-ink sm:flex-1"
                 :data-testid="`action-cotiser-${tontine.id}`"
               >
-                Cotiser
+                {{ $t('accueil.cotiser') }}
               </NuxtLink>
               <NuxtLink
                 v-if="tontine.myRole === 'treasurer' || tontine.myRole === 'president'"
                 :to="`/app/tontine/${tontine.id}/confirmations`"
                 class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink sm:flex-1"
               >
-                Confirmer
+                {{ $t('accueil.confirmer') }}
               </NuxtLink>
               <NuxtLink
                 :to="`/app/tontine/${tontine.id}/membres`"
                 class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink sm:flex-1"
               >
-                Membres
+                {{ $t('accueil.membres') }}
               </NuxtLink>
             </div>
           </li>
         </ul>
+
+        <!-- Les cycles finis, repliés : on y revient pour un reçu ou le
+             procès-verbal, pas tous les jours. -->
+        <section
+          v-if="terminees.length > 0"
+          class="flex flex-col gap-2"
+          data-testid="tontines-terminees"
+        >
+          <button
+            type="button"
+            class="flex min-h-touch w-full items-center justify-between gap-2 text-left"
+            :aria-expanded="termineesOuvertes"
+            data-testid="bouton-terminees"
+            @click="termineesOuvertes = !termineesOuvertes"
+          >
+            <SectionTitle>{{ $t('accueil.terminees_p0', { p0: terminees.length }) }}</SectionTitle>
+            <Icon
+              :name="termineesOuvertes ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+              size="1.25rem"
+              class="text-ink-subtle"
+              aria-hidden="true"
+            />
+          </button>
+
+          <ul
+            v-if="termineesOuvertes"
+            class="flex flex-col gap-2"
+            data-testid="liste-terminees"
+          >
+            <li
+              v-for="tontine in terminees"
+              :key="tontine.id"
+              class="card-surface flex items-center gap-3 p-3"
+              :data-testid="`carte-tontine-${tontine.id}`"
+            >
+              <span
+                class="flex size-9 shrink-0 items-center justify-center rounded-tile bg-surface-muted text-base font-bold text-ink-muted"
+                aria-hidden="true"
+              >{{ vignette(tontine) }}</span>
+              <NuxtLink
+                :to="`/app/tontine/${tontine.id}`"
+                class="min-w-0 flex-1 truncate font-semibold text-ink"
+                :data-testid="`lien-tontine-${tontine.id}`"
+              >
+                {{ tontine.name }}
+              </NuxtLink>
+              <StatusBadge
+                kind="tontine"
+                :status="'closed'"
+                compact
+              />
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
   </div>

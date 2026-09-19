@@ -67,8 +67,8 @@ function nomDe(l: { firstName: string | null, lastName: string | null, managedNa
  * Le bloc « à traiter aujourd'hui » vient **en premier** parce que c'est ce qui
  * remplace vraiment le carnet : pas l'historique, mais ce qu'il reste à faire.
  */
-export function tableauDeBord(db: Db, userId: string): TableauDeBord {
-  const adhesions = db
+export async function tableauDeBord(db: Db, userId: string): Promise<TableauDeBord> {
+  const adhesions = await db
     .select({
       membershipId: memberships.id,
       role: memberships.role,
@@ -81,13 +81,12 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
       eq(memberships.status, 'active'),
       ne(tontines.status, 'archived'),
     ))
-    .all()
 
   const aTraiter: ATraiter[] = []
   const resume: TontineDuTableau[] = []
 
   for (const a of adhesions) {
-    const [tourCourant] = db
+    const [tourCourant] = await db
       .select()
       .from(rounds)
       .where(and(
@@ -96,7 +95,6 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
       ))
       .orderBy(asc(rounds.index))
       .limit(1)
-      .all()
 
     let myRemaining = 0
     let myContributionStatus: string | null = null
@@ -107,7 +105,7 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
       // Le calcul vit dans `services/tours.ts` : l'écran de détail d'une
       // tontine affiche les mêmes chiffres, et deux implémentations d'un même
       // calcul d'argent finissent toujours par diverger.
-      const etat = etatDuTour(db, tourCourant.id, a.membershipId)
+      const etat = await etatDuTour(db, tourCourant.id, a.membershipId)
       const miennes = etat.miennes
 
       potCollected = etat.potCollected
@@ -142,7 +140,7 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
         })
       }
 
-      const [beneficiaire] = db
+      const [beneficiaire] = await db
         .select({
           managedName: memberships.managedName,
           firstName: users.firstName,
@@ -153,13 +151,12 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
         .leftJoin(users, eq(users.id, memberships.userId))
         .where(eq(shares.id, tourCourant.beneficiaryShareId))
         .limit(1)
-        .all()
 
       beneficiaryName = beneficiaire ? nomDe(beneficiaire) : null
 
       // Le bureau : les déclarations qui attendent une décision.
       if (a.role === 'treasurer' || a.role === 'president') {
-        const enAttente = db
+        const enAttente = await db
           .select({ id: paymentDeclarations.id })
           .from(paymentDeclarations)
           .innerJoin(contributions, eq(contributions.id, paymentDeclarations.contributionId))
@@ -169,7 +166,6 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
             // Ses propres déclarations ne sont pas de son ressort.
             ne(paymentDeclarations.declaredBy, userId),
           ))
-          .all()
 
         if (enAttente.length > 0) {
           aTraiter.push({
@@ -184,7 +180,7 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
           })
         }
 
-        const [versement] = db.select().from(payouts).where(eq(payouts.roundId, tourCourant.id)).limit(1).all()
+        const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, tourCourant.id)).limit(1)
         const potComplet = potCollected >= tourCourant.expectedAmount
 
         if (!versement && potComplet) {
@@ -200,12 +196,11 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
       }
 
       // Le bénéficiaire : le pot est parti, il doit en accuser réception.
-      const [versementDeclare] = db
+      const [versementDeclare] = await db
         .select()
         .from(payouts)
         .where(and(eq(payouts.roundId, tourCourant.id), eq(payouts.status, 'declared')))
         .limit(1)
-        .all()
 
       if (versementDeclare?.beneficiaryMembershipId === a.membershipId) {
         aTraiter.push({
@@ -260,7 +255,7 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
    * accord, cette personne n'est pas du groupe, et le montant des cotisations
    * ne la regarde pas encore.
    */
-  const demandes = db
+  const demandes = await db
     .select({
       tontineId: tontines.id,
       name: tontines.name,
@@ -273,7 +268,6 @@ export function tableauDeBord(db: Db, userId: string): TableauDeBord {
       eq(memberships.userId, userId),
       eq(memberships.status, 'pending_approval'),
     ))
-    .all()
 
   return { aTraiter, tontines: resume, demandes }
 }

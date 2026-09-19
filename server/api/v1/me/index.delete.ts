@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   const user = requireUser(event)
   const db = useDb()
 
-  const blocages = blocagesSuppression(db, user.id)
+  const blocages = await blocagesSuppression(db, user.id)
   if (blocages.length > 0) {
     throw createError({
       statusCode: 409,
@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
   }
 
   await destroySession(event)
-  db.delete(users).where(eq(users.id, user.id)).run()
+  await db.delete(users).where(eq(users.id, user.id))
 
   return { ok: true }
 })

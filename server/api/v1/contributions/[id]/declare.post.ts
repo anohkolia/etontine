@@ -20,13 +20,12 @@ export default defineEventHandler(async (event) => {
   if (!contributionId) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
   const db = useDb()
-  const [ligne] = db
+  const [ligne] = await db
     .select({ tontineId: rounds.tontineId, membershipId: contributions.membershipId })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
@@ -44,6 +43,6 @@ export default defineEventHandler(async (event) => {
   const parsed = declareContributionInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return withIdempotency(event, user.id, parsed.data, () =>
-    declarerPaiement(db, contributionId, user.id, parsed.data))
+  return await withIdempotency(event, user.id, parsed.data, async () =>
+    await declarerPaiement(db, contributionId, user.id, parsed.data))
 })

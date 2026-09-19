@@ -7,7 +7,10 @@
  * une amende qui tombe toute seule sur quelqu'un dont la moto est en panne,
  * c'est la tontine qui perd un membre.
  */
+import type { MembershipRole } from '#shared/schemas'
+
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -79,10 +82,18 @@ const motifAnnulation = ref<Record<string, string>>({})
 const enCours = ref<string | null>(null)
 
 const estPresident = computed(() => donnees.value?.myRole === 'president')
+/**
+ * Rouvrir une cotisation rejetée et clore une contestation reviennent au
+ * président **ou au censeur** (data-model §2.4, §3). L'écran ne les proposait
+ * qu'au président : le censeur, pourtant nommé pour cela, n'avait rien à faire.
+ */
+const peutTrancher = computed(() =>
+  donnees.value?.myRole === 'president' || donnees.value?.myRole === 'auditor',
+)
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -261,15 +272,18 @@ async function annuler(penaltyId: string) {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'Retards et amendes',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.impayes.retards_et_amendes'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'Retards et amendes — eTontine' })
+useHead({ title: t('tontine.impayes.retards_et_amendes_etontine') })
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <TontineTabs :tontine-id="tontineId" />
+    <TontineTabs
+      :tontine-id="tontineId"
+      :role="(donnees?.myRole as MembershipRole | undefined)"
+    />
 
     <LoadingSkeleton
       v-if="etat === 'chargement'"
@@ -296,13 +310,13 @@ useHead({ title: 'Retards et amendes — eTontine' })
       <!-- Retards -->
       <section class="flex flex-col gap-3">
         <h2 class="font-semibold text-ink">
-          En retard
+          {{ $t('tontine.impayes.en_retard') }}
         </h2>
 
         <EmptyState
           v-if="donnees.retards.length === 0"
-          title="Personne n’est en retard"
-          description="Toutes les cotisations du tour sont à jour."
+          :title="$t('tontine.impayes.personne_n_est_en')"
+          :description="$t('tontine.impayes.toutes_les_cotisations_du')"
           icon="lucide:circle-check"
         />
 
@@ -321,10 +335,10 @@ useHead({ title: 'Retards et amendes — eTontine' })
               <div class="flex flex-col gap-1">
                 <span class="font-medium text-ink">{{ retard.nom }}</span>
                 <span class="text-sm text-ink-muted">
-                  Tour {{ retard.roundIndex }} · part {{ retard.rotationPosition }}
+                  {{ $t('tontine.impayes.tour_p0_part_p1', { p0: retard.roundIndex, p1: retard.rotationPosition }) }}
                 </span>
                 <span class="text-sm text-late-ink">
-                  Échéance {{ formatRelativeDay(retard.dueDate) }}
+                  {{ $t('tontine.impayes.echeance_p0', { p0: formatRelativeDay(retard.dueDate) }) }}
                 </span>
               </div>
               <div class="flex flex-col items-end gap-2">
@@ -346,19 +360,19 @@ useHead({ title: 'Retards et amendes — eTontine' })
               class="flex flex-col gap-2 rounded-control bg-surface-muted p-3"
             >
               <p class="text-sm text-ink-muted">
-                Le barème donnerait
+                {{ $t('tontine.impayes.le_bareme_donnerait') }}
                 <AmountDisplay
                   :amount="retard.amendeCalculee"
                   size="sm"
                 />
-                d’amende. Rien n’est appliqué tant que tu ne décides pas.
+                {{ $t('tontine.impayes.d_amende_rien_n') }}
               </p>
 
               <label
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 :for="`amende-${retard.contributionId}`"
               >
-                Montant de l’amende (FCFA)
+                {{ $t('tontine.impayes.montant_de_l_amende') }}
                 <InputText
                   :id="`amende-${retard.contributionId}`"
                   :value="montantAmende[retard.contributionId]"
@@ -369,7 +383,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
               </label>
 
               <Button
-                :label="enCours === retard.contributionId ? 'Application…' : 'Appliquer l’amende'"
+                :label="enCours === retard.contributionId ? $t('tontine.impayes.application') : $t('tontine.impayes.appliquer_l_amende')"
                 :disabled="enCours !== null || !montantAmende[retard.contributionId]"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-appliquer-amende-${retard.contributionId}`"
@@ -380,15 +394,14 @@ useHead({ title: 'Retards et amendes — eTontine' })
             <!-- Une cotisation contestée attend qu'on la rouvre : tant qu'elle
                  reste en `disputed`, son membre ne peut pas renvoyer. -->
             <div
-              v-if="estPresident && retard.status === 'disputed'"
+              v-if="peutTrancher && retard.status === 'disputed'"
               class="flex flex-col gap-2 border-t border-line pt-3"
             >
               <p class="text-sm text-ink-muted">
-                Sa déclaration a été rejetée. Tant que tu ne rouvres pas sa
-                cotisation, il ne peut pas en refaire une.
+                {{ $t('tontine.impayes.sa_declaration_a_ete') }}
               </p>
               <Button
-                :label="enCours === retard.contributionId ? 'Réouverture…' : 'Rouvrir sa cotisation'"
+                :label="enCours === retard.contributionId ? $t('tontine.impayes.reouverture') : $t('tontine.impayes.rouvrir_sa_cotisation')"
                 :disabled="enCours !== null"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-rouvrir-${retard.contributionId}`"
@@ -407,7 +420,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                   class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                   :for="`preteur-${retard.contributionId}`"
                 >
-                  Qui a avancé ?
+                  {{ $t('tontine.impayes.qui_a_avance') }}
                   <select
                     :id="`preteur-${retard.contributionId}`"
                     v-model="preteur[retard.contributionId]"
@@ -415,7 +428,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                     :data-testid="`champ-preteur-${retard.contributionId}`"
                   >
                     <option value="">
-                      Choisir un membre
+                      {{ $t('tontine.impayes.choisir_un_membre') }}
                     </option>
                     <option
                       v-for="membre in donnees.membres.filter(m => m.id !== retard.membershipId)"
@@ -431,7 +444,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                   class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                   :for="`montant-avance-${retard.contributionId}`"
                 >
-                  Montant avancé (FCFA)
+                  {{ $t('tontine.impayes.montant_avance_fcfa') }}
                   <InputText
                     :id="`montant-avance-${retard.contributionId}`"
                     :value="montantAvance[retard.contributionId]"
@@ -444,7 +457,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
 
                 <div class="flex flex-col gap-2 sm:flex-row">
                   <Button
-                    :label="enCours === retard.contributionId ? 'Enregistrement…' : 'Enregistrer l’avance'"
+                    :label="enCours === retard.contributionId ? $t('tontine.impayes.enregistrement') : $t('tontine.impayes.enregistrer_l_avance')"
                     :disabled="enCours !== null
                       || !preteur[retard.contributionId]
                       || !montantAvance[retard.contributionId]"
@@ -453,7 +466,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                     @click="enregistrerAvance(retard)"
                   />
                   <Button
-                    label="Annuler"
+                    :label="$t('tontine.impayes.annuler')"
                     class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                     @click="avanceOuverte = null"
                   />
@@ -462,7 +475,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
 
               <Button
                 v-else
-                label="Quelqu’un a avancé pour lui"
+                :label="$t('tontine.impayes.quelqu_un_a_avance')"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-avance-${retard.contributionId}`"
                 @click="avanceOuverte = retard.contributionId"
@@ -478,7 +491,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
         class="flex flex-col gap-3"
       >
         <h2 class="font-semibold text-ink">
-          Amendes
+          {{ $t('tontine.impayes.amendes') }}
         </h2>
         <ul
           class="flex flex-col gap-3"
@@ -493,9 +506,9 @@ useHead({ title: 'Retards et amendes — eTontine' })
             <div class="flex items-start justify-between gap-3">
               <div class="flex flex-col gap-1">
                 <span class="font-medium text-ink">
-                  {{ amende.managedName ?? 'Membre' }}
+                  {{ amende.managedName ?? $t('tontine.impayes.membre') }}
                 </span>
-                <span class="text-sm text-ink-muted">Tour {{ amende.roundIndex }}</span>
+                <span class="text-sm text-ink-muted">{{ $t('tontine.impayes.tour_p0', { p0: amende.roundIndex }) }}</span>
                 <span
                   v-if="amende.penalty.reason"
                   class="text-sm text-ink-muted"
@@ -504,7 +517,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                   v-if="amende.penalty.status === 'waived'"
                   class="text-sm text-confirmed-ink"
                 >
-                  Annulée : {{ amende.penalty.waiveReason }}
+                  {{ $t('tontine.impayes.annulee_p0', { p0: amende.penalty.waiveReason }) }}
                 </span>
               </div>
               <AmountDisplay
@@ -522,20 +535,19 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 :for="`motif-${amende.penalty.id}`"
               >
-                Motif d’annulation
+                {{ $t('tontine.impayes.motif_d_annulation') }}
                 <InputText
                   :id="`motif-${amende.penalty.id}`"
                   v-model="motifAnnulation[amende.penalty.id]"
-                  placeholder="Le membre était hospitalisé"
+                  :placeholder="$t('tontine.impayes.le_membre_etait_hospitalise')"
                   :data-testid="`champ-motif-annulation-${amende.penalty.id}`"
                 />
                 <span class="text-sm font-normal text-ink-subtle">
-                  Obligatoire, et inscrit au registre : une amende qui disparaît
-                  sans explication fait dire que le bureau arrange ses amis.
+                  {{ $t('tontine.impayes.obligatoire_et_inscrit_au') }}
                 </span>
               </label>
               <Button
-                :label="enCours === amende.penalty.id ? 'Annulation…' : 'Annuler l’amende'"
+                :label="enCours === amende.penalty.id ? $t('tontine.impayes.annulation') : $t('tontine.impayes.annuler_l_amende')"
                 :disabled="enCours !== null || (motifAnnulation[amende.penalty.id]?.trim().length ?? 0) < 5"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-annuler-amende-${amende.penalty.id}`"
@@ -552,7 +564,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
         class="flex flex-col gap-3"
       >
         <h2 class="font-semibold text-ink">
-          Erreurs signalées
+          {{ $t('tontine.impayes.erreurs_signalees') }}
         </h2>
         <ul
           class="flex flex-col gap-3"
@@ -566,7 +578,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
           >
             <div class="flex items-baseline justify-between gap-3">
               <span class="text-sm font-semibold text-ink">
-                Écriture n° {{ litige.entryPosition }}
+                {{ $t('tontine.impayes.ecriture_n_p0', { p0: litige.entryPosition }) }}
               </span>
               <StatusBadge
                 kind="dispute"
@@ -589,7 +601,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
               v-if="litige.dispute.status === 'resolved'"
               class="rounded-control bg-confirmed-surface p-3 text-sm text-confirmed-ink"
             >
-              Conclusion : {{ litige.dispute.resolution }}
+              {{ $t('tontine.impayes.conclusion_p0', { p0: litige.dispute.resolution }) }}
             </p>
 
             <template v-else>
@@ -597,7 +609,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 :for="`reponse-${litige.dispute.id}`"
               >
-                Répondre
+                {{ $t('tontine.impayes.repondre') }}
                 <InputText
                   :id="`reponse-${litige.dispute.id}`"
                   v-model="reponse[litige.dispute.id]"
@@ -605,7 +617,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                 />
               </label>
               <Button
-                :label="enCours === litige.dispute.id ? 'Envoi…' : 'Envoyer'"
+                :label="enCours === litige.dispute.id ? $t('commun.envoi_en_cours') : $t('tontine.impayes.envoyer')"
                 :disabled="enCours !== null || (reponse[litige.dispute.id]?.trim().length ?? 0) < 5"
                 class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-repondre-${litige.dispute.id}`"
@@ -613,12 +625,12 @@ useHead({ title: 'Retards et amendes — eTontine' })
               />
 
               <!-- Clore sans un mot laisse le doute là où il était. -->
-              <template v-if="estPresident">
+              <template v-if="peutTrancher">
                 <label
                   class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                   :for="`resolution-${litige.dispute.id}`"
                 >
-                  Conclusion, pour clore
+                  {{ $t('tontine.impayes.conclusion_pour_clore') }}
                   <InputText
                     :id="`resolution-${litige.dispute.id}`"
                     v-model="resolution[litige.dispute.id]"
@@ -626,7 +638,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                   />
                 </label>
                 <Button
-                  :label="enCours === litige.dispute.id ? 'Clôture…' : 'Clore la contestation'"
+                  :label="enCours === litige.dispute.id ? $t('commun.cloture_en_cours') : $t('commun.clore_la_contestation')"
                   :disabled="enCours !== null || (resolution[litige.dispute.id]?.trim().length ?? 0) < 5"
                   class="bg-brand text-brand-ink hover:bg-brand-strong"
                   :data-testid="`bouton-clore-litige-${litige.dispute.id}`"
@@ -644,7 +656,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
         class="flex flex-col gap-3"
       >
         <h2 class="font-semibold text-ink">
-          Avances entre membres
+          {{ $t('tontine.impayes.avances_entre_membres') }}
         </h2>
         <ul
           class="flex flex-col gap-2"
@@ -661,7 +673,7 @@ useHead({ title: 'Retards et amendes — eTontine' })
                    un montant tout seul. -->
               <span class="min-w-0 text-sm text-ink">
                 <strong class="font-semibold">{{ avance.nomPreteur }}</strong>
-                a avancé pour
+                {{ $t('tontine.impayes.a_avance_pour') }}
                 <strong class="font-semibold">{{ avance.nomBeneficiaire }}</strong>
               </span>
               <AmountDisplay
@@ -672,13 +684,13 @@ useHead({ title: 'Retards et amendes — eTontine' })
 
             <div class="flex items-center justify-between gap-3">
               <span class="text-sm text-ink-muted">
-                Tour {{ avance.roundIndex }}
-                <span v-if="avance.advance.settledAt"> · soldée</span>
+                {{ $t('tontine.impayes.tour_p0', { p0: avance.roundIndex }) }}
+                <span v-if="avance.advance.settledAt"> {{ $t('tontine.impayes.soldee') }}</span>
               </span>
 
               <Button
                 v-if="estPresident && !avance.advance.settledAt"
-                :label="enCours === avance.advance.id ? 'Enregistrement…' : 'Marquer soldée'"
+                :label="enCours === avance.advance.id ? $t('tontine.impayes.enregistrement') : $t('tontine.impayes.marquer_soldee')"
                 :disabled="enCours !== null"
                 class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-solder-${avance.advance.id}`"

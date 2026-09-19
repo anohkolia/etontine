@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
 import { join } from 'node:path'
 
@@ -17,7 +17,41 @@ import { join } from 'node:path'
  * et `preload`. Les `prefetch` partent au repos, après le rendu, et les compter
  * donnerait une image faussement alarmante.
  */
-const RACINE = join(process.cwd(), '.output', 'public')
+
+/**
+ * Où trouver le lot client, selon qui a fait le build.
+ *
+ * `nuxt build` écrit dans `.output/public` — en local et sur le runner CI.
+ * Sur Vercel, la variable `VERCEL` fait basculer Nitro sur son préréglage
+ * `vercel`, qui écrit dans `.vercel/output/static`. Le chemin codé en dur
+ * faisait donc échouer le déploiement sur un `ENOENT` après un build pourtant
+ * réussi. On interroge les deux, le dossier du préréglage en premier là où il
+ * fait autorité, et `VERIFIER_BUNDLE_DIR` reste la porte de sortie pour un
+ * hébergeur qu'on n'a pas prévu.
+ */
+function racineDuBuild(): string {
+  const nuxt = join(process.cwd(), '.output', 'public')
+  const vercel = join(process.cwd(), '.vercel', 'output', 'static')
+  const candidats = [
+    process.env.VERIFIER_BUNDLE_DIR,
+    // Un `.output` laissé par un build antérieur ne doit pas prendre le pas
+    // sur celui que Vercel vient de produire.
+    ...(process.env.VERCEL ? [vercel, nuxt] : [nuxt, vercel]),
+  ].filter((c): c is string => Boolean(c))
+
+  // `_nuxt` signe un lot client complet : un dossier vide ou à moitié écrit
+  // donnerait des budgets faussement verts.
+  const trouve = candidats.find(c => existsSync(join(c, '_nuxt')))
+  if (trouve) return trouve
+
+  console.error('Contrôle du lot client : ÉCHEC')
+  console.error('  · Aucun lot client trouvé. Dossiers cherchés :')
+  for (const c of candidats) console.error(`      ${c}`)
+  console.error('  · Lancer `pnpm build`, ou pointer VERIFIER_BUNDLE_DIR sur le dossier public du build.')
+  process.exit(1)
+}
+
+const RACINE = racineDuBuild()
 
 /** Bibliothèques qui n'ont rien à faire côté client, et leur empreinte. */
 const INTERDITES: Array<{ nom: string, marqueurs: string[] }> = [
@@ -25,7 +59,7 @@ const INTERDITES: Array<{ nom: string, marqueurs: string[] }> = [
   { nom: 'exceljs', marqueurs: ['xl/workbook.xml', 'ExcelJS'] },
   { nom: 'jspdf', marqueurs: ['jsPDF'] },
   { nom: 'xlsx (SheetJS)', marqueurs: ['SheetJS'] },
-  { nom: 'better-sqlite3', marqueurs: ['better_sqlite3.node'] },
+  { nom: 'postgres (postgres-js)', marqueurs: ['PostgresError', 'max_lifetime', 'fetch_types'] },
   { nom: 'web-push', marqueurs: ['vapidHelper', 'setVapidDetails'] },
 ]
 

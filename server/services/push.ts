@@ -39,12 +39,11 @@ function preparer(): boolean {
  * notifications naissent, pas dispersé à chaque appel.
  */
 export async function pousserNotification(db: Db, notificationId: string): Promise<number> {
-  const [notification] = db
+  const [notification] = await db
     .select()
     .from(notifications)
     .where(eq(notifications.id, notificationId))
     .limit(1)
-    .all()
 
   if (!notification) return 0
   if (!preparer()) {
@@ -52,11 +51,10 @@ export async function pousserNotification(db: Db, notificationId: string): Promi
     return 0
   }
 
-  const abonnements = db
+  const abonnements = await db
     .select()
     .from(pushSubscriptions)
     .where(eq(pushSubscriptions.userId, notification.userId))
-    .all()
 
   const charge = JSON.stringify({
     title: notification.title,
@@ -83,13 +81,13 @@ export async function pousserNotification(db: Db, notificationId: string): Promi
       // indéfiniment.
       const statut = (erreur as { statusCode?: number }).statusCode
       if (statut === 404 || statut === 410) {
-        db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, abonnement.id)).run()
+        await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, abonnement.id))
       }
     }
   }
 
   if (envoyees > 0) {
-    db.update(notifications).set({ sentAt: new Date() }).where(eq(notifications.id, notificationId)).run()
+    await db.update(notifications).set({ sentAt: new Date() }).where(eq(notifications.id, notificationId))
   }
 
   return envoyees

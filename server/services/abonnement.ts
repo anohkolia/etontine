@@ -3,10 +3,7 @@ import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { memberships, subscriptionRequests, tontines, users } from '../db/schema.ts'
 import type { SubscriptionRequest, User } from '../db/schema.ts'
-import {
-  PALIER_PAR_ID,
-  depasse,
-} from '../../shared/constants/abonnement.ts'
+import { PALIER_PAR_ID, depasse, referenceDeReglement } from '../../shared/constants/abonnement.ts'
 import type {
   Limite,
   Palier,
@@ -74,8 +71,8 @@ export function palierDe(user: Pick<User, 'planTier' | 'planUntil'>, maintenant 
 }
 
 /** Le président d'une tontine, seul redevable du forfait. */
-export function presidentDe(db: Db, tontineId: string): User {
-  const [ligne] = db
+export async function presidentDe(db: Db, tontineId: string): Promise<User> {
+  const [ligne] = await db
     .select({ utilisateur: users })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
@@ -84,16 +81,15 @@ export function presidentDe(db: Db, tontineId: string): User {
       eq(memberships.role, 'president'),
     ))
     .limit(1)
-    .all()
 
   if (ligne) return ligne.utilisateur
 
   // Repli sur le créateur : une tontine au brouillon n'a pas encore d'adhésion
   // de président, mais elle a déjà quelqu'un qui en répond.
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
-  const [createur] = db.select().from(users).where(eq(users.id, tontine.createdBy)).limit(1).all()
+  const [createur] = await db.select().from(users).where(eq(users.id, tontine.createdBy)).limit(1)
   if (!createur) throw apiError('NOT_FOUND', 'Président introuvable.')
 
   return createur
@@ -104,8 +100,8 @@ export function presidentDe(db: Db, tontineId: string): User {
  * ------------------------------------------------------------------ */
 
 /** Le nombre de tontines en cours dont l'utilisateur est président. */
-export function tontinesActivesDe(db: Db, userId: string): number {
-  return db
+export async function tontinesActivesDe(db: Db, userId: string): Promise<number> {
+  return (await db
     .select({ id: tontines.id })
     .from(tontines)
     .innerJoin(memberships, eq(memberships.tontineId, tontines.id))
@@ -114,21 +110,19 @@ export function tontinesActivesDe(db: Db, userId: string): number {
       eq(memberships.role, 'president'),
       eq(memberships.status, 'active'),
       inArray(tontines.status, [...STATUTS_ACTIFS]),
-    ))
-    .all()
+    )))
     .length
 }
 
 /** L'effectif d'une tontine, au sens du quota. */
-export function effectifDe(db: Db, tontineId: string): number {
-  return db
+export async function effectifDe(db: Db, tontineId: string): Promise<number> {
+  return (await db
     .select({ id: memberships.id })
     .from(memberships)
     .where(and(
       eq(memberships.tontineId, tontineId),
       ne(memberships.status, STATUT_HORS_EFFECTIF),
-    ))
-    .all()
+    )))
     .length
 }
 
@@ -140,9 +134,9 @@ export function effectifDe(db: Db, tontineId: string): number {
  * Une tontine de plus est-elle permise ? Appelé à la **publication**, pas à la
  * création : un brouillon n'engage personne et ne se compte pas.
  */
-export function verifierQuotaTontines(db: Db, user: User, maintenant = new Date()): void {
+export async function verifierQuotaTontines(db: Db, user: User, maintenant = new Date()): Promise<void> {
   const palier = palierDe(user, maintenant)
-  const effectif = tontinesActivesDe(db, user.id)
+  const effectif = await tontinesActivesDe(db, user.id)
 
   if (depasse(palier.tontinesActives, effectif)) {
     throw apiError(
@@ -162,14 +156,14 @@ export function verifierQuotaTontines(db: Db, user: User, maintenant = new Date(
  * Le quota est celui du **président**, pas de l'appelant : quelqu'un qui
  * accepte une invitation ne paie pas le forfait de la tontine qu'il rejoint.
  */
-export function verifierQuotaMembres(
+export async function verifierQuotaMembres(
   db: Db,
   tontineId: string,
   ajout = 1,
   maintenant = new Date(),
-): void {
-  const palier = palierDe(presidentDe(db, tontineId), maintenant)
-  const effectif = effectifDe(db, tontineId)
+): Promise<void> {
+  const palier = palierDe(await presidentDe(db, tontineId), maintenant)
+  const effectif = await effectifDe(db, tontineId)
 
   if (depasse(palier.membresParTontine, effectif, ajout)) {
     throw apiError(
@@ -182,9 +176,9 @@ export function verifierQuotaMembres(
 }
 
 /** `true` si un membre de plus tient encore. Sert à l'affichage, jamais à l'autorisation. */
-export function placeDisponible(db: Db, tontineId: string, maintenant = new Date()): boolean {
-  const palier = palierDe(presidentDe(db, tontineId), maintenant)
-  return !depasse(palier.membresParTontine, effectifDe(db, tontineId))
+export async function placeDisponible(db: Db, tontineId: string, maintenant = new Date()): Promise<boolean> {
+  const palier = palierDe(await presidentDe(db, tontineId), maintenant)
+  return !depasse(palier.membresParTontine, await effectifDe(db, tontineId))
 }
 
 /* ------------------------------------------------------------------ *
@@ -210,6 +204,8 @@ export interface EtatAbonnement {
   auDessus: boolean
   demandeEnCours: {
     id: string
+    /** À citer au règlement, pour que l'administrateur rapproche le paiement. */
+    reference: string
     tier: string
     periodicity: PlanPeriodicity
     priceFcfa: number
@@ -218,10 +214,10 @@ export interface EtatAbonnement {
 }
 
 /** Tout ce que `/app/abonnement` affiche, calculé côté serveur (règle 2). */
-export function etatAbonnement(db: Db, user: User, maintenant = new Date()): EtatAbonnement {
+export async function etatAbonnement(db: Db, user: User, maintenant = new Date()): Promise<EtatAbonnement> {
   const palier = palierDe(user, maintenant)
 
-  const mesTontines = db
+  const mesTontines = await db
     .select({ id: tontines.id, name: tontines.name, emoji: tontines.emoji })
     .from(tontines)
     .innerJoin(memberships, eq(memberships.tontineId, tontines.id))
@@ -232,15 +228,14 @@ export function etatAbonnement(db: Db, user: User, maintenant = new Date()): Eta
       inArray(tontines.status, [...STATUTS_ACTIFS]),
     ))
     .orderBy(asc(tontines.name))
-    .all()
 
-  const consommees = mesTontines.map(t => ({
+  const consommees = await Promise.all(mesTontines.map(async t => ({
     ...t,
-    effectif: effectifDe(db, t.id),
+    effectif: await effectifDe(db, t.id),
     limite: palier.membresParTontine,
-  }))
+  })))
 
-  const [demande] = db
+  const [demande] = await db
     .select()
     .from(subscriptionRequests)
     .where(and(
@@ -249,7 +244,6 @@ export function etatAbonnement(db: Db, user: User, maintenant = new Date()): Eta
     ))
     .orderBy(desc(subscriptionRequests.createdAt))
     .limit(1)
-    .all()
 
   return {
     tier: palier.id,
@@ -268,6 +262,7 @@ export function etatAbonnement(db: Db, user: User, maintenant = new Date()): Eta
     demandeEnCours: demande
       ? {
           id: demande.id,
+          reference: referenceDeReglement(demande.id),
           tier: demande.tier,
           periodicity: demande.periodicity,
           priceFcfa: demande.priceFcfa,
@@ -293,12 +288,12 @@ export function etatAbonnement(db: Db, user: User, maintenant = new Date()): Eta
  * (règle 2), puis figé sur la demande : la grille peut bouger entre la demande
  * et la décision, le président doit être facturé ce qu'on lui a montré.
  */
-export function creerDemande(
+export async function creerDemande(
   db: Db,
   userId: string,
   input: { tier: PaidTier, periodicity: PlanPeriodicity },
-): { id: string, tier: PaidTier, periodicity: PlanPeriodicity, priceFcfa: number } {
-  const [enCours] = db
+): Promise<{ id: string, tier: PaidTier, periodicity: PlanPeriodicity, priceFcfa: number }> {
+  const [enCours] = await db
     .select()
     .from(subscriptionRequests)
     .where(and(
@@ -306,7 +301,6 @@ export function creerDemande(
       eq(subscriptionRequests.status, 'pending'),
     ))
     .limit(1)
-    .all()
 
   if (enCours) {
     throw apiError(
@@ -320,14 +314,14 @@ export function creerDemande(
   const priceFcfa = input.periodicity === 'yearly' ? palier.prixAnnuel : palier.prixMensuel
 
   const id = randomUUID()
-  db.insert(subscriptionRequests).values({
+  await db.insert(subscriptionRequests).values({
     id,
     userId,
     tier: input.tier,
     periodicity: input.periodicity,
     priceFcfa,
     status: 'pending',
-  }).run()
+  })
 
   return { id, tier: input.tier, periodicity: input.periodicity, priceFcfa }
 }
@@ -367,25 +361,23 @@ function versDemandeAdmin(ligne: { demande: SubscriptionRequest, utilisateur: Us
 }
 
 /** La file, du plus ancien au plus récent : personne ne s'enfonce dans la pile. */
-export function demandesEnAttente(db: Db): DemandeAdmin[] {
-  return db
+export async function demandesEnAttente(db: Db): Promise<DemandeAdmin[]> {
+  return (await db
     .select({ demande: subscriptionRequests, utilisateur: users })
     .from(subscriptionRequests)
     .innerJoin(users, eq(users.id, subscriptionRequests.userId))
     .where(eq(subscriptionRequests.status, 'pending'))
-    .orderBy(asc(subscriptionRequests.createdAt))
-    .all()
+    .orderBy(asc(subscriptionRequests.createdAt)))
     .map(versDemandeAdmin)
 }
 
-export function demandesTraitees(db: Db): DemandeAdmin[] {
-  return db
+export async function demandesTraitees(db: Db): Promise<DemandeAdmin[]> {
+  return (await db
     .select({ demande: subscriptionRequests, utilisateur: users })
     .from(subscriptionRequests)
     .innerJoin(users, eq(users.id, subscriptionRequests.userId))
     .where(inArray(subscriptionRequests.status, ['approved', 'rejected']))
-    .orderBy(desc(subscriptionRequests.reviewedAt))
-    .all()
+    .orderBy(desc(subscriptionRequests.reviewedAt)))
     .map(versDemandeAdmin)
 }
 
@@ -405,13 +397,12 @@ function ajouterMois(depuis: Date, mois: number): Date {
   return fin
 }
 
-function chargerDemande(db: Db, id: string): SubscriptionRequest {
-  const [demande] = db
+async function chargerDemande(db: Db, id: string): Promise<SubscriptionRequest> {
+  const [demande] = await db
     .select()
     .from(subscriptionRequests)
     .where(eq(subscriptionRequests.id, id))
     .limit(1)
-    .all()
 
   if (!demande) throw apiError('NOT_FOUND', 'Demande introuvable.')
   return demande
@@ -425,16 +416,16 @@ function chargerDemande(db: Db, id: string): SubscriptionRequest {
  * Plus en cours de mois perdrait ses jours restants, ou en gagnerait
  * indûment — deux façons de se tromper sur ce qu'il a payé.
  */
-export function approuverDemande(
+export async function approuverDemande(
   db: Db,
   id: string,
   admin: Administrateur,
   maintenant = new Date(),
 ) {
-  const demande = chargerDemande(db, id)
+  const demande = await chargerDemande(db, id)
   assertTransition('subscriptionRequest', demande.status, 'approved')
 
-  const [utilisateur] = db.select().from(users).where(eq(users.id, demande.userId)).limit(1).all()
+  const [utilisateur] = await db.select().from(users).where(eq(users.id, demande.userId)).limit(1)
   if (!utilisateur) throw apiError('NOT_FOUND', 'Compte introuvable.')
 
   const memePalier = utilisateur.planTier === demande.tier
@@ -442,17 +433,15 @@ export function approuverDemande(
   const depart = memePalier && droitsEnCours ? utilisateur.planUntil! : maintenant
   const planUntil = ajouterMois(depart, demande.periodicity === 'yearly' ? 12 : 1)
 
-  db.update(users)
+  await db.update(users)
     .set({ planTier: demande.tier, planUntil })
     .where(eq(users.id, demande.userId))
-    .run()
 
-  db.update(subscriptionRequests)
+  await db.update(subscriptionRequests)
     .set({ status: 'approved', reviewedBy: admin.id, reviewedAt: maintenant, reviewNote: null })
     .where(eq(subscriptionRequests.id, id))
-    .run()
 
-  journaliser(db, admin, 'abonnement_approuve', demande.userId, {
+  await journaliser(db, admin, 'abonnement_approuve', demande.userId, {
     demandeId: id,
     ancienPalier: utilisateur.planTier,
     nouveauPalier: demande.tier,
@@ -461,7 +450,7 @@ export function approuverDemande(
 
   // Règle 21 : ni montant ni date chiffrée dans une notification — elle
   // s'affiche sur un écran verrouillé, et le détail est à un clic.
-  notifier(db, demande.userId, {
+  await notifier(db, demande.userId, {
     type: 'abonnement_approuve',
     title: 'Ton abonnement est actif',
     body: `Le palier ${PALIER_PAR_ID[demande.tier].nom} est en place. Ouvre ton abonnement pour voir jusqu’à quand.`,
@@ -472,14 +461,14 @@ export function approuverDemande(
 }
 
 /** Refuse une demande. Le motif est obligatoire : un refus sans raison est une impasse. */
-export function rejeterDemande(
+export async function rejeterDemande(
   db: Db,
   id: string,
   admin: Administrateur,
   motif: string,
   maintenant = new Date(),
 ) {
-  const demande = chargerDemande(db, id)
+  const demande = await chargerDemande(db, id)
   assertTransition('subscriptionRequest', demande.status, 'rejected')
 
   const raison = motif.trim()
@@ -487,14 +476,13 @@ export function rejeterDemande(
     throw apiError('VALIDATION_ERROR', 'Explique le refus en une phrase.', { field: 'motif' })
   }
 
-  db.update(subscriptionRequests)
+  await db.update(subscriptionRequests)
     .set({ status: 'rejected', reviewedBy: admin.id, reviewedAt: maintenant, reviewNote: raison })
     .where(eq(subscriptionRequests.id, id))
-    .run()
 
-  journaliser(db, admin, 'abonnement_rejete', demande.userId, { demandeId: id, motif: raison })
+  await journaliser(db, admin, 'abonnement_rejete', demande.userId, { demandeId: id, motif: raison })
 
-  notifier(db, demande.userId, {
+  await notifier(db, demande.userId, {
     type: 'abonnement_rejete',
     title: 'Ta demande d’abonnement n’a pas abouti',
     body: 'Ouvre ton abonnement pour lire la raison et refaire une demande.',
@@ -505,8 +493,8 @@ export function rejeterDemande(
 }
 
 /** La dernière décision rendue sur les demandes d'un président, pour l'afficher. */
-export function derniereDecision(db: Db, userId: string): SubscriptionRequest | null {
-  const [demande] = db
+export async function derniereDecision(db: Db, userId: string): Promise<SubscriptionRequest | null> {
+  const [demande] = await db
     .select()
     .from(subscriptionRequests)
     .where(and(
@@ -515,7 +503,6 @@ export function derniereDecision(db: Db, userId: string): SubscriptionRequest | 
     ))
     .orderBy(desc(subscriptionRequests.reviewedAt))
     .limit(1)
-    .all()
 
   return demande ?? null
 }

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
@@ -5,6 +6,7 @@ export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
     '@nuxt/icon',
+    '@nuxtjs/i18n',
     '@pinia/nuxt',
     '@vite-pwa/nuxt',
     'pinia-plugin-persistedstate/nuxt',
@@ -56,6 +58,24 @@ export default defineNuxtConfig({
        * par `NUXT_PUBLIC_POT_ALERT_THRESHOLD`, en attendant le back-office.
        */
       potAlertThreshold: 500_000,
+
+      /**
+       * Où régler l'abonnement.
+       *
+       * L'application n'encaisse rien : le président envoie le forfait de sa
+       * poche, par mobile money, et un administrateur pose le palier depuis
+       * le back-office. Sans ces quatre valeurs, l'écran d'abonnement disait
+       * « le règlement se fait hors de l'application » — et personne ne
+       * savait où. Surchargeables par `NUXT_PUBLIC_ABONNEMENT_REGLEMENT_*`.
+       * Vides, l'écran renvoie vers l'adresse de contact de l'éditeur.
+       */
+      abonnementReglement: {
+        operateur: '',
+        numero: '',
+        titulaire: '',
+        /** Numéro WhatsApp où envoyer la capture du règlement. */
+        contact: '',
+      },
     },
   },
 
@@ -70,6 +90,9 @@ export default defineNuxtConfig({
     // — c'est ce qu'on tape — et une redirection permanente coûte moins qu'une
     // page morte.
     '/tarif': { redirect: { to: '/tarifs', statusCode: 301 } },
+    // Les pages légales sont éditoriales et publiques, pré-rendues comme la
+    // grille tarifaire. Elles doivent se lire sans compte et sans JavaScript.
+    '/legal/**': { prerender: true },
     '/app/**': { ssr: false },
   },
 
@@ -93,9 +116,6 @@ export default defineNuxtConfig({
     experimental: {
       tasks: true, // tâches planifiées : mark-late, open-next-round… (T13)
     },
-    // Format d'erreur unique de l'API. Sans cela, Nitro rend son propre objet
-    // et fait fuiter la pile d'appels dans la réponse.
-    errorHandler: '~~/server/error.ts',
 
     /**
      * Tâches planifiées (docs/api-contract.md § Tâches planifiées).
@@ -130,10 +150,59 @@ export default defineNuxtConfig({
     typeCheck: false, // `pnpm typecheck` lance vue-tsc séparément
   },
 
+  hooks: {
+    /**
+     * Format d'erreur unique de l'API, **devant** la page d'erreur de Nuxt.
+     *
+     * Poser `nitro.errorHandler` directement remplaçait le gestionnaire de
+     * Nuxt : les erreurs d'API sortaient bien au format du contrat, mais une
+     * page introuvable ne rendait plus jamais `app/error.vue` — Nitro
+     * répondait son objet JSON brut, pile d'appels comprise. Nitro accepte une
+     * liste : le nôtre traite `/api/**` et laisse passer le reste, celui de
+     * Nuxt rend alors la page d'erreur.
+     */
+    'nitro:config'(nitroConfig) {
+      const api = fileURLToPath(new URL('./server/error.ts', import.meta.url))
+      const existants = Array.isArray(nitroConfig.errorHandler)
+        ? nitroConfig.errorHandler
+        : nitroConfig.errorHandler ? [nitroConfig.errorHandler] : []
+      nitroConfig.errorHandler = [api, ...existants]
+    },
+
+    /**
+     * `/demo` est la page de vérification du socle — composants PrimeVue
+     * habillés, états du design system. Utile en développement et testée de
+     * bout en bout ; elle n'a rien à faire dans le lot de production, où elle
+     * serait une page publique de plus à maintenir et à indexer.
+     */
+    'pages:extend'(pages) {
+      if (process.env.NODE_ENV !== 'production') return
+      const index = pages.findIndex(p => p.path === '/demo')
+      if (index >= 0) pages.splice(index, 1)
+    },
+  },
+
   eslint: {
     config: {
       stylistic: true,
     },
+  },
+
+  /**
+   * Toutes les chaînes de l'interface vivent dans `i18n/locales/fr.json`
+   * (CLAUDE.md : « toutes les chaînes externalisées dès le départ »).
+   *
+   * Une seule langue aujourd'hui, sans préfixe d'adresse ni détection du
+   * navigateur : `/app` reste `/app`, et un membre dont le téléphone est en
+   * anglais lit le français qu'il attend. Ajouter une langue — le dioula, le
+   * baoulé — revient à ajouter un fichier, pas à rouvrir les écrans.
+   */
+  i18n: {
+    locales: [{ code: 'fr', language: 'fr-CI', name: 'Français', file: 'fr.json' }],
+    defaultLocale: 'fr',
+    strategy: 'no_prefix',
+    detectBrowserLanguage: false,
+    compilation: { strictMessage: false },
   },
 
   icon: {

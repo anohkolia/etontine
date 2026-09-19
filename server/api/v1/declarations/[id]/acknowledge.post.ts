@@ -10,12 +10,12 @@ import { apiError } from '../../../../utils/errors.ts'
  * Contrepartie de la déclaration d'espèces par le trésorier. Sans elle, le
  * bureau pourrait porter au registre des versements qui n'ont jamais eu lieu.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const declarationId = getRouterParam(event, 'id')
   if (!declarationId) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
   const user = requireUser(event)
-  const resultat = reconnaitreVersement(useDb(), declarationId, user.id)
+  const resultat = await reconnaitreVersement(useDb(), declarationId, user.id)
 
   if (!resultat.ok) {
     throw resultat.raison === 'introuvable'

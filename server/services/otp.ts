@@ -4,6 +4,7 @@ import type { useDb } from '../db/index.ts'
 import { otpRequests, users } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
 import { isDevOrTest } from '../utils/env.ts'
+import { envoyerMessage, texteCode } from './sms.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -73,12 +74,11 @@ export async function requestOtp(
 ): Promise<OtpRequestResult> {
   const depuis = new Date(Date.now() - FENETRE_LIMITE_MS)
 
-  const recentes = db
+  const recentes = await db
     .select({ id: otpRequests.id, createdAt: otpRequests.createdAt })
     .from(otpRequests)
     .where(and(eq(otpRequests.phone, phone), gt(otpRequests.createdAt, depuis)))
     .orderBy(desc(otpRequests.createdAt))
-    .all()
 
   if (recentes.length >= MAX_DEMANDES) {
     throw apiError(
@@ -99,20 +99,20 @@ export async function requestOtp(
   // générateur cryptographique, sinon il est prédictible.
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
 
-  // `createdAt` est posé explicitement, et non laissé au `unixepoch()` de
-  // SQLite : la limitation de débit compare cette valeur à l'horloge du
+  // `createdAt` est posé explicitement, et non laissé au `now()` de
+  // Postgres : la limitation de débit compare cette valeur à l'horloge du
   // processus. Deux horloges différentes, et la fenêtre de dix minutes devient
   // fausse — en test comme en production si la base tourne sur une autre machine.
   const maintenant = new Date()
 
-  db.insert(otpRequests).values({
+  await db.insert(otpRequests).values({
     id: randomUUID(),
     phone,
     codeHash: empreinte(phone, code),
     channel: canal,
     createdAt: maintenant,
     expiresAt: new Date(maintenant.getTime() + VALIDITE_MS),
-  }).run()
+  })
 
   await livrerCode(phone, code, canal)
 
@@ -124,19 +124,13 @@ export async function requestOtp(
 }
 
 /**
- * Envoi du code.
+ * Envoi du code, par le fournisseur configuré (`server/services/sms.ts`).
  *
- * Aucun opérateur SMS n'est branché à ce stade : le code est écrit dans les
- * journaux du serveur. Le point d'entrée unique est ici, pour que le
- * branchement d'un fournisseur ne touche qu'une fonction.
+ * En production, un fournisseur absent fait échouer la demande : un code qui
+ * n'est pas parti ne doit pas être annoncé comme envoyé.
  */
 async function livrerCode(phone: string, code: string, canal: 'sms' | 'voice'): Promise<void> {
-  if (isDevOrTest()) {
-    console.info(`[otp] ${canal} vers ${phone} : ${code}`)
-    return
-  }
-  // TODO(T-hors-périmètre) : brancher l'opérateur SMS / vocal.
-  console.info(`[otp] ${canal} vers ${phone} : envoi non configuré`)
+  await envoyerMessage({ to: phone, message: texteCode(code, canal), channel: canal })
 }
 
 export interface OtpVerifyResult {
@@ -151,7 +145,25 @@ export interface OtpVerifyResult {
  * la base de comptes fantômes en saisissant des numéros au hasard.
  */
 export async function verifyOtp(db: Db, phone: string, code: string): Promise<OtpVerifyResult> {
-  const [demande] = db
+  await consommerCode(db, phone, code)
+
+  const [existant] = await db.select().from(users).where(eq(users.phone, phone)).limit(1)
+  if (existant) return { userId: existant.id, isNewUser: false }
+
+  const userId = randomUUID()
+  await db.insert(users).values({ id: userId, phone, kycLevel: 0 })
+  return { userId, isNewUser: true }
+}
+
+/**
+ * Vérifie un code et le consomme, **sans rien créer**.
+ *
+ * C'est la brique commune de la connexion et du changement de numéro : dans
+ * le second cas, le compte existe déjà et c'est un autre numéro qu'on prouve.
+ * Lever l'erreur ici plutôt que renvoyer faux garde un seul message par cas.
+ */
+export async function consommerCode(db: Db, phone: string, code: string): Promise<void> {
+  const [demande] = await db
     .select()
     .from(otpRequests)
     .where(and(
@@ -161,7 +173,6 @@ export async function verifyOtp(db: Db, phone: string, code: string): Promise<Ot
     ))
     .orderBy(desc(otpRequests.createdAt))
     .limit(1)
-    .all()
 
   if (!demande) {
     throw apiError('VALIDATION_ERROR', 'Code expiré ou déjà utilisé. Demande un nouveau code.', { field: 'code' })
@@ -172,36 +183,26 @@ export async function verifyOtp(db: Db, phone: string, code: string): Promise<Ot
   }
 
   if (!comparaisonConstante(demande.codeHash, empreinte(phone, code))) {
-    db.update(otpRequests)
+    await db.update(otpRequests)
       .set({ attempts: demande.attempts + 1 })
       .where(eq(otpRequests.id, demande.id))
-      .run()
 
     throw apiError('VALIDATION_ERROR', 'Code incorrect.', { field: 'code' })
   }
 
-  db.update(otpRequests)
+  await db.update(otpRequests)
     .set({ consumedAt: new Date() })
     .where(eq(otpRequests.id, demande.id))
-    .run()
-
-  const [existant] = db.select().from(users).where(eq(users.phone, phone)).limit(1).all()
-  if (existant) return { userId: existant.id, isNewUser: false }
-
-  const userId = randomUUID()
-  db.insert(users).values({ id: userId, phone, kycLevel: 0 }).run()
-  return { userId, isNewUser: true }
 }
 
 /** Nombre d'échecs sur la dernière demande en cours — pilote l'offre d'appel vocal. */
-export function failedAttempts(db: Db, phone: string): number {
-  const [demande] = db
+export async function failedAttempts(db: Db, phone: string): Promise<number> {
+  const [demande] = await db
     .select({ attempts: otpRequests.attempts })
     .from(otpRequests)
     .where(eq(otpRequests.phone, phone))
     .orderBy(desc(otpRequests.createdAt))
     .limit(1)
-    .all()
 
   return demande?.attempts ?? 0
 }

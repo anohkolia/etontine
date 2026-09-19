@@ -11,6 +11,7 @@
  * confort, pas un contrôle.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
 
 const route = useRoute()
 const tontineId = route.params.id as string
@@ -107,12 +108,12 @@ const confirmables = computed(() => items.value.filter(i => !i.estLaMienne))
 function nom(item: EnAttente): string {
   return [item.memberFirstName, item.memberLastName].filter(Boolean).join(' ')
     || item.memberName
-    || 'Membre'
+    || t('tontine.confirmations.membre')
 }
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -207,10 +208,10 @@ async function toutConfirmer() {
 
 onMounted(charger)
 useEnTete(() => ({
-  titre: 'À confirmer',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.confirmations.a_confirmer'),
+  retour: { to: `/app/tontine/${tontineId}`, label: t('commun.retour_tontine') },
 }))
-useHead({ title: 'À confirmer — eTontine' })
+useHead({ title: t('tontine.confirmations.a_confirmer_etontine') })
 </script>
 
 <template>
@@ -235,8 +236,8 @@ useHead({ title: 'À confirmer — eTontine' })
            tant qu'il ne l'a pas fait. -->
       <EmptyState
         v-if="items.length === 0"
-        title="Rien à confirmer"
-        description="Toutes les déclarations ont été traitées. Les nouvelles apparaîtront ici."
+        :title="$t('tontine.confirmations.rien_a_confirmer')"
+        :description="$t('tontine.confirmations.toutes_les_declarations_ont')"
         icon="lucide:circle-check"
       />
 
@@ -255,16 +256,16 @@ useHead({ title: 'À confirmer — eTontine' })
             <div class="flex flex-col gap-1">
               <span class="font-medium text-ink">{{ nom(item) }}</span>
               <span class="text-sm text-ink-muted">
-                Tour {{ item.roundIndex }} · part {{ item.rotationPosition }}
+                {{ $t('tontine.confirmations.tour_p0_part_p1', { p0: item.roundIndex, p1: item.rotationPosition }) }}
               </span>
               <span class="text-sm text-ink-muted">
-                Déclaré le {{ formatDate(item.declaredAt) }} · {{ item.channel }}
+                {{ $t('tontine.confirmations.declare_le_p0_p1', { p0: formatDate(item.declaredAt), p1: item.channel }) }}
               </span>
               <span
                 v-if="item.providerRef"
                 class="font-mono text-sm text-ink-muted"
               >
-                Réf. {{ item.providerRef }}
+                {{ $t('tontine.confirmations.ref_p0', { p0: item.providerRef }) }}
               </span>
             </div>
 
@@ -284,7 +285,7 @@ useHead({ title: 'À confirmer — eTontine' })
               class="mt-0.5 shrink-0"
               aria-hidden="true"
             />
-            Versement en espèces enregistré par le bureau.
+            {{ $t('tontine.confirmations.versement_en_especes_enregistre') }}
           </p>
 
           <p
@@ -298,7 +299,7 @@ useHead({ title: 'À confirmer — eTontine' })
               class="mt-0.5 shrink-0"
               aria-hidden="true"
             />
-            En attente depuis plus de 48 heures.
+            {{ $t('tontine.confirmations.en_attente_depuis_plus') }}
           </p>
 
           <a
@@ -313,7 +314,7 @@ useHead({ title: 'À confirmer — eTontine' })
               size="0.875rem"
               aria-hidden="true"
             />
-            Voir la capture
+            {{ $t('tontine.confirmations.voir_la_capture') }}
           </a>
 
           <!-- Une déclaration faite par soi-même n'est pas confirmable : le
@@ -323,7 +324,7 @@ useHead({ title: 'À confirmer — eTontine' })
             class="rounded-control bg-surface-muted p-2 text-sm text-ink-muted"
             :data-testid="`propre-declaration-${item.declarationId}`"
           >
-            Tu as fait cette déclaration. Un autre membre du bureau doit la confirmer.
+            {{ $t('tontine.confirmations.tu_as_fait_cette') }}
           </p>
 
           <div
@@ -334,25 +335,25 @@ useHead({ title: 'À confirmer — eTontine' })
               class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
               :for="`motif-${item.declarationId}`"
             >
-              Motif du rejet
+              {{ $t('tontine.confirmations.motif_du_rejet') }}
               <InputText
                 :id="`motif-${item.declarationId}`"
                 v-model="motifRejet"
-                placeholder="Aucun envoi retrouvé à ce montant"
+                :placeholder="$t('tontine.confirmations.aucun_envoi_retrouve_a')"
                 :data-testid="`champ-motif-${item.declarationId}`"
               />
               <span class="text-sm font-normal text-ink-subtle">
-                Obligatoire : le membre doit savoir ce qui cloche pour corriger.
+                {{ $t('tontine.confirmations.obligatoire_le_membre_doit') }}
               </span>
             </label>
             <div class="flex flex-col gap-2 sm:flex-row">
               <Button
-                label="Annuler"
+                :label="$t('tontine.confirmations.annuler')"
                 class="border border-line-strong bg-surface text-ink sm:flex-1"
                 @click="rejetOuvert = null"
               />
               <Button
-                label="Rejeter"
+                :label="$t('tontine.confirmations.rejeter')"
                 :disabled="motifRejet.trim().length < 5 || enCours === item.declarationId"
                 class="bg-disputed-ink text-surface sm:flex-1"
                 :data-testid="`bouton-confirmer-rejet-${item.declarationId}`"
@@ -366,13 +367,13 @@ useHead({ title: 'À confirmer — eTontine' })
             class="flex flex-col gap-2 sm:flex-row"
           >
             <Button
-              label="Rejeter"
+              :label="$t('tontine.confirmations.rejeter')"
               class="border border-disputed-ink bg-surface text-disputed-ink sm:flex-1"
               :data-testid="`bouton-rejeter-${item.declarationId}`"
               @click="rejetOuvert = item.declarationId; motifRejet = ''"
             />
             <Button
-              :label="enCours === item.declarationId ? 'Confirmation…' : 'Confirmer'"
+              :label="enCours === item.declarationId ? $t('tontine.confirmations.confirmation') : $t('tontine.confirmations.confirmer')"
               :disabled="enCours === item.declarationId"
               class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
               :data-testid="`bouton-confirmer-${item.declarationId}`"
@@ -389,12 +390,10 @@ useHead({ title: 'À confirmer — eTontine' })
         data-testid="section-especes"
       >
         <h2 class="font-semibold text-ink">
-          Enregistrer des espèces
+          {{ $t('tontine.confirmations.enregistrer_des_especes') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Pour un membre qui t’a remis l’argent en main propre. Il recevra une
-          demande de confirmation : c’est lui qui dit s’il reconnaît le
-          versement.
+          {{ $t('tontine.confirmations.pour_un_membre_qui') }}
         </p>
 
         <ul class="flex flex-col gap-2">
@@ -407,7 +406,7 @@ useHead({ title: 'À confirmer — eTontine' })
             <div class="flex items-baseline justify-between gap-3">
               <span class="truncate font-semibold text-ink">{{ cotisation.nom }}</span>
               <span class="shrink-0 text-sm text-ink-muted">
-                reste <AmountDisplay
+                {{ $t('tontine.confirmations.reste') }} <AmountDisplay
                   :amount="restantDe(cotisation)"
                   size="sm"
                 />
@@ -419,7 +418,7 @@ useHead({ title: 'À confirmer — eTontine' })
                 class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
                 :for="`montant-especes-${cotisation.id}`"
               >
-                Montant reçu (FCFA)
+                {{ $t('tontine.confirmations.montant_recu_fcfa') }}
                 <InputText
                   :id="`montant-especes-${cotisation.id}`"
                   :value="montantEspeces[cotisation.id]"
@@ -432,14 +431,14 @@ useHead({ title: 'À confirmer — eTontine' })
 
               <div class="flex flex-col gap-2 sm:flex-row">
                 <Button
-                  :label="enCours === cotisation.id ? 'Enregistrement…' : 'Enregistrer'"
+                  :label="enCours === cotisation.id ? $t('tontine.confirmations.enregistrement') : $t('tontine.confirmations.enregistrer')"
                   :disabled="enCours !== null || !montantEspeces[cotisation.id]"
                   class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
                   :data-testid="`bouton-enregistrer-especes-${cotisation.id}`"
                   @click="enregistrerEspeces(cotisation)"
                 />
                 <Button
-                  label="Annuler"
+                  :label="$t('tontine.confirmations.annuler')"
                   class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
                   @click="especesOuvert = null"
                 />
@@ -448,7 +447,7 @@ useHead({ title: 'À confirmer — eTontine' })
 
             <Button
               v-else
-              label="Il a payé en espèces"
+              :label="$t('tontine.confirmations.il_a_paye_en')"
               class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
               :data-testid="`bouton-especes-${cotisation.id}`"
               @click="especesOuvert = cotisation.id"
@@ -471,7 +470,7 @@ useHead({ title: 'À confirmer — eTontine' })
         class="mt-auto pt-2"
       >
         <Button
-          :label="enCours === 'lot' ? 'Confirmation…' : `Tout confirmer (${confirmables.length})`"
+          :label="enCours === 'lot' ? $t('tontine.confirmations.confirmation') : $t('tontine.confirmations.tout_confirmer_n', { n: confirmables.length })"
           :disabled="enCours !== null"
           class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-tout-confirmer"

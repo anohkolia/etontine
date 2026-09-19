@@ -8,14 +8,14 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const PRESIDENT = 'c0000000-0000-4000-8000-000000000001'
 const MEMBRE = 'c0000000-0000-4000-8000-000000000002'
 const T = 'c0000000-0000-4000-8000-000000000010'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
@@ -33,65 +33,65 @@ beforeEach(async () => {
 
 afterEach(() => cleanup())
 
-function canal(nom = 'Aya Koné', numero = '+2250707000001') {
-  return creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: numero, holderName: nom })
+async function canal(nom = 'Aya Koné', numero = '+2250707000001') {
+  return await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: numero, holderName: nom })
 }
 
 describe('canaux de collecte — acceptation T09', () => {
-  it('refuse de rattacher un canal non vérifié', () => {
-    const id = canal()
+  it('refuse de rattacher un canal non vérifié', async () => {
+    const id = await canal()
 
     // Sans vérification, n'importe qui ferait collecter les cotisations du
     // groupe sur son propre numéro : l'arnaque la plus simple contre une tontine.
-    expect(() => rattacherCanal(db, T, id, PRESIDENT)).toThrow(
+    await expect(rattacherCanal(db, T, id, PRESIDENT)).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('accepte le rattachement une fois le numéro vérifié', () => {
-    const id = canal()
-    marquerVerifie(db, id)
+  it('accepte le rattachement une fois le numéro vérifié', async () => {
+    const id = await canal()
+    await marquerVerifie(db, id)
 
-    expect(() => rattacherCanal(db, T, id, PRESIDENT)).not.toThrow()
-    expect(canauxDeTontine(db, T)).toHaveLength(1)
+    await rattacherCanal(db, T, id, PRESIDENT)
+    expect(await canauxDeTontine(db, T)).toHaveLength(1)
   })
 
-  it('exige un nom de titulaire', () => {
-    const id = canal('Aya Koné')
-    marquerVerifie(db, id)
-    rattacherCanal(db, T, id, PRESIDENT)
+  it('exige un nom de titulaire', async () => {
+    const id = await canal('Aya Koné')
+    await marquerVerifie(db, id)
+    await rattacherCanal(db, T, id, PRESIDENT)
 
     // Le membre lit ce nom dans son application de paiement pour vérifier
     // qu'il envoie bien à la bonne personne (T14).
-    expect(canauxDeTontine(db, T)[0]!.holderName).toBe('Aya Koné')
+    expect((await canauxDeTontine(db, T))[0]!.holderName).toBe('Aya Koné')
   })
 
-  it('n’expose pas un canal non vérifié parmi les canaux de la tontine', () => {
-    const verifie = canal('Aya Koné', '+2250707000001')
-    marquerVerifie(db, verifie)
-    rattacherCanal(db, T, verifie, PRESIDENT)
+  it('n’expose pas un canal non vérifié parmi les canaux de la tontine', async () => {
+    const verifie = await canal('Aya Koné', '+2250707000001')
+    await marquerVerifie(db, verifie)
+    await rattacherCanal(db, T, verifie, PRESIDENT)
 
-    const douteux = canal('Inconnu', '+2250707000099')
-    db.insert(tontineChannels).values({ tontineId: T, channelId: douteux }).run()
+    const douteux = await canal('Inconnu', '+2250707000099')
+    await db.insert(tontineChannels).values({ tontineId: T, channelId: douteux })
 
-    expect(canauxDeTontine(db, T).map(c => c.id)).toEqual([verifie])
+    expect((await canauxDeTontine(db, T)).map(c => c.id)).toEqual([verifie])
   })
 })
 
 describe('changement de canal sur une tontine active', () => {
-  beforeEach(() => {
-    const initial = canal('Aya Koné', '+2250707000001')
-    marquerVerifie(db, initial)
-    rattacherCanal(db, T, initial, PRESIDENT)
-    db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T)).run()
+  beforeEach(async () => {
+    const initial = await canal('Aya Koné', '+2250707000001')
+    await marquerVerifie(db, initial)
+    await rattacherCanal(db, T, initial, PRESIDENT)
+    await db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T))
   })
 
-  it('gèle le nouveau canal pendant 48 heures', () => {
-    const nouveau = canal('Aya Koné', '+2250505000009')
-    marquerVerifie(db, nouveau)
+  it('gèle le nouveau canal pendant 48 heures', async () => {
+    const nouveau = await canal('Aya Koné', '+2250505000009')
+    await marquerVerifie(db, nouveau)
 
     const avant = Date.now()
-    const { frozenUntil } = rattacherCanal(db, T, nouveau, PRESIDENT)
+    const { frozenUntil } = await rattacherCanal(db, T, nouveau, PRESIDENT)
     const apres = Date.now()
 
     expect(frozenUntil).not.toBeNull()
@@ -101,24 +101,24 @@ describe('changement de canal sur une tontine active', () => {
     expect(frozenUntil!.getTime()).toBeLessThanOrEqual(apres + GEL_HEURES * 3_600_000)
   })
 
-  it('notifie tous les membres', () => {
-    const nouveau = canal('Aya Koné', '+2250505000009')
-    marquerVerifie(db, nouveau)
-    rattacherCanal(db, T, nouveau, PRESIDENT)
+  it('notifie tous les membres', async () => {
+    const nouveau = await canal('Aya Koné', '+2250505000009')
+    await marquerVerifie(db, nouveau)
+    await rattacherCanal(db, T, nouveau, PRESIDENT)
 
-    const envoyees = db.select().from(notifications).all()
+    const envoyees = await db.select().from(notifications)
     // Tous les membres actifs, président compris : c'est lui qu'on protège
     // aussi, si quelqu'un a pris la main sur son compte.
     expect(envoyees).toHaveLength(2)
     expect(envoyees.map(n => n.userId).sort()).toEqual([PRESIDENT, MEMBRE].sort())
   })
 
-  it('écrit le changement au registre, sans exposer le numéro complet', () => {
-    const nouveau = canal('Aya Koné', '+2250505000009')
-    marquerVerifie(db, nouveau)
-    rattacherCanal(db, T, nouveau, PRESIDENT)
+  it('écrit le changement au registre, sans exposer le numéro complet', async () => {
+    const nouveau = await canal('Aya Koné', '+2250505000009')
+    await marquerVerifie(db, nouveau)
+    await rattacherCanal(db, T, nouveau, PRESIDENT)
 
-    const ecritures = db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T)).all()
+    const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T))
     expect(ecritures).toHaveLength(1)
     expect(ecritures[0]!.type).toBe('settings_changed')
 
@@ -128,41 +128,41 @@ describe('changement de canal sur une tontine active', () => {
     expect(JSON.stringify(payload)).not.toContain('+2250505000009')
   })
 
-  it('ne gèle rien au premier rattachement', () => {
+  it('ne gèle rien au premier rattachement', async () => {
     // Le gel protège d'un changement suspect, pas de la mise en place initiale.
-    const [premier] = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    const [premier] = await db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T))
     expect(premier!.frozenUntil).toBeNull()
   })
 })
 
 describe('règle 21 — aucune notification ne porte de montant', () => {
-  it('refuse une notification contenant un montant', () => {
+  it('refuse une notification contenant un montant', async () => {
     // Une notification s'affiche sur un écran verrouillé, et les téléphones
     // se partagent. « Tu as reçu 250 000 FCFA » désigne une cible.
-    expect(() => notifierTontine(db, T, {
+    await expect(notifierTontine(db, T, {
       type: 'test', title: 'Pot versé', body: 'Tu as reçu 250 000 FCFA',
-    })).toThrow(NotificationAvecMontantError)
+    })).rejects.toThrow(NotificationAvecMontantError)
   })
 
-  it('refuse aussi un montant écrit sans devise', () => {
-    expect(() => notifierTontine(db, T, {
+  it('refuse aussi un montant écrit sans devise', async () => {
+    await expect(notifierTontine(db, T, {
       type: 'test', title: 'Cotisation', body: 'Il te reste 25000 à verser',
-    })).toThrow(NotificationAvecMontantError)
+    })).rejects.toThrow(NotificationAvecMontantError)
   })
 
-  it('laisse passer une formulation neutre', () => {
-    expect(() => notifierTontine(db, T, {
+  it('laisse passer une formulation neutre', async () => {
+    await notifierTontine(db, T, {
       type: 'test',
       title: 'Nouvelle activité',
       body: 'Une cotisation a été confirmée sur ta tontine.',
-    })).not.toThrow()
+    })
   })
 
-  it('n’écrit rien quand la notification est refusée', () => {
-    expect(() => notifierTontine(db, T, {
+  it('n’écrit rien quand la notification est refusée', async () => {
+    await expect(notifierTontine(db, T, {
       type: 'test', title: 'x', body: '250 000 FCFA',
-    })).toThrow()
-    expect(db.select().from(notifications).all()).toHaveLength(0)
+    })).rejects.toThrow()
+    expect(await db.select().from(notifications)).toHaveLength(0)
   })
 })
 
@@ -174,61 +174,61 @@ describe('règle 22 par le chemin de l’écran de réglages', () => {
    * passe vraiment — c'est exactement ainsi que la règle 22 a pu rester au
    * vert tout en ne se déclenchant jamais.
    */
-  function canalVerifie(numero: string) {
-    const id = canal('Aya Koné', numero)
-    marquerVerifie(db, id)
+  async function canalVerifie(numero: string) {
+    const id = await canal('Aya Koné', numero)
+    await marquerVerifie(db, id)
     return id
   }
 
-  beforeEach(() => {
-    db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T)).run()
+  beforeEach(async () => {
+    await db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T))
   })
 
-  it('gèle 48 h, écrit au registre et prévient tout le monde', () => {
-    const initial = canalVerifie('+2250707000001')
-    const nouveau = canalVerifie('+2250505000009')
+  it('gèle 48 h, écrit au registre et prévient tout le monde', async () => {
+    const initial = await canalVerifie('+2250707000001')
+    const nouveau = await canalVerifie('+2250505000009')
 
-    definirCanaux(db, T, [initial], PRESIDENT)
-    definirCanaux(db, T, [nouveau], PRESIDENT)
+    await definirCanaux(db, T, [initial], PRESIDENT)
+    await definirCanaux(db, T, [nouveau], PRESIDENT)
 
-    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    const liens = await db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T))
     expect(liens).toHaveLength(1)
     expect(liens[0]!.channelId).toBe(nouveau)
     expect(liens[0]!.frozenUntil).not.toBeNull()
 
-    const ecritures = db.select().from(ledgerEntries).all()
+    const ecritures = (await db.select().from(ledgerEntries))
       .filter(e => (e.payload as { changement?: string }).changement === 'canal_de_collecte')
     expect(ecritures).toHaveLength(1)
 
     // Tous les membres, pas seulement celui qui a changé le numéro.
-    const envoyees = db.select().from(notifications).all().filter(n => n.type === 'canal_modifie')
+    const envoyees = (await db.select().from(notifications)).filter(n => n.type === 'canal_modifie')
     expect(envoyees.length).toBeGreaterThan(0)
   })
 
-  it('ne gèle rien quand on renvoie la même sélection', () => {
-    const initial = canalVerifie('+2250707000001')
+  it('ne gèle rien quand on renvoie la même sélection', async () => {
+    const initial = await canalVerifie('+2250707000001')
 
-    definirCanaux(db, T, [initial], PRESIDENT)
-    definirCanaux(db, T, [initial], PRESIDENT)
+    await definirCanaux(db, T, [initial], PRESIDENT)
+    await definirCanaux(db, T, [initial], PRESIDENT)
 
     // Enregistrer les réglages sans toucher au numéro ne doit ni geler la
     // collecte, ni alerter le groupe pour rien : la deuxième alerte userait
     // la première.
-    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    const liens = await db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T))
     expect(liens).toHaveLength(1)
     expect(liens[0]!.frozenUntil).toBeNull()
-    expect(db.select().from(notifications).all().filter(n => n.type === 'canal_modifie')).toHaveLength(0)
+    expect((await db.select().from(notifications)).filter(n => n.type === 'canal_modifie')).toHaveLength(0)
   })
 
-  it('ne gèle pas sur un brouillon : rien n’est encore promis à personne', () => {
-    db.update(tontines).set({ status: 'draft' }).where(eq(tontines.id, T)).run()
-    const initial = canalVerifie('+2250707000001')
-    const nouveau = canalVerifie('+2250505000009')
+  it('ne gèle pas sur un brouillon : rien n’est encore promis à personne', async () => {
+    await db.update(tontines).set({ status: 'draft' }).where(eq(tontines.id, T))
+    const initial = await canalVerifie('+2250707000001')
+    const nouveau = await canalVerifie('+2250505000009')
 
-    definirCanaux(db, T, [initial], PRESIDENT)
-    definirCanaux(db, T, [nouveau], PRESIDENT)
+    await definirCanaux(db, T, [initial], PRESIDENT)
+    await definirCanaux(db, T, [nouveau], PRESIDENT)
 
-    const liens = db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T)).all()
+    const liens = await db.select().from(tontineChannels).where(eq(tontineChannels.tontineId, T))
     expect(liens[0]!.frozenUntil).toBeNull()
   })
 })

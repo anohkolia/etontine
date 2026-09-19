@@ -6,12 +6,12 @@ import { createTestDb } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const NUMERO = '+2250707123456'
 
-beforeEach(() => {
-  const ctx = createTestDb()
+beforeEach(async () => {
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   vi.useRealTimers()
@@ -114,7 +114,7 @@ describe('vérification du code', () => {
       statusCode: 422,
       data: { error: { code: 'VALIDATION_ERROR', field: 'code' } },
     })
-    expect(failedAttempts(db, NUMERO)).toBe(1)
+    expect(await failedAttempts(db, NUMERO)).toBe(1)
   })
 
   it('ouvre le repli vocal après deux échecs', async () => {
@@ -123,7 +123,7 @@ describe('vérification du code', () => {
     await expect(verifyOtp(db, NUMERO, '000001')).rejects.toThrow()
 
     // Le SMS n'arrive pas toujours : réseau saturé, numéro porté, filtrage.
-    expect(failedAttempts(db, NUMERO)).toBeGreaterThanOrEqual(ECHECS_AVANT_VOCAL)
+    expect(await failedAttempts(db, NUMERO)).toBeGreaterThanOrEqual(ECHECS_AVANT_VOCAL)
   })
 
   it('ne rejoue pas un code déjà consommé', async () => {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n()
+
 /**
  * Jauge circulaire du pot — reprise de `PotGauge` du template.
  *
@@ -14,15 +16,16 @@
  * `role="img"` avec sa description : l'information n'est jamais portée par le
  * seul remplissage coloré (règle 10).
  */
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   /** Montant confirmé, en FCFA entiers, calculé par le serveur. */
   collecte: number
   /** Montant attendu pour le tour, en FCFA entiers, calculé par le serveur. */
   objectif: number
   label?: string
-}>(), {
-  label: 'Pot du tour',
-})
+}>()
+// Le libellé par défaut vient du fichier de langue : il se calcule ici, pas
+// dans `defineProps`, que le compilateur hisse hors de `setup()`.
+const label = computed(() => props.label ?? t('ui.PotGauge.pot_du_tour'))
 
 const { format } = useMoney()
 
@@ -50,7 +53,7 @@ const decalage = computed(() =>
         viewBox="0 0 120 120"
         class="size-32 -rotate-90"
         role="img"
-        :aria-label="`${pourcentage} % du pot collecté`"
+        :aria-label="$t('ui.PotGauge.pourcentage_du_pot', { p0: pourcentage })"
       >
         <circle
           cx="60"
@@ -78,7 +81,7 @@ const decalage = computed(() =>
           class="tabular text-2xl font-bold text-ink"
           data-testid="pot-pourcentage"
         >{{ pourcentage }} %</span>
-        <span class="text-[10px] tracking-wide text-ink-muted uppercase">collecté</span>
+        <span class="text-[10px] tracking-wide text-ink-muted uppercase">{{ $t('ui.PotGauge.collecte') }}</span>
       </div>
     </div>
 
@@ -94,7 +97,7 @@ const decalage = computed(() =>
         data-testid="pot-collecte"
       />
       <p class="tabular text-sm text-ink-muted">
-        objectif {{ format(objectif) }}
+        {{ $t('ui.PotGauge.objectif_p0', { p0: format(objectif) }) }}
       </p>
     </div>
   </div>

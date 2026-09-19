@@ -20,13 +20,12 @@ export const GEL_HEURES = 48
  * pourrait faire collecter les cotisations du groupe sur le sien — c'est
  * l'arnaque la plus simple et la plus rentable contre une tontine.
  */
-export function rattacherCanal(db: Db, tontineId: string, channelId: string, acteurId: string) {
-  const [canal] = db
+export async function rattacherCanal(db: Db, tontineId: string, channelId: string, acteurId: string) {
+  const [canal] = await db
     .select()
     .from(collectionChannels)
     .where(eq(collectionChannels.id, channelId))
     .limit(1)
-    .all()
 
   if (!canal) throw apiError('NOT_FOUND', 'Canal de collecte introuvable.')
 
@@ -38,14 +37,13 @@ export function rattacherCanal(db: Db, tontineId: string, channelId: string, act
     )
   }
 
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
-  const dejaRattaches = db
+  const dejaRattaches = await db
     .select()
     .from(tontineChannels)
     .where(eq(tontineChannels.tontineId, tontineId))
-    .all()
 
   // Sur une tontine déjà lancée, changer de canal est le geste que reproduirait
   // un escroc ayant pris la main sur un compte. On ne l'interdit pas — un
@@ -58,12 +56,11 @@ export function rattacherCanal(db: Db, tontineId: string, channelId: string, act
     ? new Date(Date.now() + GEL_HEURES * 60 * 60 * 1000)
     : null
 
-  db.insert(tontineChannels)
+  await db.insert(tontineChannels)
     .values({ tontineId, channelId, frozenUntil })
-    .run()
 
   if (changement) {
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId,
       type: 'settings_changed',
       actorId: acteurId,
@@ -78,7 +75,7 @@ export function rattacherCanal(db: Db, tontineId: string, channelId: string, act
       },
     })
 
-    notifierTontine(db, tontineId, {
+    await notifierTontine(db, tontineId, {
       type: 'canal_modifie',
       title: 'Changement de numéro de collecte',
       body: 'Le numéro où envoyer les cotisations a changé. Vérifie-le avant ton prochain envoi.',
@@ -90,8 +87,8 @@ export function rattacherCanal(db: Db, tontineId: string, channelId: string, act
 }
 
 /** Les canaux vérifiés et utilisables d'une tontine. */
-export function canauxDeTontine(db: Db, tontineId: string) {
-  return db
+export async function canauxDeTontine(db: Db, tontineId: string) {
+  return await db
     .select({
       id: collectionChannels.id,
       provider: collectionChannels.provider,
@@ -106,18 +103,17 @@ export function canauxDeTontine(db: Db, tontineId: string) {
       eq(tontineChannels.tontineId, tontineId),
       isNotNull(collectionChannels.verifiedAt),
     ))
-    .all()
 }
 
 /** Crée un canal, non vérifié : inutilisable tant qu'il ne l'est pas. */
-export function creerCanal(db: Db, userId: string, input: {
+export async function creerCanal(db: Db, userId: string, input: {
   provider: 'wave' | 'orange' | 'mtn' | 'moov'
   msisdn: string
   holderName: string
   paymentLinkUrl?: string
 }) {
   const id = randomUUID()
-  db.insert(collectionChannels).values({
+  await db.insert(collectionChannels).values({
     id,
     userId,
     provider: input.provider,
@@ -127,14 +123,13 @@ export function creerCanal(db: Db, userId: string, input: {
     holderName: input.holderName,
     paymentLinkUrl: input.paymentLinkUrl ?? null,
     verifiedAt: null,
-  }).run()
+  })
 
   return id
 }
 
-export function marquerVerifie(db: Db, channelId: string) {
-  db.update(collectionChannels)
+export async function marquerVerifie(db: Db, channelId: string) {
+  await db.update(collectionChannels)
     .set({ verifiedAt: new Date() })
     .where(eq(collectionChannels.id, channelId))
-    .run()
 }

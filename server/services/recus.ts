@@ -83,8 +83,8 @@ export interface Recu {
  * qui débordent du cercle de la tontine ; il ne doit pas devenir une fuite
  * d'information sur le groupe.
  */
-export function recu(db: Db, declarationId: string): Recu {
-  const [ligne] = db
+export async function recu(db: Db, declarationId: string): Promise<Recu> {
+  const [ligne] = await db
     .select({
       declaration: paymentDeclarations,
       roundIndex: rounds.index,
@@ -101,7 +101,6 @@ export function recu(db: Db, declarationId: string): Recu {
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Reçu introuvable.')
 

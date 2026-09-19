@@ -4,7 +4,7 @@ import { dossiersEnAttente, dossiersTraites } from '../../../../server/services/
 import { requireAdmin } from '../../utils/garde.ts'
 
 /** La file des dossiers d'identité : en attente par défaut, traités sur demande. */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   requireAdmin(event)
 
   const db = useDb()
@@ -12,7 +12,7 @@ export default defineEventHandler((event) => {
 
   return {
     etat: traites ? 'traites' : 'en_attente',
-    dossiers: traites ? dossiersTraites(db) : dossiersEnAttente(db),
-    nbEnAttente: dossiersEnAttente(db).length,
+    dossiers: traites ? (await dossiersTraites(db)) : (await dossiersEnAttente(db)),
+    nbEnAttente: (await dossiersEnAttente(db)).length,
   }
 })

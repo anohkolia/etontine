@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
 
-  const [ligne] = db
+  const [ligne] = await db
     .select({
       contribution: contributions,
       tontineId: rounds.tontineId,
@@ -38,13 +38,12 @@ export default defineEventHandler(async (event) => {
     .innerJoin(memberships, eq(memberships.id, contributions.membershipId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
   const { user } = await requireMembership(event, ligne.tontineId)
 
-  const canaux = canauxDeTontine(db, ligne.tontineId)
+  const canaux = await canauxDeTontine(db, ligne.tontineId)
 
   if (canaux.length === 0) {
     throw apiError('NOT_FOUND', 'Aucun numéro de collecte n’est rattaché à cette tontine.')

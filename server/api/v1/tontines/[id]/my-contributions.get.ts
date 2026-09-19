@@ -20,18 +20,17 @@ export default defineEventHandler(async (event) => {
   const { membership } = await requireMembership(event, tontineId)
   const db = useDb()
 
-  const tours = db
+  const tours = await db
     .select({ id: rounds.id, index: rounds.index, dueDate: rounds.dueDate, status: rounds.status })
     .from(rounds)
     .where(and(
       eq(rounds.tontineId, tontineId),
       inArray(rounds.status, ['collecting', 'payout_pending']),
     ))
-    .all()
 
   if (tours.length === 0) return { round: null, contributions: [] }
 
-  const miennes = db
+  const miennes = await db
     .select({
       id: contributions.id,
       roundId: contributions.roundId,
@@ -49,7 +48,6 @@ export default defineEventHandler(async (event) => {
       inArray(contributions.roundId, tours.map(t => t.id)),
       eq(memberships.id, membership.id),
     ))
-    .all()
 
   // Mes déclarations sur ces cotisations, **quelle que soit leur décision**.
   //
@@ -66,7 +64,7 @@ export default defineEventHandler(async (event) => {
   //   voyais le badge « Contesté » sans jamais savoir ce qui clochait.
   const declarations = miennes.length === 0
     ? []
-    : db
+    : (await db
         .select({
           id: paymentDeclarations.id,
           contributionId: paymentDeclarations.contributionId,
@@ -75,6 +73,7 @@ export default defineEventHandler(async (event) => {
           source: paymentDeclarations.source,
           declaredAt: paymentDeclarations.declaredAt,
           declaredBy: paymentDeclarations.declaredBy,
+          proofUrl: paymentDeclarations.proofUrl,
           memberAcknowledgedAt: paymentDeclarations.memberAcknowledgedAt,
           decision: paymentDeclarations.decision,
           decidedAt: paymentDeclarations.decidedAt,
@@ -82,8 +81,7 @@ export default defineEventHandler(async (event) => {
         })
         .from(paymentDeclarations)
         .where(inArray(paymentDeclarations.contributionId, miennes.map(c => c.id)))
-        .orderBy(desc(paymentDeclarations.declaredAt))
-        .all()
+        .orderBy(desc(paymentDeclarations.declaredAt)))
 
   return { round: tours[0], contributions: miennes, declarations }
 })

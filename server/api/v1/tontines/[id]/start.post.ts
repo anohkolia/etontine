@@ -1,6 +1,6 @@
 import { getRouterParam } from 'h3'
 import { useDb } from '../../../../db/index.ts'
-import { demarrerTontine } from '../../../../services/tours.ts'
+import { dateDuJour, demarrerTontine } from '../../../../services/tours.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
 
@@ -15,5 +15,7 @@ export default defineEventHandler(async (event) => {
   if (!tontineId) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const { user } = await requireMembership(event, tontineId, ['president'])
-  return demarrerTontine(useDb(), tontineId, user.id)
+  // La date du jour est passée ici, pas devinée par le service : c'est ce qui
+  // permet de refuser un démarrage dont le premier tour serait déjà passé.
+  return await demarrerTontine(useDb(), tontineId, user.id, { aujourdhui: dateDuJour() })
 })

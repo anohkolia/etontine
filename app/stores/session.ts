@@ -64,6 +64,17 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /**
+   * La session a expiré côté serveur : on oublie l'utilisateur sans appeler
+   * `/logout` — la session n'existe déjà plus — et sans naviguer : c'est
+   * l'appelant qui sait où renvoyer, avec quelle intention.
+   */
+  function expirer() {
+    user.value = null
+    memberships.value = []
+    chargee.value = true
+  }
+
   async function deconnecter() {
     await $fetch('/api/v1/auth/logout', { method: 'POST' })
     user.value = null
@@ -72,5 +83,5 @@ export const useSessionStore = defineStore('session', () => {
     await navigateTo('/login')
   }
 
-  return { user, memberships, chargee, connecte, profilComplet, roleDans, charger, deconnecter }
+  return { user, memberships, chargee, connecte, profilComplet, roleDans, charger, expirer, deconnecter }
 })

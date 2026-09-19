@@ -28,12 +28,11 @@ export default defineEventHandler(async (event) => {
   // moisson : il faut être membre pour obtenir le QR.
   await requireMembership(event, tontineId)
 
-  const [invitation] = useDb()
+  const [invitation] = await useDb()
     .select()
     .from(invites)
     .where(eq(invites.token, token))
     .limit(1)
-    .all()
 
   if (!invitation || invitation.tontineId !== tontineId) {
     throw apiError('NOT_FOUND', 'Invitation introuvable.')

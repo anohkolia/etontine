@@ -8,6 +8,6 @@ export default defineTask({
     description: 'Ouvre le tour suivant lorsque sa date est arrivée',
   },
   async run() {
-    return { result: { ouverts: ouvrirTourSuivant(useDb()) } }
+    return { result: { ouverts: await ouvrirTourSuivant(useDb()) } }
   },
 })

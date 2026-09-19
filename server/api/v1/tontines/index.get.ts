@@ -3,7 +3,7 @@ import { mesTontines } from '../../../services/tontines.ts'
 import { requireUser } from '../../../utils/auth.ts'
 
 /** Mes tontines, avec mon rôle. Un seul appel doit suffire au tableau de bord. */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
-  return mesTontines(useDb(), user.id)
+  return await mesTontines(useDb(), user.id)
 })

@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) throw validationError(parsed.error)
 
   const db = useDb()
-  const [existant] = db
+  const [existant] = await db
     .select()
     .from(pushSubscriptions)
     .where(and(
@@ -27,18 +27,17 @@ export default defineEventHandler(async (event) => {
       eq(pushSubscriptions.endpoint, parsed.data.endpoint),
     ))
     .limit(1)
-    .all()
 
   if (existant) return { ok: true, id: existant.id }
 
   const id = randomUUID()
-  db.insert(pushSubscriptions).values({
+  await db.insert(pushSubscriptions).values({
     id,
     userId: user.id,
     endpoint: parsed.data.endpoint,
     p256dh: parsed.data.keys.p256dh,
     auth: parsed.data.keys.auth,
-  }).run()
+  })
 
   return { ok: true, id }
 })

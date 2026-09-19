@@ -61,37 +61,35 @@ function versDossier(u: typeof users.$inferSelect): Dossier {
  * avant celui qui a déposé ce matin. Une file triée à l'envers laisse les
  * dossiers difficiles s'enfoncer indéfiniment.
  */
-export function dossiersEnAttente(db: Db): Dossier[] {
-  return db
+export async function dossiersEnAttente(db: Db): Promise<Dossier[]> {
+  return (await db
     .select()
     .from(users)
     .where(eq(users.kycStatus, 'pending_review'))
-    .orderBy(asc(users.kycSubmittedAt))
-    .all()
+    .orderBy(asc(users.kycSubmittedAt)))
     .map(versDossier)
 }
 
 /** Les dossiers déjà traités, du plus récent au plus ancien. */
-export function dossiersTraites(db: Db, limite = 50): Dossier[] {
-  return db
+export async function dossiersTraites(db: Db, limite = 50): Promise<Dossier[]> {
+  return (await db
     .select()
     .from(users)
     .where(and(isNotNull(users.kycReviewedAt)))
     .orderBy(desc(users.kycReviewedAt))
-    .limit(limite)
-    .all()
+    .limit(limite))
     .map(versDossier)
 }
 
-export function dossier(db: Db, userId: string): Dossier {
-  const [u] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+export async function dossier(db: Db, userId: string): Promise<Dossier> {
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!u) throw apiError('NOT_FOUND', 'Dossier introuvable.')
   return versDossier(u)
 }
 
 /** L'adresse de stockage d'une pièce, pour la route qui la sert. */
-export function urlPiece(db: Db, userId: string, type: 'document' | 'selfie'): string | null {
-  const [u] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+export async function urlPiece(db: Db, userId: string, type: 'document' | 'selfie'): Promise<string | null> {
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!u) return null
   return (type === 'document' ? u.kycDocumentUrl : u.kycSelfieUrl) ?? null
 }
@@ -104,8 +102,8 @@ export function urlPiece(db: Db, userId: string, type: 'document' | 'selfie'): s
  * volontairement manuelle : aucune règle automatique ne remplace le fait de
  * regarder une pièce et un visage.
  */
-export function approuverDossier(db: Db, userId: string, admin: Administrateur) {
-  const [u] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+export async function approuverDossier(db: Db, userId: string, admin: Administrateur) {
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!u) throw apiError('NOT_FOUND', 'Dossier introuvable.')
 
   if (u.kycStatus !== 'pending_review') {
@@ -123,20 +121,20 @@ export function approuverDossier(db: Db, userId: string, admin: Administrateur) 
   }
 
   const maintenant = new Date()
-  db.update(users).set({
+  await db.update(users).set({
     kycStatus: 'approved',
     kycLevel: Math.max(u.kycLevel, PALIER_ACCORDE),
     kycReviewedBy: admin.id,
     kycReviewedAt: maintenant,
     kycRejectionReason: null,
-  }).where(eq(users.id, userId)).run()
+  }).where(eq(users.id, userId))
 
-  journaliser(db, admin, 'kyc_approuve', userId, {
+  await journaliser(db, admin, 'kyc_approuve', userId, {
     ancienPalier: u.kycLevel,
     nouveauPalier: Math.max(u.kycLevel, PALIER_ACCORDE),
   })
 
-  notifier(db, userId, {
+  await notifier(db, userId, {
     type: 'kyc_approuve',
     title: 'Ton identité est vérifiée',
     body: 'Tu peux maintenant publier une tontine.',
@@ -153,7 +151,7 @@ export function approuverDossier(db: Db, userId: string, admin: Administrateur) 
  * corriger, redépose la même chose, et l'on repart pour un tour. Le motif est
  * ce qui rend le second dépôt utile.
  */
-export function rejeterDossier(db: Db, userId: string, admin: Administrateur, motif: string) {
+export async function rejeterDossier(db: Db, userId: string, admin: Administrateur, motif: string) {
   if (!motif || motif.trim().length < 10) {
     throw apiError(
       'VALIDATION_ERROR',
@@ -162,25 +160,25 @@ export function rejeterDossier(db: Db, userId: string, admin: Administrateur, mo
     )
   }
 
-  const [u] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!u) throw apiError('NOT_FOUND', 'Dossier introuvable.')
 
   if (u.kycStatus !== 'pending_review') {
     throw apiError('INVALID_TRANSITION', 'Ce dossier n’est pas en attente d’examen.', { field: 'kycStatus' })
   }
 
-  db.update(users).set({
+  await db.update(users).set({
     kycStatus: 'rejected',
     kycReviewedBy: admin.id,
     kycReviewedAt: new Date(),
     kycRejectionReason: motif.trim(),
     // Le palier n'est pas retiré : quelqu'un qui l'avait déjà ne le perd pas
     // sur un dépôt raté.
-  }).where(eq(users.id, userId)).run()
+  }).where(eq(users.id, userId))
 
-  journaliser(db, admin, 'kyc_rejete', userId, { motif: motif.trim() })
+  await journaliser(db, admin, 'kyc_rejete', userId, { motif: motif.trim() })
 
-  notifier(db, userId, {
+  await notifier(db, userId, {
     type: 'kyc_rejete',
     title: 'Ta vérification d’identité n’a pas abouti',
     body: 'Ouvre l’application pour voir ce qui doit être corrigé.',
@@ -191,21 +189,20 @@ export function rejeterDossier(db: Db, userId: string, admin: Administrateur, mo
 }
 
 /** Consigne une consultation de pièce : regarder est aussi une action. */
-export function journaliserConsultation(
+export async function journaliserConsultation(
   db: Db,
   admin: Administrateur,
   userId: string,
   type: 'document' | 'selfie',
-): void {
-  journaliser(db, admin, 'kyc_piece_consultee', userId, { type })
+): Promise<void> {
+  await journaliser(db, admin, 'kyc_piece_consultee', userId, { type })
 }
 
 /** Le journal d'administration, du plus récent au plus ancien. */
-export function journalAdministration(db: Db, limite = 100) {
-  return db
+export async function journalAdministration(db: Db, limite = 100) {
+  return await db
     .select()
     .from(adminAudit)
     .orderBy(desc(adminAudit.createdAt))
     .limit(limite)
-    .all()
 }

@@ -26,14 +26,14 @@ export default defineEventHandler(async (event) => {
   if (!estAdministrateur(parsed.data.phone)) {
     // On vérifie tout de même le code avant de refuser : répondre plus vite
     // pour un numéro non autorisé le désignerait comme tel.
-    await verifyOtp(useDb(), parsed.data.phone, parsed.data.code).catch(() => null)
+    await (await verifyOtp(useDb(), parsed.data.phone, parsed.data.code)).catch(() => null)
     throw apiError('UNAUTHENTICATED', 'Accès refusé.')
   }
 
   const db = useDb()
   await verifyOtp(db, parsed.data.phone, parsed.data.code)
 
-  const [utilisateur] = db.select().from(users).where(eq(users.phone, parsed.data.phone)).limit(1).all()
+  const [utilisateur] = await db.select().from(users).where(eq(users.phone, parsed.data.phone)).limit(1)
   if (!utilisateur) throw apiError('UNAUTHENTICATED', 'Accès refusé.')
 
   await createSession(event, utilisateur.id)

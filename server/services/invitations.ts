@@ -14,11 +14,11 @@ type Db = ReturnType<typeof useDb>
 const VALIDITE_JOURS = 30
 
 /** Crée un lien d'invitation. Le jeton est imprévisible, jamais dérivé de l'id. */
-export function creerInvitation(db: Db, tontineId: string, createdBy: string, maxUses = 20) {
+export async function creerInvitation(db: Db, tontineId: string, createdBy: string, maxUses = 20) {
   const token = randomBytes(16).toString('base64url')
   const expiresAt = new Date(Date.now() + VALIDITE_JOURS * 86_400_000)
 
-  db.insert(invites).values({
+  await db.insert(invites).values({
     id: randomUUID(),
     token,
     tontineId,
@@ -26,7 +26,7 @@ export function creerInvitation(db: Db, tontineId: string, createdBy: string, ma
     expiresAt,
     maxUses,
     usedCount: 0,
-  }).run()
+  })
 
   return { token, expiresAt, maxUses }
 }
@@ -64,8 +64,8 @@ export interface ApercuInvitation {
  * membres**, pas leurs numéros, pas l'état des cotisations. Un lien qui fuite
  * ne doit pas livrer le carnet d'adresses du groupe.
  */
-export function apercuInvitation(db: Db, token: string): ApercuInvitation {
-  const [invitation] = db.select().from(invites).where(eq(invites.token, token)).limit(1).all()
+export async function apercuInvitation(db: Db, token: string): Promise<ApercuInvitation> {
+  const [invitation] = await db.select().from(invites).where(eq(invites.token, token)).limit(1)
 
   if (!invitation) throw apiError('NOT_FOUND', 'Ce lien d’invitation n’existe pas.')
 
@@ -77,30 +77,27 @@ export function apercuInvitation(db: Db, token: string): ApercuInvitation {
     throw apiError('NOT_FOUND', 'Ce lien d’invitation a déjà servi au maximum de fois prévu.')
   }
 
-  const [tontine] = db
+  const [tontine] = await db
     .select()
     .from(tontines)
     .where(eq(tontines.id, invitation.tontineId))
     .limit(1)
-    .all()
 
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
-  const [president] = db
+  const [president] = await db
     .select({ firstName: users.firstName, lastName: users.lastName })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.tontineId, tontine.id), eq(memberships.role, 'president')))
     .limit(1)
-    .all()
 
-  const membres = db
+  const membres = await db
     .select()
     .from(memberships)
     .where(and(eq(memberships.tontineId, tontine.id), eq(memberships.status, 'active')))
-    .all()
 
-  const parts = db.select().from(shares).where(eq(shares.tontineId, tontine.id)).all()
+  const parts = await db.select().from(shares).where(eq(shares.tontineId, tontine.id))
 
   return {
     tontineId: tontine.id,
@@ -113,7 +110,7 @@ export function apercuInvitation(db: Db, token: string): ApercuInvitation {
     memberCount: membres.length,
     totalShares: parts.length,
     status: tontine.status,
-    complet: !placeDisponible(db, tontine.id),
+    complet: !(await placeDisponible(db, tontine.id)),
   }
 }
 
@@ -137,16 +134,16 @@ export interface ResultatAdhesion {
  * Le rapprochement se fait sur le numéro en E.164, seule clé fiable : deux
  * membres peuvent porter le même nom, jamais le même numéro.
  */
-export function accepterInvitation(db: Db, token: string, userId: string): ResultatAdhesion {
-  const apercu = apercuInvitation(db, token)
+export async function accepterInvitation(db: Db, token: string, userId: string): Promise<ResultatAdhesion> {
+  const apercu = await apercuInvitation(db, token)
 
-  const [utilisateur] = db.select().from(users).where(eq(users.id, userId)).limit(1).all()
+  const [utilisateur] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!utilisateur) throw apiError('UNAUTHENTICATED', 'Connecte-toi pour rejoindre.')
 
-  const [invitation] = db.select().from(invites).where(eq(invites.token, token)).limit(1).all()
+  const [invitation] = await db.select().from(invites).where(eq(invites.token, token)).limit(1)
 
   // Déjà membre avec un compte : rien à faire, on renvoie l'adhésion existante.
-  const [dejaMembre] = db
+  const [dejaMembre] = await db
     .select()
     .from(memberships)
     .where(and(
@@ -154,7 +151,6 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
       eq(memberships.userId, userId),
     ))
     .limit(1)
-    .all()
 
   if (dejaMembre) {
     return {
@@ -165,7 +161,7 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
   }
 
   // Membre géré en attente de son compte : on rattache, sans rien dupliquer.
-  const [gere] = db
+  const [gere] = await db
     .select()
     .from(memberships)
     .where(and(
@@ -174,20 +170,17 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
       eq(memberships.managedPhone, utilisateur.phone),
     ))
     .limit(1)
-    .all()
 
   if (gere) {
-    db.update(memberships)
+    await db.update(memberships)
       .set({ userId, joinedAt: gere.joinedAt ?? new Date() })
       .where(eq(memberships.id, gere.id))
-      .run()
 
-    db.update(invites)
+    await db.update(invites)
       .set({ usedCount: invitation!.usedCount + 1 })
       .where(eq(invites.id, invitation!.id))
-      .run()
 
-    appendLedger(db, {
+    await appendLedger(db, {
       tontineId: apercu.tontineId,
       type: 'member_joined',
       actorId: userId,
@@ -207,12 +200,11 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
   // laisser en attente d'un accord que le président ne pourrait pas donner.
   // Le rattachement d'un membre géré, lui, passe plus haut : son siège existe
   // déjà, il ne fait que reprendre le sien.
-  const [tontineCourante] = db
+  const [tontineCourante] = await db
     .select({ status: tontines.status, rotationFrozenAt: tontines.rotationFrozenAt })
     .from(tontines)
     .where(eq(tontines.id, apercu.tontineId))
     .limit(1)
-    .all()
 
   if (tontineCourante?.status !== 'draft' && tontineCourante?.status !== 'open') {
     throw apiError(
@@ -226,22 +218,21 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
   // s'applique. Le contrôle est **ici** et pas seulement à la création du lien :
   // un lien créé quand il restait deux places peut être ouvert par cinq
   // personnes à la fois, et c'est ce dernier filet qui départage.
-  verifierQuotaMembres(db, apercu.tontineId)
+  await verifierQuotaMembres(db, apercu.tontineId)
 
   // Nouvel arrivant : en attente de l'accord du président.
   const membershipId = randomUUID()
-  db.insert(memberships).values({
+  await db.insert(memberships).values({
     id: membershipId,
     tontineId: apercu.tontineId,
     userId,
     role: 'member',
     status: 'pending_approval',
-  }).run()
+  })
 
-  db.update(invites)
+  await db.update(invites)
     .set({ usedCount: invitation!.usedCount + 1 })
     .where(eq(invites.id, invitation!.id))
-    .run()
 
   return { membershipId, rattache: false, status: 'pending_approval' }
 }
@@ -260,13 +251,13 @@ export function accepterInvitation(db: Db, token: string, userId: string): Resul
  * fausserait le pot attendu de tous les tours déjà en cours. Mieux vaut un
  * refus clair qu'une adhésion qui n'existe qu'à moitié.
  */
-export function approuverAdhesion(db: Db, membershipId: string, acteurId: string, parts = 1) {
-  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+export async function approuverAdhesion(db: Db, membershipId: string, acteurId: string, parts = 1) {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
   if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
 
   assertTransition('membership', m.status, 'active')
 
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, m.tontineId)).limit(1).all()
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, m.tontineId)).limit(1)
   if (tontine?.status === 'running' || tontine?.rotationFrozenAt) {
     throw apiError(
       'FORBIDDEN',
@@ -275,16 +266,15 @@ export function approuverAdhesion(db: Db, membershipId: string, acteurId: string
     )
   }
 
-  verifierQuotaMembres(db, m.tontineId)
+  await verifierQuotaMembres(db, m.tontineId)
 
-  db.update(memberships)
+  await db.update(memberships)
     .set({ status: 'active', joinedAt: new Date() })
     .where(eq(memberships.id, membershipId))
-    .run()
 
-  attribuerParts(db, m.tontineId, membershipId, parts)
+  await attribuerParts(db, m.tontineId, membershipId, parts)
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: m.tontineId,
     type: 'member_joined',
     actorId: acteurId,
@@ -293,15 +283,15 @@ export function approuverAdhesion(db: Db, membershipId: string, acteurId: string
 }
 
 /** Refuse une adhésion en attente. La transition passe par la table d'états. */
-export function refuserAdhesion(db: Db, membershipId: string, acteurId: string) {
-  const [m] = db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1).all()
+export async function refuserAdhesion(db: Db, membershipId: string, acteurId: string) {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
   if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
 
   assertTransition('membership', m.status, 'left')
 
-  db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId)).run()
+  await db.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId))
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: m.tontineId,
     type: 'member_left',
     actorId: acteurId,

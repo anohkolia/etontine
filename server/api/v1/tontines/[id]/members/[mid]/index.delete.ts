@@ -16,5 +16,5 @@ export default defineEventHandler(async (event) => {
   if (!tontineId || !membershipId) throw apiError('NOT_FOUND', 'Membre introuvable.')
 
   const { user } = await requireMembership(event, tontineId, ['president'])
-  return retirerMembre(useDb(), membershipId, user.id)
+  return await retirerMembre(useDb(), membershipId, user.id)
 })

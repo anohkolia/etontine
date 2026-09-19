@@ -27,18 +27,17 @@ function nomDe(ligne: { firstName: string | null, lastName: string | null, manag
 }
 
 /** Le détail d'un tour : qui a cotisé quoi, et où en est le versement. */
-export function detailTour(db: Db, roundId: string) {
-  const [tour] = db
+export async function detailTour(db: Db, roundId: string) {
+  const [tour] = await db
     .select({ round: rounds, tontine: tontines })
     .from(rounds)
     .innerJoin(tontines, eq(tontines.id, rounds.tontineId))
     .where(eq(rounds.id, roundId))
     .limit(1)
-    .all()
 
   if (!tour) throw apiError('NOT_FOUND', 'Tour introuvable.')
 
-  const lignes = db
+  const lignes = await db
     .select({
       contribution: contributions,
       rotationPosition: shares.rotationPosition,
@@ -52,11 +51,10 @@ export function detailTour(db: Db, roundId: string) {
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(contributions.roundId, roundId))
     .orderBy(asc(shares.rotationPosition))
-    .all()
 
-  const [versement] = db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1).all()
+  const [versement] = await db.select().from(payouts).where(eq(payouts.roundId, roundId)).limit(1)
 
-  const [beneficiaire] = db
+  const [beneficiaire] = await db
     .select({
       managedName: memberships.managedName,
       firstName: users.firstName,
@@ -67,7 +65,6 @@ export function detailTour(db: Db, roundId: string) {
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(shares.id, tour.round.beneficiaryShareId))
     .limit(1)
-    .all()
 
   return {
     tontine: tour.tontine,
@@ -130,8 +127,8 @@ export interface StructureProcesVerbal {
  * liste des cotisations du tour, le versement et un emplacement de signature »
  * — devient une propriété qu'on teste, et non une capture qu'on relit.
  */
-export function structureProcesVerbal(db: Db, roundId: string): StructureProcesVerbal {
-  const detail = detailTour(db, roundId)
+export async function structureProcesVerbal(db: Db, roundId: string): Promise<StructureProcesVerbal> {
+  const detail = await detailTour(db, roundId)
   const potConstitue = detail.cotisations.reduce((n, c) => n + c.confirme, 0)
 
   return {
@@ -175,8 +172,8 @@ export function structureProcesVerbal(db: Db, roundId: string): StructureProcesV
  * police standard PDF (Helvetica) : aucun fichier n'est embarqué, et le
  * document reste léger.
  */
-export function procesVerbalPdf(db: Db, roundId: string): Promise<Buffer> {
-  const pv = structureProcesVerbal(db, roundId)
+export async function procesVerbalPdf(db: Db, roundId: string): Promise<Buffer> {
+  const pv = await structureProcesVerbal(db, roundId)
 
   return new Promise((resoudre, rejeter) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 })
@@ -299,7 +296,7 @@ export function procesVerbalPdf(db: Db, roundId: string): Promise<Buffer> {
  * il est porté par le format de cellule.
  */
 export async function registreXlsx(db: Db, tontineId: string): Promise<Buffer> {
-  const [tontine] = db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1).all()
+  const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
 
   const classeur = new ExcelJS.Workbook()
@@ -317,13 +314,12 @@ export async function registreXlsx(db: Db, tontineId: string): Promise<Buffer> {
   ]
   feuilleRegistre.getRow(1).font = { bold: true }
 
-  const ecritures = db
+  const ecritures = await db
     .select({ entry: ledgerEntries, roundIndex: rounds.index })
     .from(ledgerEntries)
     .leftJoin(rounds, eq(rounds.id, ledgerEntries.roundId))
     .where(eq(ledgerEntries.tontineId, tontineId))
     .orderBy(asc(ledgerEntries.position))
-    .all()
 
   for (const e of ecritures) {
     feuilleRegistre.addRow({
@@ -349,7 +345,7 @@ export async function registreXlsx(db: Db, tontineId: string): Promise<Buffer> {
   ]
   feuilleCotisations.getRow(1).font = { bold: true }
 
-  const lignes = db
+  const lignes = await db
     .select({
       roundIndex: rounds.index,
       dueDate: contributions.dueDate,
@@ -368,7 +364,6 @@ export async function registreXlsx(db: Db, tontineId: string): Promise<Buffer> {
     .leftJoin(users, eq(users.id, memberships.userId))
     .where(eq(rounds.tontineId, tontineId))
     .orderBy(asc(rounds.index), asc(shares.rotationPosition))
-    .all()
 
   for (const l of lignes) {
     feuilleCotisations.addRow({

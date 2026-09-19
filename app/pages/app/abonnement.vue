@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Limite, PaidTier, PlanPeriodicity, PlanTier } from '#shared/constants/abonnement'
 import { MOIS_OFFERTS, PALIERS, PALIER_PAR_ID, libelleLimite } from '#shared/constants/abonnement'
+import { EDITEUR } from '#shared/constants/editeur'
+import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
 
 /**
  * Mon abonnement — palier courant, ce qu'il permet, ce que j'en consomme.
@@ -19,6 +21,8 @@ import { MOIS_OFFERTS, PALIERS, PALIER_PAR_ID, libelleLimite } from '#shared/con
  *    les rails d'ici : ne rien promettre vaut mieux que promettre à moitié.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
+const { t } = useI18n()
+const { canal: motDuCanal } = useLibelle()
 
 interface ConsommationTontine {
   id: string
@@ -37,6 +41,7 @@ interface EtatAbonnement {
   auDessus: boolean
   demandeEnCours: {
     id: string
+    reference: string
     tier: string
     periodicity: PlanPeriodicity
     priceFcfa: number
@@ -51,6 +56,19 @@ interface EtatAbonnement {
 }
 
 const { format } = useMoney()
+const { copier, copie } = useCopie()
+
+/** Où régler : configuré par l'exploitant, jamais deviné par l'écran. */
+const reglement = useRuntimeConfig().public.abonnementReglement as {
+  operateur: string
+  numero: string
+  titulaire: string
+  contact: string
+}
+const presentationOperateur = computed(() => {
+  const connu = PAYMENT_CHANNEL[reglement.operateur as keyof typeof PAYMENT_CHANNEL]
+  return connu ? motDuCanal(reglement.operateur, connu.label) : reglement.operateur
+})
 const { formatDate } = useDate()
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -63,7 +81,7 @@ const confirmation = ref<string | null>(null)
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
-    ?? 'Impossible de joindre le serveur.'
+    ?? t('commun.serveur_injoignable')
 }
 
 async function charger() {
@@ -102,7 +120,7 @@ async function demander(tier: PaidTier) {
       headers: { 'Idempotency-Key': crypto.randomUUID() },
       body: { tier, periodicity: periodicite.value },
     })
-    confirmation.value = 'Ta demande est enregistrée. Elle sera traitée sous peu.'
+    confirmation.value = t('abonnement.ta_demande_est_enregistree')
     await charger()
   }
   catch (e) {
@@ -114,11 +132,11 @@ async function demander(tier: PaidTier) {
 }
 
 useEnTete(() => ({
-  titre: 'Mon abonnement',
+  titre: t('abonnement.mon_abonnement'),
   sousTitre: abonnement.value ? `Palier ${abonnement.value.nom}` : undefined,
-  retour: { to: '/app/profil', label: 'Mon profil' },
+  retour: { to: '/app/profil', label: t('commun.mon_profil') },
 }))
-useHead({ title: 'Mon abonnement — eTontine' })
+useHead({ title: t('abonnement.mon_abonnement_etontine') })
 </script>
 
 <template>
@@ -142,7 +160,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
         data-testid="palier-courant"
       >
         <p class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
-          Mon palier
+          {{ $t('abonnement.mon_palier') }}
         </p>
         <h2 class="text-2xl font-bold text-ink">
           {{ abonnement.nom }}
@@ -152,14 +170,13 @@ useHead({ title: 'Mon abonnement — eTontine' })
           class="text-sm text-ink-muted"
           data-testid="fin-droits"
         >
-          Actif jusqu’au {{ formatDate(abonnement.jusquAu) }}.
+          {{ $t('abonnement.actif_jusqu_au_p0', { p0: formatDate(abonnement.jusquAu) }) }}
         </p>
         <p
           v-else
           class="text-sm text-ink-muted"
         >
-          Sans limite de durée. Le registre, les preuves et les reçus y sont
-          inclus, comme à tous les paliers.
+          {{ $t('abonnement.sans_limite_de_duree') }}
         </p>
       </section>
 
@@ -176,34 +193,31 @@ useHead({ title: 'Mon abonnement — eTontine' })
           aria-hidden="true"
         />
         <span>
-          <span class="font-semibold">Au-dessus de ton palier.</span>
-          Tes tontines en cours continuent normalement, rien n’est bloqué ni
-          effacé. Pour en ouvrir une nouvelle ou ajouter des membres, close une
-          tontine ou passe à un palier supérieur.
+          <span class="font-semibold">{{ $t('abonnement.au_dessus_de_ton') }}</span>
+          {{ $t('abonnement.tes_tontines_en_cours') }}
         </span>
       </p>
 
       <!-- Consommation. Le serveur a compté, l'écran affiche. -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
-          Ce que j’utilise
+          {{ $t('abonnement.ce_que_j_utilise') }}
         </h2>
 
         <div class="flex items-baseline justify-between gap-3 text-sm">
-          <span class="text-ink-muted">Tontines en cours</span>
+          <span class="text-ink-muted">{{ $t('abonnement.tontines_en_cours') }}</span>
           <span
             class="font-semibold text-ink tabular"
             data-testid="consommation-tontines"
           >
-            {{ abonnement.consommation.tontinesActives }}
-            sur {{ libelleLimite(abonnement.quotas.tontinesActives) }}
+            {{ $t('abonnement.p0_sur_p1', { p0: abonnement.consommation.tontinesActives, p1: libelleLimite(abonnement.quotas.tontinesActives) }) }}
           </span>
         </div>
 
         <EmptyState
           v-if="abonnement.consommation.tontines.length === 0"
-          title="Aucune tontine en cours"
-          description="Les tontines que tu présides apparaîtront ici, avec leur nombre de membres."
+          :title="$t('abonnement.aucune_tontine_en_cours')"
+          :description="$t('abonnement.les_tontines_que_tu')"
           icon="lucide:circle-dashed"
           data-testid="aucune-tontine"
         />
@@ -228,7 +242,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
               <span class="truncate text-sm font-medium text-ink">{{ tontine.name }}</span>
             </span>
             <span class="tabular shrink-0 text-sm text-ink-muted">
-              {{ tontine.effectif }} sur {{ libelleLimite(tontine.limite) }} membres
+              {{ $t('abonnement.p0_sur_p1_membres', { p0: tontine.effectif, p1: libelleLimite(tontine.limite) }) }}
             </span>
           </li>
         </ul>
@@ -247,7 +261,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
           aria-hidden="true"
         />
         <span>
-          <span class="font-semibold">Demande refusée.</span>
+          <span class="font-semibold">{{ $t('abonnement.demande_refusee') }}</span>
           {{ abonnement.derniereDecision.note }}
         </span>
       </p>
@@ -265,18 +279,83 @@ useHead({ title: 'Mon abonnement — eTontine' })
             class="text-declared-ink"
             aria-hidden="true"
           />
-          Demande en cours
+          {{ $t('abonnement.demande_en_cours') }}
         </h2>
         <p class="text-sm text-ink-muted">
-          Palier
+          {{ $t('abonnement.palier') }}
           <span class="font-semibold text-ink">{{ PALIER_PAR_ID[abonnement.demandeEnCours.tier as PlanTier].nom }}</span>,
           <span class="amount">{{ format(abonnement.demandeEnCours.priceFcfa) }}</span>
-          {{ abonnement.demandeEnCours.periodicity === 'yearly' ? 'par an' : 'par mois' }},
-          demandée le {{ formatDate(abonnement.demandeEnCours.createdAt) }}.
+          {{ $t('abonnement.p0_demandee_le_p1', { p0: abonnement.demandeEnCours.periodicity === 'yearly' ? $t('commun.par_an') : $t('commun.par_mois'), p1: formatDate(abonnement.demandeEnCours.createdAt) }) }}
         </p>
-        <p class="text-sm text-ink-muted">
-          Le règlement se fait hors de l’application. Ton palier sera posé dès
-          qu’il aura été constaté.
+        <!-- Où payer, en clair. « Hors de l'application » sans numéro ni
+             référence était une impasse : personne ne pouvait régler. -->
+        <div
+          v-if="reglement.numero"
+          class="flex flex-col gap-2 rounded-control bg-surface-muted p-3 text-sm"
+          data-testid="instructions-reglement"
+        >
+          <p class="font-semibold text-ink">
+            {{ $t('abonnement.pour_regler') }}
+          </p>
+          <ol class="flex list-decimal flex-col gap-1.5 pl-5 text-ink-muted">
+            <li>
+              {{ $t('abonnement.envoie') }} <span class="amount font-semibold text-ink">{{ format(abonnement.demandeEnCours.priceFcfa) }}</span>
+              {{ $t('abonnement.par') }} <span class="font-semibold text-ink">{{ presentationOperateur }}</span> {{ $t('abonnement.au') }}
+              <span
+                class="font-mono font-semibold text-ink tabular-nums"
+                data-testid="numero-reglement"
+              >{{ reglement.numero }}</span>
+              <template v-if="reglement.titulaire">
+                {{ $t('abonnement.titulaire') }} <span class="font-semibold text-ink">{{ reglement.titulaire }}</span>
+              </template>.
+            </li>
+            <li>
+              {{ $t('abonnement.indique_la_reference') }}
+              <span
+                class="font-mono font-semibold text-ink"
+                data-testid="reference-reglement"
+              >{{ abonnement.demandeEnCours.reference }}</span>
+              {{ $t('abonnement.dans_le_motif_de') }}
+              <button
+                type="button"
+                class="ml-1 min-h-touch text-brand underline underline-offset-4"
+                data-testid="bouton-copier-reference"
+                @click="copier(abonnement.demandeEnCours.reference)"
+              >
+                {{ copie ? $t('abonnement.copiee') : $t('abonnement.copier') }}
+              </button>
+            </li>
+            <li v-if="reglement.contact">
+              {{ $t('abonnement.envoie_la_capture_de') }}
+              <a
+                :href="`https://wa.me/${reglement.contact.replace(/\D/g, '')}?text=${encodeURIComponent(`Règlement eTontine ${abonnement.demandeEnCours.reference}`)}`"
+                target="_blank"
+                rel="noopener"
+                class="font-semibold text-brand underline underline-offset-4"
+                data-testid="lien-whatsapp-reglement"
+              >{{ reglement.contact }}</a>.
+            </li>
+          </ol>
+          <p class="text-ink-muted">
+            {{ $t('abonnement.ton_palier_sera_pose') }}
+          </p>
+        </div>
+        <p
+          v-else
+          class="text-sm text-ink-muted"
+          data-testid="instructions-reglement"
+        >
+          {{ $t('abonnement.le_reglement_se_fait') }}
+          <a
+            :href="`mailto:${EDITEUR.email}`"
+            class="text-brand underline underline-offset-4"
+          >{{ EDITEUR.email }}</a>
+          {{ $t('abonnement.en_citant_la_reference') }}
+          <span
+            class="font-mono font-semibold text-ink"
+            data-testid="reference-reglement"
+          >{{ abonnement.demandeEnCours.reference }}</span>
+          {{ $t('abonnement.pour_connaitre_les_modalites') }}
         </p>
       </section>
 
@@ -288,23 +367,22 @@ useHead({ title: 'Mon abonnement — eTontine' })
       >
         <div>
           <h2 class="font-semibold text-ink">
-            Changer de palier
+            {{ $t('abonnement.changer_de_palier') }}
           </h2>
           <p class="mt-1 text-sm text-ink-muted">
-            L’abonnement est payé par le président, de sa poche. On ne touche
-            jamais à la caisse du groupe.
+            {{ $t('abonnement.l_abonnement_est_paye') }}
           </p>
         </div>
 
         <fieldset class="flex flex-col gap-2">
           <legend class="sr-only">
-            Périodicité de paiement
+            {{ $t('abonnement.periodicite_de_paiement') }}
           </legend>
           <div class="inline-flex self-start rounded-full border border-line p-1">
             <label
               v-for="choix in [
-                { clef: 'monthly' as const, libelle: 'Au mois' },
-                { clef: 'yearly' as const, libelle: 'À l’année' },
+                { clef: 'monthly' as const, libelle: $t('commun.au_mois') },
+                { clef: 'yearly' as const, libelle: $t('commun.a_l_annee') },
               ]"
               :key="choix.clef"
               class="min-h-touch inline-flex cursor-pointer items-center rounded-full px-4 text-sm font-semibold"
@@ -326,7 +404,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
             </label>
           </div>
           <p class="text-xs text-ink-muted">
-            À l’année, {{ MOIS_OFFERTS }} mois sont offerts.
+            {{ $t('abonnement.a_l_annee_p0', { p0: MOIS_OFFERTS }) }}
           </p>
         </fieldset>
 
@@ -342,17 +420,16 @@ useHead({ title: 'Mon abonnement — eTontine' })
               <span class="amount font-bold text-ink">
                 {{ format(prix(palier.id as PaidTier)) }}
                 <span class="text-xs font-normal text-ink-muted">
-                  {{ periodicite === 'yearly' ? '/ an' : '/ mois' }}
+                  {{ periodicite === 'yearly' ? $t('abonnement.par_an_court') : $t('abonnement.par_mois_court') }}
                 </span>
               </span>
             </div>
             <p class="text-sm text-ink-muted">
-              {{ libelleLimite(palier.tontinesActives) }} tontines en cours,
-              {{ libelleLimite(palier.membresParTontine) }} membres par tontine.
+              {{ $t('abonnement.p0_tontines_en_cours', { p0: libelleLimite(palier.tontinesActives), p1: libelleLimite(palier.membresParTontine) }) }}
             </p>
             <Button
               type="button"
-              :label="envoi === palier.id ? 'Envoi…' : `Demander le palier ${palier.nom}`"
+              :label="envoi === palier.id ? $t('commun.envoi_en_cours') : `Demander le palier ${palier.nom}`"
               :disabled="envoi !== null"
               class="bg-brand text-brand-ink hover:bg-brand-strong"
               :data-testid="`demander-${palier.id}`"
@@ -362,9 +439,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
         </ul>
 
         <p class="text-xs leading-relaxed text-ink-subtle">
-          Aucun paiement ne se fait dans l’application : elle ne détient jamais
-          de fonds. Ta demande est transmise, et ton palier est posé une fois le
-          règlement constaté.
+          {{ $t('abonnement.aucun_paiement_ne_se') }}
         </p>
       </section>
 
@@ -395,7 +470,7 @@ useHead({ title: 'Mon abonnement — eTontine' })
           size="1rem"
           aria-hidden="true"
         />
-        Comparer les paliers en détail
+        {{ $t('abonnement.comparer_les_paliers_en') }}
       </NuxtLink>
     </template>
   </div>

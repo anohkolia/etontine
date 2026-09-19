@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TontineEmoji } from '#shared/constants/tontine'
 import { TONTINE_EMOJIS } from '#shared/constants/tontine'
+import { tontineDraftInput, tontineFinanceInput, tontineRulesInput } from '#shared/schemas'
 
 /**
  * Wizard de création d'une tontine.
@@ -16,6 +17,7 @@ import { TONTINE_EMOJIS } from '#shared/constants/tontine'
 // Palier 1 pour ouvrir le wizard, palier 2 pour publier : voir la note de
 // server/api/v1/tontines/index.post.ts sur la contradiction de spécification.
 definePageMeta({ layout: 'app', middleware: ['auth', 'kyc-palier'], kycLevel: 1 })
+const { t } = useI18n()
 
 const brouillon = useBrouillonStore()
 const session = useSessionStore()
@@ -27,7 +29,7 @@ const EMOJIS = TONTINE_EMOJIS
 const seuilAlerte = useRuntimeConfig().public.potAlertThreshold as number
 
 const ETAPES = [
-  'Accès', 'Informations', 'Argent', 'Ordre de passage', 'Règles', 'Récapitulatif',
+  t('tontine.create.acces'), t('tontine.create.informations'), t('tontine.create.argent'), t('tontine.create.ordre_de_passage'), t('tontine.create.regles'), t('tontine.create.recapitulatif'),
 ] as const
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -37,6 +39,42 @@ const erreurCode = ref<string | null>(null)
 
 /** L'adresse de la vérification d'identité, avec retour sur le wizard. */
 const versIdentite = '/app/profil/identite?redirect=/app/tontine/create'
+
+/**
+ * Trois validations, une par étape qui saisit quelque chose, avec les schémas
+ * que le serveur applique à la même requête. Le brouillon réactif reste la
+ * source des champs — six écrans le lisent — et chaque validateur reçoit une
+ * copie au moment de passer à l'étape suivante : l'erreur s'affiche alors sous
+ * le champ, sans aller-retour réseau.
+ */
+const validationInfos = useFormulaire(tontineDraftInput.pick({ name: true, description: true, locality: true }))
+// La date de départ est vérifiée à part (`dateValide`) : le schéma la compare
+// en date locale, et l'écran veut le message avant la perte de focus.
+const validationArgent = useFormulaire(tontineFinanceInput.pick({ shareAmount: true, frequency: true, collectionChannelIds: true }))
+const validationRegles = useFormulaire(tontineRulesInput)
+
+/** L'étape courante est-elle valide au regard de son schéma ? Pose les erreurs sinon. */
+async function etapeValide(): Promise<boolean> {
+  switch (brouillon.etape) {
+    case 1:
+      validationInfos.setValues({ name: form.name, description: form.description || undefined, locality: form.locality || undefined }, false)
+      return (await validationInfos.valider()) !== null
+    case 2:
+      validationArgent.setValues({
+        shareAmount: form.shareAmount, frequency: form.frequency,
+        collectionChannelIds: form.collectionChannelIds,
+      }, false)
+      return (await validationArgent.valider()) !== null
+    case 4:
+      validationRegles.setValues({
+        penaltyAmount: form.penaltyAmount, penaltyPeriod: form.penaltyPeriod,
+        penaltyCap: form.penaltyCap ?? undefined, graceDays: form.graceDays,
+      }, false)
+      return (await validationRegles.valider()) !== null
+    default:
+      return true
+  }
+}
 
 /** Les réglages en cours de saisie. Le serveur en garde la version qui fait foi. */
 const form = reactive({
@@ -76,6 +114,19 @@ const peutOuvrir = computed(() => (session.user?.kycLevel ?? 0) >= 2)
 const simulation = computed(() =>
   phrase(form.shareAmount, brouillon.membresPrevus, form.frequency),
 )
+
+/**
+ * La date du premier tour.
+ *
+ * Elle était fixée en silence à « aujourd'hui + 7 jours » et n'apparaissait
+ * nulle part — alors que toutes les échéances du cycle en découlent. Un
+ * président qui démarrait trois semaines après son brouillon voyait le tour 1
+ * en retard dès la première heure. Le champ est borné à aujourd'hui : le
+ * serveur refuse de toute façon de démarrer sur une date passée.
+ */
+const { formatDate } = useDate()
+const aujourdhui = new Date().toISOString().slice(0, 10)
+const dateValide = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.startDate) && form.startDate >= aujourdhui)
 const potEstime = computed(() => potParTour(form.shareAmount, brouillon.membresPrevus))
 const alertePlafond = computed(() => potEstime.value > seuilAlerte)
 
@@ -84,7 +135,7 @@ const canauxVerifies = computed(() => canaux.value.filter(c => c.verifiedAt !== 
 type ErreurApi = { data?: { error?: { code?: string, message?: string } } }
 
 function message(e: unknown): string {
-  return (e as ErreurApi)?.data?.error?.message ?? 'Impossible de joindre le serveur.'
+  return (e as ErreurApi)?.data?.error?.message ?? t('commun.serveur_injoignable')
 }
 
 /**
@@ -148,6 +199,7 @@ onMounted(charger)
 async function suivant() {
   erreur.value = null
   erreurCode.value = null
+  if (!(await etapeValide())) return
   enregistrement.value = true
   try {
     if (brouillon.etape === 0) {
@@ -240,7 +292,7 @@ async function publier() {
 const peutAvancer = computed(() => {
   switch (brouillon.etape) {
     case 1: return form.name.trim().length >= 3
-    case 2: return form.shareAmount > 0 && form.collectionChannelIds.length > 0
+    case 2: return form.shareAmount > 0 && form.collectionChannelIds.length > 0 && dateValide.value
     default: return true
   }
 })
@@ -248,10 +300,10 @@ const peutAvancer = computed(() => {
 // Pas de sous-titre d'étape ici : la barre segmentée et la ligne qui la suit
 // le disent déjà, et l'écrire trois fois sur le même écran n'aide personne.
 useEnTete(() => ({
-  titre: 'Nouvelle tontine',
-  retour: { to: '/app', label: 'Mes tontines' },
+  titre: t('tontine.create.nouvelle_tontine'),
+  retour: { to: '/app', label: t('commun.mes_tontines') },
 }))
-useHead({ title: 'Créer une tontine — eTontine' })
+useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
 </script>
 
 <template>
@@ -282,7 +334,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
         class="text-sm text-ink-muted"
         data-testid="etape-courante"
       >
-        Étape {{ brouillon.etape + 1 }} sur {{ ETAPES.length }} — {{ ETAPES[brouillon.etape] }}
+        {{ $t('tontine.create.etape_p0_sur_p1', { p0: brouillon.etape + 1, p1: ETAPES.length, p2: ETAPES[brouillon.etape] }) }}
       </p>
     </header>
 
@@ -314,31 +366,47 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="acces-prive"
           >
           <span>
-            <span class="font-medium text-ink">Tontine privée</span>
+            <span class="font-medium text-ink">{{ $t('tontine.create.tontine_privee') }}</span>
             <span class="block text-sm text-ink-muted">
-              Sur invitation. Personne ne la trouve sans ton lien.
+              {{ $t('tontine.create.sur_invitation_personne_ne') }}
             </span>
           </span>
         </label>
 
-        <!-- Grisée si le palier manque, jamais masquée : l'organisateur doit
-           savoir que l'option existe et ce qu'il faut pour y accéder. -->
+        <!-- Grisée, jamais masquée : l'organisateur doit savoir que l'option
+           existe et ce qu'il faut pour y accéder (acceptation T10).
+
+           Elle reste grisée **pour tout le monde** tant que la page publique
+           de découverte n'existe pas : l'écran promettait une tontine
+           « visible publiquement » que personne ne pouvait trouver. On le dit,
+           plutôt que de laisser cocher une promesse vide. -->
         <label
-          class="flex min-h-touch items-start gap-3 card-surface p-4"
-          :class="peutOuvrir ? '' : 'opacity-60'"
+          class="flex min-h-touch items-start gap-3 card-surface p-4 opacity-60"
         >
           <input
             v-model="form.access"
             type="radio"
             value="open"
-            :disabled="!peutOuvrir"
+            disabled
             class="mt-1 size-5 shrink-0 accent-brand"
             data-testid="acces-ouvert"
           >
           <span>
-            <span class="font-medium text-ink">Tontine ouverte</span>
+            <span class="font-medium text-ink">{{ $t('tontine.create.tontine_ouverte') }}</span>
             <span class="block text-sm text-ink-muted">
-              Visible publiquement, n’importe qui peut demander à rejoindre.
+              {{ $t('tontine.create.visible_publiquement_n_importe') }}
+            </span>
+            <span
+              class="mt-1 flex items-start gap-1.5 text-sm text-ink-muted"
+              data-testid="explication-decouverte"
+            >
+              <Icon
+                name="lucide:clock"
+                size="0.875rem"
+                class="mt-0.5 shrink-0"
+                aria-hidden="true"
+              />
+              {{ $t('tontine.create.bientot_la_page_ou') }}
             </span>
             <span
               v-if="!peutOuvrir"
@@ -351,7 +419,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
                 class="mt-0.5 shrink-0"
                 aria-hidden="true"
               />
-              Demande une pièce d’identité vérifiée. Tu peux la fournir dans ton profil.
+              {{ $t('tontine.create.demande_une_piece_d') }}
             </span>
           </span>
         </label>
@@ -367,13 +435,15 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="nom"
         >
-          Nom de la tontine
+          {{ $t('tontine.create.nom_de_la_tontine') }}
           <InputText
             id="nom"
             v-model="form.name"
-            placeholder="Tontine du marché de Cocody"
+            :placeholder="$t('tontine.create.tontine_du_marche_de')"
+            :aria-invalid="Boolean(validationInfos.erreur('name'))"
             data-testid="champ-nom-tontine"
           />
+          <ErreurChamp :message="validationInfos.erreur('name')" />
         </label>
         <!-- Sélecteur d'icône, repris du wizard du template. Sur une liste de
              tontines, l'image se repère avant le nom — et c'est encore plus
@@ -381,7 +451,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
              facultatif : aucune tontine n'est bloquée faute d'image. -->
         <fieldset class="flex flex-col gap-2">
           <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Image (facultatif)
+            {{ $t('tontine.create.image_facultatif') }}
           </legend>
           <div class="flex flex-wrap gap-2">
             <button
@@ -403,22 +473,22 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="lieu"
         >
-          Quartier ou lieu
+          {{ $t('tontine.create.quartier_ou_lieu') }}
           <InputText
             id="lieu"
             v-model="form.locality"
-            placeholder="Cocody"
+            :placeholder="$t('tontine.create.cocody')"
           />
         </label>
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="description"
         >
-          Description
+          {{ $t('tontine.create.description') }}
           <InputText
             id="description"
             v-model="form.description"
-            placeholder="Tontine mensuelle entre voisines"
+            :placeholder="$t('tontine.create.tontine_mensuelle_entre_voisines')"
           />
         </label>
       </section>
@@ -433,7 +503,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="montant"
         >
-          Montant d’une part (FCFA)
+          {{ $t('tontine.create.montant_d_une_part') }}
           <InputText
             id="montant"
             :value="form.shareAmount || ''"
@@ -442,31 +512,58 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="champ-montant"
             @input="form.shareAmount = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
           />
+          <ErreurChamp :message="validationArgent.erreur('shareAmount')" />
         </label>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="frequence"
         >
-          Fréquence
+          {{ $t('tontine.create.frequence') }}
           <select
             id="frequence"
             v-model="form.frequency"
             class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-base text-ink"
             data-testid="champ-frequence"
           >
-            <option value="daily">Journalière</option>
-            <option value="weekly">Hebdomadaire</option>
-            <option value="biweekly">Tous les quinze jours</option>
-            <option value="monthly">Mensuelle</option>
+            <option value="daily">{{ $t('tontine.create.journaliere') }}</option>
+            <option value="weekly">{{ $t('tontine.create.hebdomadaire') }}</option>
+            <option value="biweekly">{{ $t('tontine.create.tous_les_quinze_jours') }}</option>
+            <option value="monthly">{{ $t('tontine.create.mensuelle') }}</option>
           </select>
+        </label>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="date-demarrage"
+        >
+          {{ $t('tontine.create.date_du_premier_tour') }}
+          <input
+            id="date-demarrage"
+            v-model="form.startDate"
+            type="date"
+            :min="aujourdhui"
+            class="min-h-touch rounded-control border border-line-strong bg-surface px-3 text-base text-ink"
+            data-testid="champ-date-demarrage"
+          >
+          <span class="text-sm font-normal text-ink-subtle">
+            {{ $t('tontine.create.toutes_les_echeances_en') }}
+          </span>
+          <span
+            v-if="form.startDate && !dateValide"
+            class="text-sm font-normal text-disputed-ink"
+            role="alert"
+            data-testid="erreur-date-demarrage"
+          >
+            {{ $t('tontine.create.la_date_ne_peut') }}
+          </span>
         </label>
 
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="membres"
         >
-          Nombre de parts prévu
+          {{ $t('tontine.create.nombre_de_parts_prevu') }}
           <InputText
             id="membres"
             :value="brouillon.membresPrevus"
@@ -475,8 +572,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
             @input="brouillon.membresPrevus = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
           />
           <span class="text-sm font-normal text-ink-subtle">
-            Une estimation, pour la simulation. Le pot réel se calculera sur les
-            parts réellement attribuées.
+            {{ $t('tontine.create.une_estimation_pour_la') }}
           </span>
         </label>
 
@@ -503,14 +599,13 @@ useHead({ title: 'Créer une tontine — eTontine' })
             aria-hidden="true"
           />
           <span>
-            Ton pot atteindra environ {{ format(potEstime) }}. Vérifie le plafond
-            de ton compte de monnaie électronique avant de démarrer.
+            {{ $t('tontine.create.ton_pot_atteindra_environ', { p0: format(potEstime) }) }}
           </span>
         </p>
 
         <fieldset class="flex flex-col gap-2">
           <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Numéro de collecte
+            {{ $t('tontine.create.numero_de_collecte') }}
           </legend>
 
           <!-- L'état vide portait un texte impératif sans aucune action :
@@ -520,8 +615,8 @@ useHead({ title: 'Créer une tontine — eTontine' })
                serveur, mais revenir au tableau de bord ferait croire l'inverse. -->
           <EmptyState
             v-if="canauxVerifies.length === 0"
-            title="Aucun numéro vérifié"
-            description="Il te faut un numéro de collecte vérifié pour que tes membres puissent cotiser."
+            :title="$t('tontine.create.aucun_numero_verifie')"
+            :description="$t('tontine.create.il_te_faut_un')"
             icon="lucide:smartphone"
           >
             <template #action>
@@ -535,7 +630,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
                   size="1rem"
                   aria-hidden="true"
                 />
-                Ajouter un numéro
+                {{ $t('tontine.create.ajouter_un_numero') }}
               </NuxtLink>
             </template>
           </EmptyState>
@@ -569,7 +664,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
               size="1rem"
               aria-hidden="true"
             />
-            Ajouter un autre numéro
+            {{ $t('tontine.create.ajouter_un_autre_numero') }}
           </NuxtLink>
         </fieldset>
       </section>
@@ -589,9 +684,9 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="ordre-fixe"
           >
           <span>
-            <span class="font-medium text-ink">Ordre fixe</span>
+            <span class="font-medium text-ink">{{ $t('tontine.create.ordre_fixe') }}</span>
             <span class="block text-sm text-ink-muted">
-              Tu décides qui prend la main, et dans quel ordre.
+              {{ $t('tontine.create.tu_decides_qui_prend') }}
             </span>
           </span>
         </label>
@@ -604,10 +699,9 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="ordre-tirage"
           >
           <span>
-            <span class="font-medium text-ink">Tirage au sort</span>
+            <span class="font-medium text-ink">{{ $t('tontine.create.tirage_au_sort') }}</span>
             <span class="block text-sm text-ink-muted">
-              Le tirage est fait par le serveur et inscrit au registre, horodaté.
-              Personne ne peut soupçonner un arrangement.
+              {{ $t('tontine.create.le_tirage_est_fait') }}
             </span>
           </span>
         </label>
@@ -623,7 +717,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="amende"
         >
-          Amende de retard (FCFA, 0 pour aucune)
+          {{ $t('tontine.create.amende_de_retard_fcfa') }}
           <InputText
             id="amende"
             :value="form.penaltyAmount"
@@ -638,7 +732,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-2"
         >
           <legend class="pb-1 text-sm font-medium text-ink-muted">
-            Comment s’applique-t-elle ?
+            {{ $t('tontine.create.comment_s_applique_t') }}
           </legend>
           <label class="flex min-h-touch items-center gap-3 text-sm">
             <input
@@ -647,7 +741,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
               value="once"
               class="size-5 accent-brand"
             >
-            Une seule fois, passé le délai
+            {{ $t('tontine.create.une_seule_fois_passe') }}
           </label>
           <label class="flex min-h-touch items-center gap-3 text-sm">
             <input
@@ -656,7 +750,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
               value="per_day"
               class="size-5 accent-brand"
             >
-            Par jour de retard
+            {{ $t('tontine.create.par_jour_de_retard') }}
           </label>
         </fieldset>
 
@@ -665,7 +759,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="plafond-amende"
         >
-          Plafond de l’amende (FCFA)
+          {{ $t('tontine.create.plafond_de_l_amende') }}
           <InputText
             id="plafond-amende"
             :value="form.penaltyCap ?? ''"
@@ -673,9 +767,9 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="champ-plafond-amende"
             @input="form.penaltyCap = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || null"
           />
+          <ErreurChamp :message="validationRegles.erreur('penaltyCap')" />
           <span class="text-sm font-normal text-ink-subtle">
-            Une amende journalière sans plafond finit par dépasser la cotisation
-            elle-même.
+            {{ $t('tontine.create.une_amende_journaliere_sans') }}
           </span>
         </label>
 
@@ -683,7 +777,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
           for="grace"
         >
-          Délai de grâce (jours)
+          {{ $t('tontine.create.delai_de_grace_jours') }}
           <InputText
             id="grace"
             :value="form.graceDays"
@@ -691,6 +785,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
             data-testid="champ-grace"
             @input="form.graceDays = Number(($event.target as HTMLInputElement).value.replace(/\D/g, '')) || 0"
           />
+          <ErreurChamp :message="validationRegles.erreur('graceDays')" />
         </label>
       </section>
 
@@ -715,7 +810,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
               :amount="form.shareAmount"
               size="lg"
             />
-            par part
+            {{ $t('tontine.create.par_part') }}
           </p>
           <p
             v-if="simulation"
@@ -724,14 +819,18 @@ useHead({ title: 'Créer une tontine — eTontine' })
             {{ simulation }}
           </p>
           <p class="text-sm text-ink-muted">
-            Ordre de passage :
-            {{ form.rotationMode === 'draw' ? 'tirage au sort' : 'fixe' }}
+            {{ $t('tontine.create.ordre_de_passage_p0', { p0: form.rotationMode === 'draw' ? $t('tontine.create.tirage_au_sort_2') : 'fixe' }) }}
+          </p>
+          <p
+            class="text-sm text-ink-muted"
+            data-testid="recap-date-demarrage"
+          >
+            {{ $t('tontine.create.premier_tour_le_p0', { p0: formatDate(form.startDate) }) }}
           </p>
         </div>
 
         <p class="text-sm text-ink-muted">
-          Après publication, tu pourras ajouter les membres et leur envoyer le lien
-          d’invitation.
+          {{ $t('tontine.create.apres_publication_tu_pourras') }}
         </p>
       </section>
 
@@ -763,7 +862,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
             size="1rem"
             aria-hidden="true"
           />
-          Vérifier mon identité
+          {{ $t('tontine.create.verifier_mon_identite') }}
         </NuxtLink>
       </div>
 
@@ -771,7 +870,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
       <div class="mt-auto flex flex-col gap-2 pt-2 sm:flex-row-reverse">
         <Button
           v-if="brouillon.etape < ETAPES.length - 1"
-          :label="enregistrement ? 'Enregistrement…' : 'Continuer'"
+          :label="enregistrement ? $t('tontine.create.enregistrement') : $t('tontine.create.continuer')"
           :disabled="!peutAvancer || enregistrement"
           class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
           data-testid="bouton-continuer"
@@ -779,7 +878,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
         />
         <Button
           v-else
-          :label="enregistrement ? 'Publication…' : 'Publier la tontine'"
+          :label="enregistrement ? $t('tontine.create.publication') : $t('tontine.create.publier_la_tontine')"
           :disabled="enregistrement"
           class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
           data-testid="bouton-publier"
@@ -788,7 +887,7 @@ useHead({ title: 'Créer une tontine — eTontine' })
 
         <Button
           v-if="brouillon.etape > 0"
-          label="Retour"
+          :label="$t('tontine.create.retour')"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
           data-testid="bouton-retour"
           @click="brouillon.etape--"

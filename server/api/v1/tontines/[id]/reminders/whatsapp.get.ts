@@ -20,6 +20,6 @@ export default defineEventHandler(async (event) => {
 
   return {
     envoiManuel: true,
-    relances: relancesWhatsApp(useDb(), tontineId),
+    relances: await relancesWhatsApp(useDb(), tontineId),
   }
 })

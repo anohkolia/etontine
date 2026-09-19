@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type Database from 'better-sqlite3'
+import { sql } from 'drizzle-orm'
+import { migrate as migratePostgresJs } from 'drizzle-orm/postgres-js/migrator'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type { Db } from './index.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const MIGRATIONS_DIR = join(HERE, 'migrations')
@@ -14,42 +17,51 @@ export function migrationNames(): string[] {
     .map(f => f.replace(/\.sql$/, ''))
 }
 
+/** Applique les migrations manquantes sur une base `postgres-js` (Supabase, PGlite local). */
+export async function migrer(db: PostgresJsDatabase<Record<string, unknown>>): Promise<void> {
+  await migratePostgresJs(db, { migrationsFolder: MIGRATIONS_DIR })
+}
+
+/**
+ * Le journal de Drizzle : table `drizzle.__drizzle_migrations`, une ligne par
+ * migration appliquée, dans l'ordre. Elle ne stocke pas le nom : on retrouve
+ * la migration par sa position, l'ordre d'application étant celui du journal.
+ */
+async function journal(db: Db): Promise<Array<{ id: number, hash: string }>> {
+  const existe = await db.execute(sql`
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'
+  `)
+  if (lignes(existe).length === 0) return []
+
+  const rows = await db.execute(sql`SELECT id, hash FROM drizzle.__drizzle_migrations ORDER BY created_at ASC, id ASC`)
+  return lignes(rows) as Array<{ id: number, hash: string }>
+}
+
+/** Les lignes d'un `execute`, quel que soit le pilote (postgres-js rend un tableau, PGlite un objet `rows`). */
+function lignes(resultat: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(resultat)) return resultat as Array<Record<string, unknown>>
+  const r = resultat as { rows?: Array<Record<string, unknown>> }
+  return r.rows ?? []
+}
+
 /**
  * Annule la dernière migration appliquée.
  *
  * `drizzle-kit` ne sait faire que la montée. La descente vit dans
  * `migrations/down/<nom>.down.sql`, écrite à la main, et l'on retire la ligne
- * correspondante de la table de suivi de Drizzle pour que la montée suivante
- * rejoue la migration.
+ * correspondante du journal pour que la montée suivante rejoue la migration.
  */
-export function rollbackLast(sqlite: Database.Database): string | null {
-  const suivi = sqlite
-    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='__drizzle_migrations'`)
-    .get()
-
-  if (!suivi) return null
-
-  // On identifie la ligne par son empreinte, pas par `id` : Drizzle déclare
-  // cette colonne en `SERIAL`, mot-clé que SQLite ne connaît pas — `id` y vaut
-  // donc `NULL`, et un `WHERE id = NULL` ne supprime jamais rien. La migration
-  // resterait marquée comme appliquée, et la remontée ne ferait rien du tout.
-  const derniere = sqlite
-    .prepare(`SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1`)
-    .get() as { hash: string, created_at: number } | undefined
-
+export async function rollbackLast(db: Db): Promise<string | null> {
+  const appliquees = await journal(db)
+  const derniere = appliquees.at(-1)
   if (!derniere) return null
 
-  // La table de suivi ne stocke pas le nom : on retrouve la migration par sa
-  // position, l'ordre d'application étant celui du journal.
-  const appliquees = sqlite
-    .prepare(`SELECT COUNT(*) AS n FROM __drizzle_migrations`)
-    .get() as { n: number }
-  const nom = migrationNames()[appliquees.n - 1]
-
+  const nom = migrationNames()[appliquees.length - 1]
   if (!nom) {
     throw new Error(
-      `Impossible de retrouver la migration en position ${appliquees.n}. `
-      + 'Le dossier migrations/ et la table __drizzle_migrations divergent.',
+      `Impossible de retrouver la migration en position ${appliquees.length}. `
+      + 'Le dossier migrations/ et le journal drizzle.__drizzle_migrations divergent.',
     )
   }
 
@@ -70,12 +82,10 @@ export function rollbackLast(sqlite: Database.Database): string | null {
     .map(s => s.trim())
     .filter(s => s.length > 0)
 
-  sqlite.transaction(() => {
-    for (const instruction of instructions) sqlite.exec(instruction)
-    sqlite
-      .prepare(`DELETE FROM __drizzle_migrations WHERE hash = ? AND created_at = ?`)
-      .run(derniere.hash, derniere.created_at)
-  })()
+  await db.transaction(async (tx) => {
+    for (const instruction of instructions) await tx.execute(sql.raw(instruction))
+    await tx.execute(sql`DELETE FROM drizzle.__drizzle_migrations WHERE id = ${derniere.id}`)
+  })
 
   return nom
 }
@@ -84,12 +94,12 @@ export function rollbackLast(sqlite: Database.Database): string | null {
  * Annule toutes les migrations appliquées, de la plus récente à la plus
  * ancienne. Sert au contrôle de réversibilité et à `pnpm db:reset`.
  */
-export function rollbackAll(sqlite: Database.Database): string[] {
+export async function rollbackAll(db: Db): Promise<string[]> {
   const annulees: string[] = []
-  let nom = rollbackLast(sqlite)
+  let nom = await rollbackLast(db)
   while (nom) {
     annulees.push(nom)
-    nom = rollbackLast(sqlite)
+    nom = await rollbackLast(db)
   }
   return annulees
 }

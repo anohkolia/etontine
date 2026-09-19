@@ -37,21 +37,19 @@ export default defineEventHandler(async (event) => {
   let roundId = typeof q.roundId === 'string' ? q.roundId : null
 
   if (!roundId) {
-    const [dernier] = db
+    const [dernier] = await db
       .select({ id: rounds.id })
       .from(rounds)
       .where(and(eq(rounds.tontineId, tontineId), eq(rounds.status, 'closed')))
       .orderBy(desc(rounds.index))
       .limit(1)
-      .all()
 
-    const [courant] = db
+    const [courant] = await db
       .select({ id: rounds.id })
       .from(rounds)
       .where(eq(rounds.tontineId, tontineId))
       .orderBy(desc(rounds.index))
       .limit(1)
-      .all()
 
     roundId = dernier?.id ?? courant?.id ?? null
   }

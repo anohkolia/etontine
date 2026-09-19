@@ -5,10 +5,10 @@ import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
   await createTestUser(db, 'u1', '+2250707000001')

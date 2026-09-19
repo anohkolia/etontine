@@ -21,12 +21,11 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const tontines = new Set(
-    db.select({ tontineId: rounds.tontineId })
+    (await db.select({ tontineId: rounds.tontineId })
       .from(paymentDeclarations)
       .innerJoin(contributions, eq(contributions.id, paymentDeclarations.contributionId))
       .innerJoin(rounds, eq(rounds.id, contributions.roundId))
-      .where(inArray(paymentDeclarations.id, parsed.data.ids))
-      .all()
+      .where(inArray(paymentDeclarations.id, parsed.data.ids)))
       .map(l => l.tontineId),
   )
 
@@ -41,6 +40,6 @@ export default defineEventHandler(async (event) => {
   const tontineId = [...tontines][0]!
   const { user } = await requireMembership(event, tontineId, ['treasurer', 'president'])
 
-  return withIdempotency(event, user.id, parsed.data, () =>
-    confirmerEnLot(db, parsed.data.ids, user.id))
+  return await withIdempotency(event, user.id, parsed.data, async () =>
+    await confirmerEnLot(db, parsed.data.ids, user.id))
 })

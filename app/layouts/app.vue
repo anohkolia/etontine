@@ -23,6 +23,25 @@ const entete = useEnTete()
 // module 14 la veut consultable hors connexion.
 const { nonLues, rafraichirCompteur } = useNotifications()
 onMounted(rafraichirCompteur)
+
+// Le compteur ne se rafraîchissait qu'au montage de la mise en page — une
+// seule fois par session, l'application étant une SPA. Une notification
+// arrivée pendant qu'on cotise restait invisible jusqu'au rechargement. On
+// relit à chaque navigation et au retour en avant-plan : deux moments où l'on
+// regarde l'en-tête, et un appel léger — le serveur ne renvoie qu'un compte.
+const route = useRoute()
+watch(() => route.path, () => rafraichirCompteur())
+onMounted(() => {
+  const onVisibilite = () => {
+    if (document.visibilityState === 'visible') rafraichirCompteur()
+  }
+  document.addEventListener('visibilitychange', onVisibilite)
+  onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibilite))
+})
+
+// Le verrou d'écran se referme après cinq minutes en arrière-plan : un
+// téléphone posé sur la table reste un téléphone qu'on peut prendre.
+useVerrou().surveiller()
 </script>
 
 <template>
@@ -32,6 +51,7 @@ onMounted(rafraichirCompteur)
          saisie est gardée ferait attendre des envois qui n'ont pas eu lieu.
          L'écran qui tient la promesse la réclame par `useNatureHorsLigne()`. -->
     <OfflineBanner />
+    <PwaBandeau />
 
     <header
       class="gradient-trust sticky top-0 z-20 rounded-b-tile px-4 pt-4 pb-5 text-night-ink shadow-float"
@@ -86,7 +106,7 @@ onMounted(rafraichirCompteur)
             data-testid="compteur-notifications"
           >{{ nonLues > 9 ? '9+' : nonLues }}</span>
           <span class="sr-only">
-            Mes notifications{{ nonLues > 0 ? ` — ${nonLues} non lue${nonLues > 1 ? 's' : ''}` : '' }}
+            {{ $t('layout.app.mes_notifications') }}{{ nonLues > 0 ? $t('layout.app.non_lues', { n: nonLues }, nonLues) : '' }}
           </span>
         </NuxtLink>
 
@@ -99,7 +119,7 @@ onMounted(rafraichirCompteur)
             :prenom="session.user?.firstName"
             :nom="session.user?.lastName"
           />
-          <span class="sr-only">Mon profil</span>
+          <span class="sr-only">{{ $t('layout.app.mon_profil') }}</span>
         </NuxtLink>
       </div>
     </header>

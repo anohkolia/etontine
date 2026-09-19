@@ -1,21 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { blocagesSuppression, exporterDonnees } from '../../server/services/compte.ts'
+import { eq } from 'drizzle-orm'
+import {
+  appliquerChangementNumero, blocagesSuppression, demanderChangementNumero, exporterDonnees,
+} from '../../server/services/compte.ts'
+import { consommerCode, requestOtp } from '../../server/services/otp.ts'
 import { hashPin, verifyPin } from '../../server/utils/pin.ts'
 import {
-  contributions, memberships, rounds, shares, tontines,
+  contributions, ledgerEntries, memberships, notifications, rounds, shares, tontines, users,
 } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
 let db: TestDb
-let cleanup: () => void
+let cleanup: () => Promise<void>
 
 const U = 'b0000000-0000-4000-8000-000000000001'
 const AUTRE = 'b0000000-0000-4000-8000-000000000002'
 const T = 'b0000000-0000-4000-8000-000000000010'
 
 beforeEach(async () => {
-  const ctx = createTestDb()
+  const ctx = await createTestDb()
   db = ctx.db
   cleanup = ctx.cleanup
 
@@ -47,7 +51,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'collecting',
     })
 
-    const blocages = blocagesSuppression(db, U)
+    const blocages = await blocagesSuppression(db, U)
 
     expect(blocages).toHaveLength(1)
     expect(blocages[0]).toMatchObject({ tontineName: 'Tontine des tantines', roundIndex: 1 })
@@ -62,7 +66,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'payout_pending',
     })
 
-    expect(blocagesSuppression(db, U)[0]!.raison).toContain('versé')
+    expect((await blocagesSuppression(db, U))[0]!.raison).toContain('versé')
   })
 
   it('bloque un membre qui n’a pas encore pris la main', async () => {
@@ -73,7 +77,7 @@ describe('suppression de compte — acceptation T08', () => {
     })
 
     // Partir maintenant, c'est avoir cotisé pour rien.
-    expect(blocagesSuppression(db, U)[0]!.raison).toContain('pas encore pris la main')
+    expect((await blocagesSuppression(db, U))[0]!.raison).toContain('pas encore pris la main')
   })
 
   it('ne bloque rien quand tout est clos', async () => {
@@ -83,7 +87,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partA, expectedAmount: 50_000, status: 'closed',
     })
 
-    expect(blocagesSuppression(db, U)).toEqual([])
+    expect(await blocagesSuppression(db, U)).toEqual([])
   })
 
   it('ne bloque pas pour la tontine d’un autre membre', async () => {
@@ -93,7 +97,7 @@ describe('suppression de compte — acceptation T08', () => {
       beneficiaryShareId: partB, expectedAmount: 50_000, status: 'collecting',
     })
 
-    expect(blocagesSuppression(db, U)).toEqual([])
+    expect(await blocagesSuppression(db, U)).toEqual([])
   })
 })
 
@@ -110,7 +114,7 @@ describe('export des données personnelles', () => {
       { id: 'c2', roundId: 'r1', shareId: 'ms-b-s', membershipId: 'ms-b', expectedAmount: 25_000, dueDate: '2026-02-01' },
     ])
 
-    const donnees = exporterDonnees(db, U)
+    const donnees = await exporterDonnees(db, U)
     const texte = JSON.stringify(donnees)
 
     expect(donnees.cotisations).toHaveLength(1)
@@ -121,7 +125,7 @@ describe('export des données personnelles', () => {
   })
 
   it('contient les deux consentements séparément', async () => {
-    const donnees = exporterDonnees(db, U)
+    const donnees = await exporterDonnees(db, U)
     expect(donnees.profil).toHaveProperty('consentDataAt')
     expect(donnees.profil).toHaveProperty('consentNotificationsAt')
   })
@@ -145,5 +149,71 @@ describe('code de verrouillage', () => {
   it('refuse une empreinte malformée sans lever', () => {
     expect(verifyPin('1234', 'nimportequoi')).toBe(false)
     expect(verifyPin('1234', '')).toBe(false)
+  })
+})
+
+describe('changement de numéro', () => {
+  const T2 = 'b0000000-0000-4000-8000-000000000011'
+
+  async function membreAvecBureau() {
+    // U est membre actif de T, où AUTRE est président ; et de T2, sans bureau à prévenir.
+    await db.insert(memberships).values({ id: 'ms-u', tontineId: T, userId: U, status: 'active', role: 'member' })
+    await db.insert(memberships).values({ id: 'ms-p', tontineId: T, userId: AUTRE, status: 'active', role: 'president' })
+    await db.insert(tontines).values({
+      id: T2, name: 'Autre tontine', shareAmount: 5_000, frequency: 'weekly', startDate: '2026-01-01', createdBy: U,
+    })
+    await db.insert(memberships).values({ id: 'ms-u2', tontineId: T2, userId: U, status: 'active', role: 'president' })
+  }
+
+  it('refuse le numéro actuel, et un numéro déjà pris', async () => {
+    await expect(demanderChangementNumero(db, U, '+2250707000001')).rejects.toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
+    await expect(demanderChangementNumero(db, U, '+2250707000002')).rejects.toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
+    await demanderChangementNumero(db, U, '+2250707009999')
+  })
+
+  it('change le numéro et pose la date du changement — le gel de 48 h en découle', async () => {
+    await membreAvecBureau()
+    await appliquerChangementNumero(db, U, '+2250707009999')
+
+    const [u] = await db.select().from(users).where(eq(users.id, U))
+    expect(u!.phone).toBe('+2250707009999')
+    expect(u!.phoneChangedAt).toBeInstanceOf(Date)
+    expect(Date.now() - u!.phoneChangedAt!.getTime()).toBeLessThan(5_000)
+  })
+
+  it('l’écrit au registre de chaque tontine active, sans le numéro en clair', async () => {
+    await membreAvecBureau()
+    await appliquerChangementNumero(db, U, '+2250707009999')
+
+    const ecritures = (await db.select().from(ledgerEntries))
+      .filter(e => (e.payload as { changement?: string }).changement === 'numero_change')
+    expect(ecritures.map(e => e.tontineId).sort()).toEqual([T, T2].sort())
+    for (const e of ecritures) {
+      expect(JSON.stringify(e.payload)).not.toContain('0707009999')
+      expect(e.payload).toMatchObject({ ancienFin: '0001', nouveauFin: '9999' })
+    }
+  })
+
+  it('prévient le bureau de chaque tontine, sans montant ni numéro', async () => {
+    await membreAvecBureau()
+    await appliquerChangementNumero(db, U, '+2250707009999')
+
+    const prevenus = await db.select().from(notifications)
+    expect(prevenus.map(n => n.userId)).toEqual([AUTRE])
+    expect(prevenus[0]!.body).not.toContain('9999')
+  })
+
+  it('consommer un code ne crée jamais de compte', async () => {
+    const { devCode } = await requestOtp(db, '+2250707009999')
+    await consommerCode(db, '+2250707009999', devCode!)
+    expect(await db.select().from(users).where(eq(users.phone, '+2250707009999'))).toHaveLength(0)
+    // Et il ne se consomme qu'une fois.
+    await expect(consommerCode(db, '+2250707009999', devCode!)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    )
   })
 })

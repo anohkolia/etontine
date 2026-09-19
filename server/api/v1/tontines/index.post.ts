@@ -40,6 +40,6 @@ export default defineEventHandler(async (event) => {
     )
   }
 
-  const id = creerBrouillon(useDb(), user.id, parsed.data)
+  const id = await creerBrouillon(useDb(), user.id, parsed.data)
   return { id, status: 'draft' as const }
 })

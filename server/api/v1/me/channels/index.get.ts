@@ -3,10 +3,10 @@ import { useDb } from '../../../../db/index.ts'
 import { collectionChannels } from '../../../../db/schema.ts'
 import { requireUser } from '../../../../utils/auth.ts'
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = requireUser(event)
 
-  return useDb()
+  return await useDb()
     .select({
       id: collectionChannels.id,
       provider: collectionChannels.provider,
@@ -17,5 +17,4 @@ export default defineEventHandler((event) => {
     })
     .from(collectionChannels)
     .where(eq(collectionChannels.userId, user.id))
-    .all()
 })

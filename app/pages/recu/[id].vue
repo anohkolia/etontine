@@ -7,6 +7,7 @@
  * et membre — rien sur les autres membres, rien sur l'état du pot.
  */
 definePageMeta({ layout: false })
+const { t } = useI18n()
 
 const route = useRoute()
 const id = route.params.id as string
@@ -33,7 +34,7 @@ const urlImage = computed(() =>
 )
 
 useHead(() => ({
-  title: recu.value ? `Reçu — ${recu.value.tontineName}` : 'Reçu — eTontine',
+  title: recu.value ? t('public.recu.recu_de', { nom: recu.value.tontineName }) : t('public.recu.recu_etontine'),
   // Un reçu ne doit pas se retrouver indexé par un moteur de recherche.
   meta: [{ name: 'robots', content: 'noindex, nofollow' }],
 }))
@@ -57,8 +58,8 @@ useHead(() => ({
            essai suffirait. -->
       <EmptyState
         v-else-if="error && error.statusCode === 404"
-        title="Ce reçu n’est plus consultable"
-        description="Le lien a expiré ou n’est pas valable. Demande-en un nouveau au bureau de la tontine."
+        :title="$t('public.recu.ce_recu_n_est')"
+        :description="$t('public.recu.le_lien_a_expire')"
         icon="lucide:receipt"
       />
 
@@ -70,7 +71,7 @@ useHead(() => ({
 
       <template v-else-if="recu">
         <h1 class="text-sm tracking-widest text-ink-muted uppercase">
-          Reçu de cotisation
+          {{ $t('public.recu.recu_de_cotisation') }}
         </h1>
 
         <div class="flex flex-col gap-4 card-surface p-5">
@@ -89,7 +90,7 @@ useHead(() => ({
           <dl class="flex flex-col gap-3 border-t border-line pt-4">
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-sm text-ink-muted">
-                Tontine
+                {{ $t('public.recu.tontine') }}
               </dt>
               <dd
                 class="font-medium text-ink"
@@ -100,7 +101,7 @@ useHead(() => ({
             </div>
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-sm text-ink-muted">
-                Membre
+                {{ $t('public.recu.membre') }}
               </dt>
               <dd
                 class="font-medium text-ink"
@@ -111,7 +112,7 @@ useHead(() => ({
             </div>
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-sm text-ink-muted">
-                Tour
+                {{ $t('public.recu.tour') }}
               </dt>
               <dd class="font-medium text-ink">
                 {{ recu.roundIndex }}
@@ -119,7 +120,7 @@ useHead(() => ({
             </div>
             <div class="flex items-baseline justify-between gap-3">
               <dt class="text-sm text-ink-muted">
-                Date
+                {{ $t('public.recu.date') }}
               </dt>
               <dd
                 class="font-medium text-ink"
@@ -143,12 +144,11 @@ useHead(() => ({
             size="1rem"
             aria-hidden="true"
           />
-          Voir le reçu en image
+          {{ $t('public.recu.voir_le_recu_en') }}
         </a>
 
         <p class="text-sm text-ink-subtle">
-          Ce reçu ne montre que cette cotisation. Il ne dit rien des autres
-          membres de la tontine.
+          {{ $t('public.recu.ce_recu_ne_montre') }}
         </p>
       </template>
     </main>

@@ -12,11 +12,11 @@ import { requireAdmin } from '../../../utils/garde.ts'
  * puis signe ici. La décision est journalisée — elle lève un quota, elle doit
  * avoir un auteur.
  */
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const admin = requireAdmin(event)
 
   const id = getRouterParam(event, 'id')
   if (!id) throw apiError('NOT_FOUND', 'Demande introuvable.')
 
-  return approuverDemande(useDb(), id, admin)
+  return await approuverDemande(useDb(), id, admin)
 })

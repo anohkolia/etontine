@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
+import { tontineLanceeAvecCotisant } from './helpers/tontine'
 
-/** Monte une tontine lancée où l'utilisateur a une cotisation à verser. */
+/** Monte une tontine lancée, vue par son président — qui ne cotise pas. */
 async function tontineLancee(page: import('@playwright/test').Page) {
   await seConnecter(page)
   await verifierIdentite(page)
@@ -55,8 +56,10 @@ test('un seul appel de données peint l’écran', async ({ page }) => {
   expect(appels).toEqual(['/api/v1/dashboard'])
 })
 
-test('le bloc « à traiter aujourd’hui » vient en premier', async ({ page }) => {
-  await tontineLancee(page)
+test('le bloc « à traiter aujourd’hui » vient en premier', async ({ page, browser }) => {
+  // Vu par Koffi, qui a une cotisation à verser. Le président ne cotise pas :
+  // son bloc, lui, ne se remplit que des décisions qu'on attend de lui.
+  await tontineLanceeAvecCotisant(browser, page)
   await page.goto('/app')
   await waitForHydration(page)
 
@@ -86,8 +89,8 @@ test('aucun DataTable n’est rendu à 360 px', async ({ page }) => {
   await expect(page.getByTestId('liste-tontines')).toBeVisible()
 })
 
-test('la jauge et le montant dû s’affichent sur la carte', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('la jauge et le montant dû s’affichent sur la carte', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto('/app')
   await waitForHydration(page)
 
@@ -96,13 +99,13 @@ test('la jauge et le montant dû s’affichent sur la carte', async ({ page }) =
   await expect(carte).toContainText('Tour 1')
   await expect(carte.locator('[data-pc-name="progressbar"]')).toBeVisible()
 
-  // Le président a une part : il doit 25 000 FCFA.
+  // Koffi a une part : il doit 25 000 FCFA.
   await expect(carte).toContainText('25 000 FCFA')
   await expect(carte.getByTestId('status-badge').first()).toBeVisible()
 })
 
-test('les actions rapides mènent aux bons écrans', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('les actions rapides mènent aux bons écrans', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto('/app')
   await waitForHydration(page)
 

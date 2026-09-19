@@ -30,6 +30,20 @@ export const phoneCI = z
   .transform(v => (v.startsWith('+225') ? v : `+225${v}`))
 
 export const otpCode = z.string().regex(/^\d{6}$/, 'Le code doit contenir 6 chiffres')
+
+/**
+ * Adresse d'une capture déposée par `POST /uploads/proof`.
+ *
+ * Le dépôt renvoie un chemin **relatif** à l'application
+ * (`/api/v1/uploads/proof/<user>/<fichier>`), et `z.string().url()` le
+ * refusait : toute déclaration accompagnée d'une capture était rejetée en 422,
+ * silencieusement pour qui ne lisait pas la réponse. On accepte ce chemin, et
+ * une adresse absolue pour une preuve hébergée ailleurs.
+ */
+export const proofUrl = z.string().trim().max(500).refine(
+  v => /^\/api\/v1\/uploads\/proof\/[^/]+\/[^/]+$/.test(v) || /^https?:\/\/\S+$/.test(v),
+  { message: 'Adresse de capture invalide' },
+)
 export const shortRef = z.string().regex(/^TON-[A-Z0-9]{4}$/)
 
 /* ------------------------------------------------------------------ */
@@ -231,15 +245,20 @@ export const managedMemberInput = z.object({
 })
 
 export const memberUpdateInput = z.object({
+  /**
+   * Le rôle dans cette tontine. `president` sur un autre membre **transfère**
+   * la présidence : l'ancien président devient membre, et le registre le note.
+   */
   role: membershipRole.optional(),
   shares: z.number().int().min(1).max(5).optional(),
   /**
    * `active` approuve une adhésion en attente, `left` la refuse ou fait sortir
-   * un membre. Les autres états ne se posent pas à la main : `invited` et
-   * `pending_approval` viennent du parcours d'invitation, et `defaulted`
-   * demande une règle que le président ne pose pas d'un clic.
+   * un membre, `defaulted` déclare un membre défaillant — seulement après un
+   * tour où il a pris la main, le serveur le vérifie (§2.2). Les autres états
+   * ne se posent pas à la main : `invited` et `pending_approval` viennent du
+   * parcours d'invitation.
    */
-  status: z.enum(['active', 'left']).optional(),
+  status: z.enum(['active', 'left', 'defaulted']).optional(),
 })
 
 /* ------------------------------------------------------------------ */
@@ -250,7 +269,7 @@ export const declareContributionInput = z.object({
   amount: amountFcfa, // paiements partiels autorisés
   channel: paymentChannel,
   providerRef: z.string().trim().max(64).optional(),
-  proofUrl: z.string().url().optional(),
+  proofUrl: proofUrl.optional(),
   declaredAt: z.coerce.date().optional(), // défaut : horloge serveur
 })
 
@@ -282,7 +301,7 @@ export const preparePayoutInput = z.object({
 export const declarePayoutInput = z.object({
   channel: paymentChannel,
   providerRef: z.string().trim().max(64).optional(),
-  proofUrl: z.string().url().optional(),
+  proofUrl: proofUrl.optional(),
 })
 
 export const acknowledgePayoutInput = z.object({

@@ -35,9 +35,9 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = useDb()
-  db.update(users).set(modifications).where(eq(users.id, user.id)).run()
+  await db.update(users).set(modifications).where(eq(users.id, user.id))
 
-  const [maj] = db.select().from(users).where(eq(users.id, user.id)).limit(1).all()
+  const [maj] = await db.select().from(users).where(eq(users.id, user.id)).limit(1)
   return {
     data: maj!.consentDataAt !== null,
     notifications: maj!.consentNotificationsAt !== null,

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n()
+
 /**
  * Prise d'un selfie **en direct**, à la caméra de l'appareil.
  *
@@ -46,7 +48,7 @@ async function demarrer() {
     })
 
     const source = video.value
-    if (!source) throw new Error('Aperçu indisponible.')
+    if (!source) throw new Error(t('ui.SelfieCamera.apercu_indisponible'))
 
     source.srcObject = flux.value
     await source.play()
@@ -74,7 +76,7 @@ function premiereTrame(source: HTMLVideoElement): Promise<void> {
 
   return new Promise((resoudre, rejeter) => {
     const abandon = setTimeout(
-      () => rejeter(new Error('La caméra n’a rien renvoyé.')),
+      () => rejeter(new Error(t('ui.SelfieCamera.la_camera_n_a'))),
       10_000,
     )
     source.addEventListener('loadeddata', () => {
@@ -94,7 +96,7 @@ async function capturer() {
   if (!source) return
 
   if (!source.videoWidth || !source.videoHeight) {
-    erreur.value = 'La caméra n’est pas encore prête. Réessaie dans un instant.'
+    erreur.value = t('ui.SelfieCamera.la_camera_n_est')
     return
   }
 
@@ -104,7 +106,7 @@ async function capturer() {
 
   const contexte = canvas.getContext('2d')
   if (!contexte) {
-    erreur.value = 'Impossible de capturer l’image sur cet appareil.'
+    erreur.value = t('ui.SelfieCamera.impossible_de_capturer_l')
     return
   }
   contexte.drawImage(source, 0, 0, canvas.width, canvas.height)
@@ -113,7 +115,7 @@ async function capturer() {
     canvas.toBlob(resoudre, 'image/jpeg', 0.9),
   )
   if (!blob) {
-    erreur.value = 'Impossible de capturer l’image sur cet appareil.'
+    erreur.value = t('ui.SelfieCamera.impossible_de_capturer_l')
     return
   }
 
@@ -165,7 +167,7 @@ onBeforeUnmount(() => {
     <img
       v-if="apercu"
       :src="apercu"
-      alt="Selfie retenu"
+      :alt="$t('ui.SelfieCamera.selfie_retenu')"
       class="w-full max-w-xs rounded-control border border-line-strong"
       data-testid="apercu-selfie"
     >
@@ -187,7 +189,7 @@ onBeforeUnmount(() => {
     <Button
       v-if="etat === 'inactive' && !aUnSelfie"
       type="button"
-      label="Ouvrir la caméra"
+      :label="$t('ui.SelfieCamera.ouvrir_la_camera')"
       class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
       data-testid="bouton-ouvrir-camera"
       @click="demarrer"
@@ -198,13 +200,13 @@ onBeforeUnmount(() => {
       class="text-sm text-ink-subtle"
       role="status"
     >
-      Ouverture de la caméra…
+      {{ $t('ui.SelfieCamera.ouverture_de_la_camera') }}
     </p>
 
     <Button
       v-else-if="etat === 'directe'"
       type="button"
-      label="Prendre la photo"
+      :label="$t('ui.SelfieCamera.prendre_la_photo')"
       class="bg-brand text-brand-ink hover:bg-brand-strong"
       data-testid="bouton-capturer-selfie"
       @click="capturer"
@@ -213,7 +215,7 @@ onBeforeUnmount(() => {
     <Button
       v-else-if="aUnSelfie"
       type="button"
-      label="Reprendre la photo"
+      :label="$t('ui.SelfieCamera.reprendre_la_photo')"
       class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
       data-testid="bouton-reprendre-selfie"
       @click="reprendre"
@@ -235,8 +237,7 @@ onBeforeUnmount(() => {
           class="mt-0.5 shrink-0"
           aria-hidden="true"
         />
-        Caméra inaccessible sur cet appareil. Prends la photo avec ton appareil
-        photo, puis choisis-la ci-dessous.
+        {{ $t('ui.SelfieCamera.camera_inaccessible_sur_cet') }}
       </p>
       <input
         id="selfie-repli"
@@ -254,7 +255,7 @@ onBeforeUnmount(() => {
       class="text-sm text-ink-subtle"
       data-testid="poids-selfie"
     >
-      Photo compressée à {{ Math.max(1, Math.round(poids / 1024)) }} Ko avant envoi.
+      {{ $t('ui.SelfieCamera.photo_compressee_a_p0', { p0: Math.max(1, Math.round(poids / 1024)) }) }}
     </p>
 
     <p

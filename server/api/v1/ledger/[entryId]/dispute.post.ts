@@ -19,8 +19,8 @@ export default defineEventHandler(async (event) => {
   if (!entryId) throw apiError('NOT_FOUND', 'Écriture introuvable.')
 
   const db = useDb()
-  const [ecriture] = db.select({ tontineId: ledgerEntries.tontineId }).from(ledgerEntries)
-    .where(eq(ledgerEntries.id, entryId)).limit(1).all()
+  const [ecriture] = await db.select({ tontineId: ledgerEntries.tontineId }).from(ledgerEntries)
+    .where(eq(ledgerEntries.id, entryId)).limit(1)
 
   if (!ecriture) throw apiError('NOT_FOUND', 'Écriture introuvable.')
 
@@ -29,5 +29,5 @@ export default defineEventHandler(async (event) => {
   const parsed = disputeInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return ouvrirContestation(db, entryId, user.id, parsed.data.message)
+  return await ouvrirContestation(db, entryId, user.id, parsed.data.message)
 })

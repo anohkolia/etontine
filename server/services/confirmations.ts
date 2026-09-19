@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
   contributions, memberships, paymentDeclarations, rounds, shares, users,
@@ -11,8 +11,8 @@ import { notifier } from './notifications.ts'
 type Db = ReturnType<typeof useDb>
 
 /** La file d'attente du trésorier : les déclarations en attente de décision. */
-export function fileDAttente(db: Db, tontineId: string) {
-  return db
+export async function fileDAttente(db: Db, tontineId: string) {
+  return await db
     .select({
       declarationId: paymentDeclarations.id,
       contributionId: paymentDeclarations.contributionId,
@@ -44,7 +44,6 @@ export function fileDAttente(db: Db, tontineId: string) {
       eq(paymentDeclarations.decision, 'pending'),
     ))
     .orderBy(asc(paymentDeclarations.declaredAt))
-    .all()
 }
 
 interface ContexteDeclaration {
@@ -55,8 +54,8 @@ interface ContexteDeclaration {
   membershipId: string
 }
 
-function contexte(db: Db, declarationId: string): ContexteDeclaration {
-  const [ligne] = db
+async function contexte(db: Db, declarationId: string): Promise<ContexteDeclaration> {
+  const [ligne] = await db
     .select({
       declaration: paymentDeclarations,
       contribution: contributions,
@@ -68,37 +67,10 @@ function contexte(db: Db, declarationId: string): ContexteDeclaration {
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(paymentDeclarations.id, declarationId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Déclaration introuvable.')
 
   return { ...ligne, membershipId: ligne.contribution.membershipId }
-}
-
-/**
- * Qui peut confirmer une déclaration faite par `declarantId`.
- *
- * Les adhésions actives de rôle président ou trésorier qui ont un compte,
- * **moins le déclarant lui-même** — puisque c'est précisément lui que la règle
- * de séparation écarte.
- *
- * Cette liste existe pour une raison : sur une tontine où l'organisateur cumule
- * tous les rôles, elle est vide, et la règle §2.4 n'a alors plus personne à qui
- * confier la décision. Le savoir permet de traiter ce cas sans le confondre
- * avec une tentative d'auto-validation dans un bureau qui, lui, a du monde.
- */
-export function confirmateursPossibles(db: Db, tontineId: string, declarantId: string): string[] {
-  return db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(and(
-      eq(memberships.tontineId, tontineId),
-      eq(memberships.status, 'active'),
-      inArray(memberships.role, ['president', 'treasurer']),
-    ))
-    .all()
-    .map(m => m.userId)
-    .filter((id): id is string => id !== null && id !== declarantId)
 }
 
 /**
@@ -110,58 +82,47 @@ export function confirmateursPossibles(db: Db, tontineId: string, declarantId: s
  * organisateur de se déclarer à jour tout seul, et il n'a de valeur que s'il
  * est appliqué ici — masquer un bouton côté client n'empêche rien.
  *
- * **Le seul repli : le bureau d'une seule personne.** Quand l'organisateur
- * cumule les rôles, la règle n'a personne à qui confier la décision, et sa
- * propre cotisation resterait bloquée en « déclarée » à chaque tour. Elle est
- * alors confirmée d'office et le registre le dit — parce qu'il n'y a de toute
- * façon rien à vérifier : l'argent que l'organisateur cotise part sur son
- * propre canal de collecte, aucun tiers ne le voit passer. Le contrôle réel
- * est en aval, à l'accusé de réception du bénéficiaire, qui lui reste réservé.
+ * Elle ne connaît **aucun repli** : le président ne cotise pas, il est donc
+ * toujours là pour décider sur la déclaration d'un trésorier, et l'un ou
+ * l'autre sur celle d'un membre. Le seul cas sans décideur — un président seul
+ * au bureau qui enregistre des espèces pour un membre — se résout en nommant
+ * un trésorier, pas en levant la règle : c'est précisément une seconde paire
+ * d'yeux qui manque.
  */
-export function confirmerDeclaration(db: Db, declarationId: string, decideurId: string) {
-  const { declaration, contribution, tontineId, roundId, membershipId } = contexte(db, declarationId)
+export async function confirmerDeclaration(db: Db, declarationId: string, decideurId: string) {
+  const { declaration, contribution, tontineId, roundId, membershipId } = await contexte(db, declarationId)
 
   if (declaration.decision !== 'pending') {
     // Déjà décidée : ce n'est pas une erreur, c'est un rejeu. On le dit sans
     // rien changer — c'est ce qui rend « tout confirmer » idempotent.
-    return { declarationId, dejaDecidee: true, autoConfirmee: false, contributionStatus: contribution.status }
+    return { declarationId, dejaDecidee: true, contributionStatus: contribution.status }
   }
 
   // Règle de séparation §2.4 : personne ne décide sur sa propre déclaration.
-  // Elle ne cède que lorsqu'il n'y a **personne d'autre** — bureau d'une seule
-  // personne — et le repli est alors dérivé des données, jamais d'un drapeau
-  // que l'appelant pourrait poser. Dès qu'un second membre de bureau existe, la
-  // règle reprend d'elle-même, sans rien à défaire ici.
-  let autoConfirmee = false
   if (declaration.declaredBy === decideurId) {
-    if (confirmateursPossibles(db, tontineId, decideurId).length > 0) {
-      throw apiError(
-        'FORBIDDEN',
-        'Tu ne peux pas confirmer ta propre déclaration. Un autre membre du bureau doit le faire.',
-      )
-    }
-    autoConfirmee = true
+    throw apiError(
+      'FORBIDDEN',
+      'Tu ne peux pas confirmer ta propre déclaration. Un autre membre du bureau doit le faire.',
+    )
   }
 
   assertTransition('contribution', contribution.status, 'confirmed')
 
   const maintenant = new Date()
-  db.update(paymentDeclarations)
+  await db.update(paymentDeclarations)
     .set({ decision: 'confirmed', decidedBy: decideurId, decidedAt: maintenant })
     .where(eq(paymentDeclarations.id, declarationId))
-    .run()
 
   // Les paiements partiels sont autorisés : on cumule, et la cotisation n'est
   // « confirmée » que lorsque le dû est atteint.
   const cumul = contribution.confirmedAmount + declaration.amount
   const soldee = cumul >= contribution.expectedAmount
 
-  db.update(contributions)
+  await db.update(contributions)
     .set({ confirmedAmount: cumul, status: soldee ? 'confirmed' : 'due' })
     .where(eq(contributions.id, contribution.id))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     roundId,
     type: 'contribution_confirmed',
@@ -172,14 +133,10 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
       amount: declaration.amount,
       confirmedTotal: cumul,
       complete: soldee,
-      // Écrit **seulement** quand la confirmation n'a été vue par personne :
-      // le groupe doit pouvoir distinguer au registre une cotisation validée
-      // par un tiers d'une cotisation que son auteur a validée faute de tiers.
-      ...(autoConfirmee ? { autoConfirmee: true, motif: 'aucun_second_valideur' } : {}),
     },
   })
 
-  notifierMembre(db, membershipId, tontineId, {
+  await notifierMembre(db, membershipId, tontineId, {
     type: 'cotisation_confirmee',
     title: 'Ta cotisation est confirmée',
     body: 'Le trésorier a confirmé ta cotisation. Elle apparaît au registre.',
@@ -188,7 +145,7 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
     // le trésorier et le cotisant, n'apprend rien à personne.
   }, decideurId)
 
-  return { declarationId, dejaDecidee: false, autoConfirmee, contributionStatus: soldee ? 'confirmed' : 'due' }
+  return { declarationId, dejaDecidee: false, contributionStatus: soldee ? 'confirmed' : 'due' }
 }
 
 /**
@@ -199,13 +156,13 @@ export function confirmerDeclaration(db: Db, declarationId: string, decideurId: 
  * — mauvais montant, envoi introuvable, référence absente — pour pouvoir
  * corriger ou contester.
  */
-export function rejeterDeclaration(
+export async function rejeterDeclaration(
   db: Db,
   declarationId: string,
   decideurId: string,
   motif: string,
 ) {
-  const { declaration, contribution, tontineId, roundId, membershipId } = contexte(db, declarationId)
+  const { declaration, contribution, tontineId, roundId, membershipId } = await contexte(db, declarationId)
 
   if (!motif || motif.trim().length < 5) {
     throw apiError('VALIDATION_ERROR', 'Explique brièvement le motif du rejet.', { field: 'reason' })
@@ -221,7 +178,7 @@ export function rejeterDeclaration(
 
   assertTransition('contribution', contribution.status, 'disputed')
 
-  db.update(paymentDeclarations)
+  await db.update(paymentDeclarations)
     .set({
       decision: 'rejected',
       decidedBy: decideurId,
@@ -229,14 +186,12 @@ export function rejeterDeclaration(
       rejectionReason: motif.trim(),
     })
     .where(eq(paymentDeclarations.id, declarationId))
-    .run()
 
-  db.update(contributions)
+  await db.update(contributions)
     .set({ status: 'disputed' })
     .where(eq(contributions.id, contribution.id))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId,
     roundId,
     type: 'contribution_rejected',
@@ -244,7 +199,7 @@ export function rejeterDeclaration(
     payload: { contributionId: contribution.id, declarationId, reason: motif.trim() },
   })
 
-  notifierMembre(db, membershipId, tontineId, {
+  await notifierMembre(db, membershipId, tontineId, {
     type: 'cotisation_rejetee',
     title: 'Ta déclaration a été rejetée',
     body: 'Le trésorier n’a pas retrouvé ton envoi. Ouvre l’application pour voir le motif.',
@@ -264,13 +219,13 @@ export function rejeterDeclaration(
  * Ses propres déclarations sont ignorées silencieusement plutôt que de faire
  * échouer tout le lot : elles resteront dans la file pour quelqu'un d'autre.
  */
-export function confirmerEnLot(db: Db, declarationIds: string[], decideurId: string) {
+export async function confirmerEnLot(db: Db, declarationIds: string[], decideurId: string) {
   const confirmees: string[] = []
   const ignorees: Array<{ id: string, raison: string }> = []
 
   for (const id of declarationIds) {
     try {
-      const resultat = confirmerDeclaration(db, id, decideurId)
+      const resultat = await confirmerDeclaration(db, id, decideurId)
       if (resultat.dejaDecidee) ignorees.push({ id, raison: 'deja_decidee' })
       else confirmees.push(id)
     }
@@ -285,23 +240,22 @@ export function confirmerEnLot(db: Db, declarationIds: string[], decideurId: str
   return { confirmees: confirmees.length, ignorees }
 }
 
-function notifierMembre(
+async function notifierMembre(
   db: Db,
   membershipId: string,
   tontineId: string,
   message: { type: string, title: string, body: string, url: string },
   saufUserId?: string,
 ) {
-  const [membre] = db
+  const [membre] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(eq(memberships.id, membershipId))
     .limit(1)
-    .all()
 
   // Un membre géré n'a pas de compte : rien à notifier ici. Il sera joint par
   // SMS, hors périmètre MVP.
-  if (membre?.userId && membre.userId !== saufUserId) notifier(db, membre.userId, { ...message, tontineId })
+  if (membre?.userId && membre.userId !== saufUserId) await notifier(db, membre.userId, { ...message, tontineId })
 }
 
 /**
@@ -316,25 +270,23 @@ function notifierMembre(
  * L'acteur est le président ou le censeur, comme le veut §2.4 : rouvrir, c'est
  * constater que la contestation est résolue.
  */
-export function rouvrirCotisation(db: Db, contributionId: string, acteurId: string) {
-  const [ligne] = db
+export async function rouvrirCotisation(db: Db, contributionId: string, acteurId: string) {
+  const [ligne] = await db
     .select({ contribution: contributions, tontineId: rounds.tontineId, roundId: rounds.id })
     .from(contributions)
     .innerJoin(rounds, eq(rounds.id, contributions.roundId))
     .where(eq(contributions.id, contributionId))
     .limit(1)
-    .all()
 
   if (!ligne) throw apiError('NOT_FOUND', 'Cotisation introuvable.')
 
   assertTransition('contribution', ligne.contribution.status, 'due')
 
-  db.update(contributions)
+  await db.update(contributions)
     .set({ status: 'due' })
     .where(eq(contributions.id, contributionId))
-    .run()
 
-  appendLedger(db, {
+  await appendLedger(db, {
     tontineId: ligne.tontineId,
     roundId: ligne.roundId,
     type: 'settings_changed',
@@ -342,7 +294,7 @@ export function rouvrirCotisation(db: Db, contributionId: string, acteurId: stri
     payload: { changement: 'cotisation_rouverte', contributionId },
   })
 
-  notifierMembre(db, ligne.contribution.membershipId, ligne.tontineId, {
+  await notifierMembre(db, ligne.contribution.membershipId, ligne.tontineId, {
     type: 'cotisation_rouverte',
     title: 'Tu peux renvoyer ta cotisation',
     body: 'Le bureau a rouvert ta cotisation. Tu peux déclarer à nouveau.',

@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
   const { tontineId, ...champs } = parsed.data
   const db = useDb()
 
-  const [existant] = db
+  const [existant] = await db
     .select()
     .from(notificationPreferences)
     .where(and(
@@ -39,17 +39,15 @@ export default defineEventHandler(async (event) => {
         : eq(notificationPreferences.tontineId, tontineId),
     ))
     .limit(1)
-    .all()
 
   if (existant) {
-    db.update(notificationPreferences)
+    await db.update(notificationPreferences)
       .set(champs)
       .where(eq(notificationPreferences.id, existant.id))
-      .run()
     return { ok: true, id: existant.id }
   }
 
   const id = randomUUID()
-  db.insert(notificationPreferences).values({ id, userId: user.id, tontineId, ...champs }).run()
+  await db.insert(notificationPreferences).values({ id, userId: user.id, tontineId, ...champs })
   return { ok: true, id }
 })

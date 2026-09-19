@@ -72,10 +72,9 @@ async function deposerUnDossierEnAttente(page: Page, nom: { prenom: string, nom:
   })
 
   const e164 = `+225${numero}`
-  useDb().update(users)
+  await useDb().update(users)
     .set({ kycStatus: 'pending_review', kycLevel: 1 })
     .where(eq(users.phone, e164))
-    .run()
 
   return e164
 }
@@ -110,7 +109,7 @@ test.describe('parcours de connexion', () => {
 })
 
 test('l’administrateur examine un dossier et l’approuve', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUnDossierEnAttente(membre, { prenom: 'Aya', nom: 'Koné' })
 
@@ -152,7 +151,7 @@ test('l’administrateur examine un dossier et l’approuve', async ({ page, bro
 })
 
 test('un rejet exige un motif, et le motif reste visible', async ({ page, browser }) => {
-  const contexteMembre = await browser.newContext()
+  const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()
   const numero = await deposerUnDossierEnAttente(membre, { prenom: 'Koffi', nom: 'N’Guessan' })
 

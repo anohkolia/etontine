@@ -20,6 +20,10 @@ const props = defineProps<{
 }>()
 
 const presentation = computed(() => statusPresentation(props.kind, props.status))
+
+// Le mot passe par le fichier de langue ; la table reste le repli.
+const { statut } = useLibelle()
+const mot = computed(() => statut(props.kind, props.status, presentation.value.label))
 </script>
 
 <template>
@@ -42,6 +46,6 @@ const presentation = computed(() => statusPresentation(props.kind, props.status)
       aria-hidden="true"
       data-testid="status-badge-icon"
     />
-    <span data-testid="status-badge-label">{{ presentation.label }}</span>
+    <span data-testid="status-badge-label">{{ mot }}</span>
   </span>
 </template>

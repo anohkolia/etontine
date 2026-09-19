@@ -3,11 +3,16 @@ import { waitForHydration } from './hydration'
 import { numeroDeTest } from './telephone'
 import { remplirCode } from './otp'
 
-/** Ouvre une session neuve par OTP et attend d'être dans l'application. */
-export async function seConnecter(page: Page): Promise<void> {
+/**
+ * Ouvre une session par OTP et attend d'être dans l'application.
+ *
+ * Le numéro se choisit quand il doit correspondre à quelqu'un — le membre géré
+ * que le président a inscrit, et qui vient rejoindre avec son propre compte.
+ */
+export async function seConnecter(page: Page, numero = numeroDeTest()): Promise<void> {
   await page.goto('/login')
   await waitForHydration(page)
-  await page.getByTestId('champ-telephone').fill(numeroDeTest())
+  await page.getByTestId('champ-telephone').fill(numero)
   await page.getByTestId('bouton-recevoir-code').click()
 
   // En développement, le code est affiché plutôt qu'envoyé par SMS.

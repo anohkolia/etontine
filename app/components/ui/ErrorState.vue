@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n()
+
 /**
  * L'état d'erreur des cinq états obligatoires (règle 14).
  *
@@ -8,15 +10,16 @@
  *
  * Aucun montant n'apparaît dans un message d'erreur.
  */
-withDefaults(defineProps<{
+// Les textes par défaut viennent du fichier de langue : ils se calculent ici,
+// pas dans `defineProps`, que le compilateur hisse hors de `setup()`.
+const props = defineProps<{
   title?: string
   description?: string
   /** Détail technique, replié : utile au support, jamais imposé au membre. */
   detail?: string
-}>(), {
-  title: 'Quelque chose n’a pas fonctionné',
-  description: 'Réessaie dans un instant. Si cela se reproduit, préviens le bureau de ta tontine.',
-})
+}>()
+const title = computed(() => props.title ?? t('ui.ErrorState.quelque_chose_n_a'))
+const description = computed(() => props.description ?? t('ui.ErrorState.reessaie_dans_un_instant'))
 
 const emit = defineEmits<{ retry: [] }>()
 </script>
@@ -45,7 +48,7 @@ const emit = defineEmits<{ retry: [] }>()
       class="w-full max-w-sm text-left"
     >
       <summary class="cursor-pointer text-xs text-disputed-ink underline underline-offset-4">
-        Détail technique
+        {{ $t('ui.ErrorState.detail_technique') }}
       </summary>
       <p class="mt-1 font-mono text-xs break-words text-disputed-ink">
         {{ detail }}
@@ -63,7 +66,7 @@ const emit = defineEmits<{ retry: [] }>()
         size="1rem"
         aria-hidden="true"
       />
-      Réessayer
+      {{ $t('ui.ErrorState.reessayer') }}
     </button>
   </div>
 </template>

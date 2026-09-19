@@ -15,5 +15,5 @@ export default defineEventHandler(async (event) => {
   const parsed = otpRequestInput.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return requestOtp(useDb(), parsed.data.phone, 'sms')
+  return await requestOtp(useDb(), parsed.data.phone, 'sms')
 })

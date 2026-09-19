@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n()
+
 /**
  * La barre d'onglets basse.
  *
@@ -22,10 +24,10 @@
  * Le chemin vers l'abonnement part du profil, où l'on va pour ce genre de chose.
  */
 const onglets = [
-  { to: '/app', label: 'Accueil', icon: 'lucide:layout-dashboard' },
-  { to: '/app/tontine/create', label: 'Créer', icon: 'lucide:circle-plus' },
-  { to: '/aide', label: 'Aide', icon: 'lucide:life-buoy' },
-  { to: '/app/profil', label: 'Profil', icon: 'lucide:circle-user-round' },
+  { to: '/app', label: t('ui.BarreOnglets.accueil'), icon: 'lucide:layout-dashboard' },
+  { to: '/app/tontine/create', label: t('ui.BarreOnglets.creer'), icon: 'lucide:circle-plus' },
+  { to: '/aide', label: t('ui.BarreOnglets.aide'), icon: 'lucide:life-buoy' },
+  { to: '/app/profil', label: t('ui.BarreOnglets.profil'), icon: 'lucide:circle-user-round' },
 ] as const
 
 const route = useRoute()
@@ -39,7 +41,7 @@ function actif(to: string): boolean {
 <template>
   <nav
     class="fixed bottom-0 left-1/2 z-30 w-full max-w-2xl -translate-x-1/2 border-t border-line bg-surface/95 px-2 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur"
-    aria-label="Navigation principale"
+    :aria-label="$t('ui.BarreOnglets.navigation_principale')"
     data-testid="barre-onglets"
   >
     <ul class="grid grid-cols-4">
