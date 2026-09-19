@@ -400,7 +400,12 @@ useHead({ title: t('accueil.mes_tontines_etontine') })
                 {{ $t('accueil.prend_la_main') }} <span class="font-medium text-ink">{{ tontine.beneficiaryName }}</span>
               </p>
 
-              <div class="flex items-center justify-between gap-3 rounded-control bg-surface-muted p-3">
+              <!-- Le président ne cotise pas : « ce que je dois : 0 » se lirait
+                   comme une cotisation soldée, alors qu'il n'en a aucune. -->
+              <div
+                v-if="tontine.myRole !== 'president'"
+                class="flex items-center justify-between gap-3 rounded-control bg-surface-muted p-3"
+              >
                 <span class="flex flex-col">
                   <span class="text-xs tracking-wide text-ink-muted uppercase">{{ $t('accueil.ce_que_je_dois') }}</span>
                   <AmountDisplay

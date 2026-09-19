@@ -21,6 +21,7 @@ let tour1: string
 
 const PRESIDENT = 'a2000000-0000-4000-8000-000000000001'
 const TRESORIER = 'a2000000-0000-4000-8000-000000000002'
+const MEMBRE = 'a2000000-0000-4000-8000-000000000003'
 
 beforeEach(async () => {
   const ctx = await createTestDb()
@@ -29,11 +30,15 @@ beforeEach(async () => {
 
   await createTestUser(db, PRESIDENT, '+2250707001111')
   await createTestUser(db, TRESORIER, '+2250707002222')
+  await createTestUser(db, MEMBRE, '+2250707004444')
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, {
     shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15', locality: 'Abobo',
   })
+  // Trois cotisants — le président ne cotise pas. Yao, premier inscrit,
+  // prend la main au tour 1.
+  await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707004444', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707002222', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707003333', shares: 1 })
 
@@ -43,21 +48,23 @@ beforeEach(async () => {
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)
 
-  const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi N’Guessan')!
-  await db.update(memberships).set({ userId: TRESORIER, role: 'treasurer' }).where(eq(memberships.id, gere.id))
+  const koffi = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi N’Guessan')!
+  await db.update(memberships).set({ userId: TRESORIER, role: 'treasurer' }).where(eq(memberships.id, koffi.id))
+  const yao = (await db.select().from(memberships)).find(m => m.managedName === 'Yao Brou')!
+  await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, yao.id))
 
   tour1 = (await db.select().from(rounds)).find(r => r.index === 1)!.id
 })
 
 afterEach(() => cleanup())
 
+/** Yao déclare la sienne ; le trésorier déclare la sienne et celle de Fatou ; le président confirme tout. */
 async function confirmerTout() {
+  const msYao = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!.id
   for (const c of (await db.select().from(contributions)).filter(x => x.roundId === tour1)) {
-    const msPresident = (await db.select().from(memberships)).find(m => m.userId === PRESIDENT)!.id
-    const declarant = c.membershipId === msPresident ? PRESIDENT : TRESORIER
-    const decideur = declarant === PRESIDENT ? TRESORIER : PRESIDENT
+    const declarant = c.membershipId === msYao ? MEMBRE : TRESORIER
     const { declarationId } = await declarerPaiement(db, c.id, declarant, { amount: 25_000, channel: 'wave' })
-    await confirmerDeclaration(db, declarationId, decideur)
+    await confirmerDeclaration(db, declarationId, PRESIDENT)
   }
 }
 
@@ -73,9 +80,9 @@ describe('procès-verbal PDF — acceptation T20', () => {
   it('contient les cotisations du tour, le versement et un emplacement de signature', async () => {
     await confirmerTout()
     await db.update(tontines).set({ counterValidationThreshold: 500_000 }).where(eq(tontines.id, T))
-    await preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: '1111', acceptIncompletePot: false })
+    await preparerVersement(db, tour1, TRESORIER, { beneficiaryPhoneLast4: '4444', acceptIncompletePot: false })
     await declarerVersement(db, tour1, TRESORIER, { channel: 'wave' })
-    await accuserReception(db, tour1, PRESIDENT, 75_000)
+    await accuserReception(db, tour1, MEMBRE, 75_000)
 
     // Un PDF est compressé, donc invérifiable par lecture directe : c'est la
     // structure du document qui porte le contrat de contenu.

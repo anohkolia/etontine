@@ -30,11 +30,8 @@ beforeEach(async () => {
   await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
   const fatou = await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
 
-  // Fatou a un compte et la casquette de trésorière, et c'est **porteur** :
-  // sans un second membre de bureau, la déclaration du président serait
-  // confirmée d'office faute de valideur possible. Ce fichier teste le cas
-  // courant, celui d'un bureau qui a du monde ; le bureau d'une seule personne
-  // a ses propres tests dans `confirmations.spec.ts`.
+  // Fatou a un compte et la casquette de trésorière : c'est elle qui déclare
+  // ici, et le président — qui ne cotise pas — qui confirme.
   await createTestUser(db, TRESORIER, '+2250707000003')
   await db.update(memberships)
     .set({ userId: TRESORIER, role: 'treasurer' })
@@ -46,7 +43,8 @@ beforeEach(async () => {
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)
 
-  maCotisation = (await db.select().from(contributions))[0]!.id
+  // La cotisation de Fatou sur le tour ouvert : c'est elle qui déclare.
+  maCotisation = (await db.select().from(contributions)).find(c => c.membershipId === fatou)!.id
 })
 
 afterEach(() => {
@@ -59,7 +57,7 @@ const ENVOI = { amount: 25_000, channel: 'wave' as const, providerRef: 'TX-1' }
 describe('déclaration de paiement', () => {
   it('passe la cotisation à « déclaré », jamais à « confirmé »', async () => {
     // T15 : déclarer n'est pas encaisser. Le vert dirait le contraire.
-    const resultat = await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    const resultat = await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
 
     expect(resultat.contributionStatus).toBe('declared')
 
@@ -69,7 +67,7 @@ describe('déclaration de paiement', () => {
   })
 
   it('inscrit la déclaration au registre', async () => {
-    await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
 
     const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'contribution_declared'))
     expect(ecritures).toHaveLength(1)
@@ -79,7 +77,7 @@ describe('déclaration de paiement', () => {
   it('refuse de déclarer une cotisation déjà confirmée', async () => {
     await db.update(contributions).set({ status: 'confirmed' }).where(eq(contributions.id, maCotisation))
 
-    await expect(declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)).rejects.toThrow(
+    await expect(declarerPaiement(db, maCotisation, TRESORIER, ENVOI)).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
@@ -87,11 +85,11 @@ describe('déclaration de paiement', () => {
 
 describe('garde-fou anti-double-déclaration — acceptation T15', () => {
   it('reconnaît un second envoi identique dans la fenêtre', async () => {
-    const premier = await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    const premier = await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
 
     // Le membre impatient retape sur le bouton parce que rien ne s'affiche.
     await db.update(contributions).set({ status: 'due' }).where(eq(contributions.id, maCotisation))
-    const second = await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    const second = await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
 
     expect(second.doublonEvite).toBe(true)
     expect(second.declarationId).toBe(premier.declarationId)
@@ -101,23 +99,23 @@ describe('garde-fou anti-double-déclaration — acceptation T15', () => {
   it('laisse passer un second envoi une fois la fenêtre écoulée', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-15T10:00:00Z'))
-    await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
 
     // Un paiement partiel légitime dépasse largement 90 secondes.
     vi.setSystemTime(new Date(Date.now() + (FENETRE_DOUBLON_SECONDES + 10) * 1000))
     await db.update(contributions).set({ status: 'due' }).where(eq(contributions.id, maCotisation))
 
-    const second = await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    const second = await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
     expect(second.doublonEvite).toBe(false)
     expect(await db.select().from(paymentDeclarations)).toHaveLength(2)
   })
 
   it('ne confond pas deux montants différents', async () => {
-    await declarerPaiement(db, maCotisation, PRESIDENT, ENVOI)
+    await declarerPaiement(db, maCotisation, TRESORIER, ENVOI)
     await db.update(contributions).set({ status: 'due' }).where(eq(contributions.id, maCotisation))
 
     // Un paiement partiel n'est pas un doublon.
-    const second = await declarerPaiement(db, maCotisation, PRESIDENT, { ...ENVOI, amount: 10_000 })
+    const second = await declarerPaiement(db, maCotisation, TRESORIER, { ...ENVOI, amount: 10_000 })
     expect(second.doublonEvite).toBe(false)
   })
 })

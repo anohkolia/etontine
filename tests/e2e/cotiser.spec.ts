@@ -1,43 +1,16 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
-import { numeroDeTest } from './helpers/telephone'
+import { tontineLanceeAvecCotisant } from './helpers/tontine'
 import { pngLourd } from './helpers/image'
 
-/** Monte une tontine lancée, et renvoie son identifiant. */
-async function tontineLancee(page: import('@playwright/test').Page) {
-  await seConnecter(page)
-  await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+/**
+ * L'écran « cotiser » est celui d'un membre : le président ne cotise pas.
+ * Chaque test pilote la page de Koffi, sur une tontine lancée par un
+ * président dans un contexte à part.
+ */
 
-  const creation = await page.request.post('/api/v1/tontines', {
-    data: { name: 'Tontine des tantines', access: 'private' },
-  })
-  const { id } = await creation.json() as { id: string }
-
-  await page.request.fetch(`/api/v1/tontines/${id}`, {
-    method: 'PATCH',
-    data: {
-      shareAmount: 25_000,
-      frequency: 'monthly',
-      startDate: new Date().toISOString().slice(0, 10),
-      collectionChannelIds: [canal],
-    },
-  })
-
-  for (const nom of ['Koffi N’Guessan', 'Fatou Diarra']) {
-    await page.request.post(`/api/v1/tontines/${id}/members`, {
-      data: { name: nom, phone: `+225${numeroDeTest()}`, shares: 1 },
-    })
-  }
-
-  await page.request.post(`/api/v1/tontines/${id}/publish`)
-  await page.request.post(`/api/v1/tontines/${id}/start`)
-  return id
-}
-
-test('l’écran « où envoyer » montre toujours le nom du titulaire', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('l’écran « où envoyer » montre toujours le nom du titulaire', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
 
@@ -51,8 +24,8 @@ test('l’écran « où envoyer » montre toujours le nom du titulaire', async (
   await expect(page.getByTestId('reference-courte')).toContainText(/^TON-[A-Z0-9]{4}$/)
 })
 
-test('le bouton Copier fonctionne sans contexte sécurisé', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('le bouton Copier fonctionne sans contexte sécurisé', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -67,8 +40,8 @@ test('le bouton Copier fonctionne sans contexte sécurisé', async ({ page }) =>
   await expect(page.getByTestId('bouton-copier-numero')).toContainText('copié')
 })
 
-test('l’écran de paiement n’affiche aucun frais', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('l’écran de paiement n’affiche aucun frais', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -83,8 +56,8 @@ test('l’écran de paiement n’affiche aucun frais', async ({ page }) => {
   expect(ecran).not.toMatch(/frais/i)
 })
 
-test('une image de 4 Mo est compressée sous 100 Ko avant l’envoi', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('une image de 4 Mo est compressée sous 100 Ko avant l’envoi', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -109,26 +82,25 @@ test('une image de 4 Mo est compressée sous 100 Ko avant l’envoi', async ({ p
   expect(ko).toBeLessThan(100)
 })
 
-test('déclarer verrouille 90 secondes, et le bureau seul confirme d’office', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('déclarer verrouille 90 secondes, et rien ne se confirme tout seul', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
   await page.getByTestId('bouton-jai-envoye').click()
   await page.getByTestId('bouton-declarer').click()
 
-  // Ici le président est seul au bureau : personne d'autre ne peut vérifier sa
-  // déclaration, le serveur la confirme donc dans la foulée et l'écran le dit
-  // (data-model §2.4). Le cas à deux — bleu « Déclaré » en attente du
-  // trésorier — est tenu par le parcours 3 de `parcours-critiques.spec.ts`.
-  await expect(page.getByTestId('message-declaration')).toContainText('confirmée d’office')
+  // Le président — qui ne cotise pas — confirmera : la déclaration attend, et
+  // l'écran le dit. Rien n'est jamais confirmé « d'office ».
+  await expect(page.getByTestId('message-declaration')).toContainText('trésorier')
 
   // Acceptation T15 : le bouton reste inactif 90 secondes après un envoi.
   const bouton = page.getByTestId('bouton-declarer')
   await expect(bouton).toBeDisabled()
   await expect(bouton).toContainText('Déjà déclaré')
 
-  const badge = page.getByTestId('status-badge').filter({ hasText: 'Confirmé' }).first()
+  // Bleu « Déclaré », jamais le vert du confirmé.
+  const badge = page.getByTestId('status-badge').filter({ hasText: 'Déclaré' }).first()
   await expect(badge).toBeVisible()
 
   const fond = await badge.evaluate(el => getComputedStyle(el).backgroundColor)
@@ -140,11 +112,11 @@ test('déclarer verrouille 90 secondes, et le bureau seul confirme d’office', 
     sonde.remove()
     return couleur
   })
-  expect(fond).toBe(confirme)
+  expect(fond).not.toBe(confirme)
 })
 
-test('une seconde déclaration donne un message explicite, jamais un doublon', async ({ page }) => {
-  const id = await tontineLancee(page)
+test('une seconde déclaration donne un message explicite, jamais un doublon', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -152,9 +124,10 @@ test('une seconde déclaration donne un message explicite, jamais un doublon', a
   await page.getByTestId('bouton-declarer').click()
   await expect(page.getByTestId('message-declaration')).toBeVisible()
 
-  // On revient sur la cotisation : elle est déjà soldée, et l'écran le dit.
+  // On revient sur la cotisation : elle est déjà déclarée, et l'écran le dit
+  // sans proposer d'envoyer une seconde fois.
   await page.reload()
   await waitForHydration(page)
-  await expect(page.getByTestId('liste-cotisations')).toContainText('Confirmé')
+  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
   await expect(page.locator('[data-testid^="bouton-envoyer-"]')).toHaveCount(0)
 })

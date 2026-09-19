@@ -17,6 +17,7 @@ let T: string
 
 const PRESIDENT = 'c2000000-0000-4000-8000-000000000001'
 const MEMBRE = 'c2000000-0000-4000-8000-000000000002'
+const AUTRE = 'c2000000-0000-4000-8000-000000000003'
 
 /** Échéance du tour 1 : 15 janvier 2026. */
 const ECHEANCE = '2026-01-15'
@@ -29,12 +30,16 @@ beforeEach(async () => {
 
   await createTestUser(db, PRESIDENT, '+2250707001111')
   await createTestUser(db, MEMBRE, '+2250707002222')
+  await createTestUser(db, AUTRE, '+2250707004444')
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: ECHEANCE })
-  // Yao a deux parts : on vérifiera qu'il n'est relancé qu'une fois.
+  // Le président ne cotise pas, il n'est donc jamais relancé. Koffi a deux
+  // parts : on vérifiera qu'il n'est relancé qu'une fois. Yao a un compte,
+  // Fatou n'en a pas.
   await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 2 })
   await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Yao', phone: '+2250707004444', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
   await marquerVerifie(db, canal)
@@ -42,8 +47,10 @@ beforeEach(async () => {
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)
 
-  const gere = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi')!
-  await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, gere.id))
+  const koffi = (await db.select().from(memberships)).find(m => m.managedName === 'Koffi')!
+  await db.update(memberships).set({ userId: MEMBRE }).where(eq(memberships.id, koffi.id))
+  const yao = (await db.select().from(memberships)).find(m => m.managedName === 'Yao')!
+  await db.update(memberships).set({ userId: AUTRE }).where(eq(memberships.id, yao.id))
 })
 
 afterEach(() => cleanup())
@@ -102,7 +109,7 @@ describe('rappels de cotisation', () => {
     const envoyes = await envoyerRappels(db, A('2026-01-15'))
     const destinataires = new Set(envoyes.map(e => e.userId))
 
-    expect(destinataires).toEqual(new Set([PRESIDENT, MEMBRE]))
+    expect(destinataires).toEqual(new Set([MEMBRE, AUTRE]))
     // Mais elle figure bien dans les relances WhatsApp.
     expect((await relancesWhatsApp(db, T)).map(r => r.nom)).toContain('Fatou')
   })
@@ -128,7 +135,7 @@ describe('rappels de cotisation', () => {
     expect(laNuit.some(e => e.userId === MEMBRE)).toBe(false)
 
     // Et les autres membres, eux, sont bien relancés.
-    expect(laNuit.some(e => e.userId === PRESIDENT)).toBe(true)
+    expect(laNuit.some(e => e.userId === AUTRE)).toBe(true)
   })
 
   it('respecte le refus des rappels', async () => {
@@ -162,7 +169,7 @@ describe('relances WhatsApp — l’envoi reste manuel', () => {
   it('produit un lien wa.me pré-rempli par retardataire', async () => {
     const relances = await relancesWhatsApp(db, T)
 
-    // Trois membres, dont un à double part : trois relances, pas quatre.
+    // Trois cotisants, dont un à double part : trois relances, pas quatre.
     expect(relances).toHaveLength(3)
 
     const koffi = relances.find(r => r.nom === 'Koffi')!

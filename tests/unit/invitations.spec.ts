@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import {
   accepterInvitation, apercuInvitation, approuverAdhesion, creerInvitation, refuserAdhesion,
 } from '../../server/services/invitations.ts'
-import { ajouterMembreGere, attribuerParts } from '../../server/services/membres.ts'
+import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerBrouillon, majTontine } from '../../server/services/tontines.ts'
 import { useEngagement } from '../../app/composables/useEngagement.ts'
 import { useMoney } from '../../app/composables/useMoney.ts'
@@ -31,9 +31,6 @@ beforeEach(async () => {
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', locality: 'Abobo' })
-
-  const [ms] = await db.select().from(memberships).where(eq(memberships.tontineId, T))
-  await attribuerParts(db, T, ms!.id, 1)
 })
 
 afterEach(() => cleanup())

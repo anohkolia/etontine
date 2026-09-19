@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  confirmateursPossibles, confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration,
-  rouvrirCotisation,
+  confirmerDeclaration, confirmerEnLot, fileDAttente, rejeterDeclaration, rouvrirCotisation,
 } from '../../server/services/confirmations.ts'
 import { declarerEspeces, declarerPaiement } from '../../server/services/declarations.ts'
 import { reconnaitreVersement } from '../../server/services/escalade.ts'
@@ -10,7 +9,7 @@ import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
-import { contributions, ledgerEntries, memberships, notifications, paymentDeclarations } from '../../server/db/schema.ts'
+import { contributions, ledgerEntries, memberships, notifications, paymentDeclarations, rounds } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -21,15 +20,15 @@ let T: string
 const PRESIDENT = 'c1000000-0000-4000-8000-000000000001'
 const TRESORIER = 'c1000000-0000-4000-8000-000000000002'
 const MEMBRE = 'c1000000-0000-4000-8000-000000000003'
+const YAO = 'c1000000-0000-4000-8000-000000000004'
 
 /**
  * Rattache un membre géré à un compte, pour qu'il puisse déclarer et être
  * notifié — et lui pose sa casquette.
  *
- * Le rôle n'est pas décoratif ici : `confirmerDeclaration` s'en sert pour
- * savoir s'il existe un second valideur possible. Un « trésorier » resté
- * `member` laisserait le bureau à une seule personne, et les déclarations du
- * président seraient confirmées d'office au lieu d'attendre en file.
+ * Le rôle n'est pas décoratif : c'est lui qui dit qui peut confirmer. Un
+ * « trésorier » resté `member` ne confirmerait rien, et tout reposerait sur
+ * le président.
  */
 async function rattacher(nom: string, userId: string, role: 'treasurer' | 'member' = 'member') {
   const [gere] = (await db.select().from(memberships)).filter(m => m.managedName === nom)
@@ -37,8 +36,18 @@ async function rattacher(nom: string, userId: string, role: 'treasurer' | 'membe
   return gere!.id
 }
 
+/**
+ * La cotisation du membre sur le tour ouvert.
+ *
+ * Toujours ce tour-là, et pas « la première trouvée » : l'ordre des lignes
+ * n'est pas garanti, et après une mise à jour Postgres rend volontiers la
+ * cotisation du tour 2 en premier — le test lisait alors un « à cotiser » là
+ * où il venait de confirmer.
+ */
 async function cotisationDe(membershipId: string) {
-  return (await db.select().from(contributions)).find(c => c.membershipId === membershipId)!
+  const ouvert = (await db.select().from(rounds)).find(r => r.status === 'collecting')!
+  return (await db.select().from(contributions))
+    .find(c => c.membershipId === membershipId && c.roundId === ouvert.id)!
 }
 
 beforeEach(async () => {
@@ -49,12 +58,15 @@ beforeEach(async () => {
   await createTestUser(db, PRESIDENT, '+2250707000001')
   await createTestUser(db, TRESORIER, '+2250707000002')
   await createTestUser(db, MEMBRE, '+2250707000003')
+  await createTestUser(db, YAO, '+2250707000004')
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
+  // Le président ne cotise pas : trois cotisants, tous avec un compte.
   await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Yao', phone: '+2250707000004', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
   await marquerVerifie(db, canal)
@@ -64,6 +76,7 @@ beforeEach(async () => {
 
   await rattacher('Koffi', TRESORIER, 'treasurer')
   await rattacher('Fatou', MEMBRE)
+  await rattacher('Yao', YAO)
 })
 
 afterEach(() => cleanup())
@@ -187,11 +200,11 @@ describe('rejet — le motif est obligatoire', () => {
 describe('« tout confirmer » — idempotence (acceptation T16)', () => {
   async function deuxDeclarations() {
     const gereMembre = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!
-    const gerePresident = (await db.select().from(memberships)).find(m => m.userId === PRESIDENT)!
+    const gereYao = (await db.select().from(memberships)).find(m => m.userId === YAO)!
 
     return [
       (await declarerPaiement(db, (await cotisationDe(gereMembre.id)).id, MEMBRE, ENVOI)).declarationId,
-      (await declarerPaiement(db, (await cotisationDe(gerePresident.id)).id, PRESIDENT, ENVOI)).declarationId,
+      (await declarerPaiement(db, (await cotisationDe(gereYao.id)).id, YAO, ENVOI)).declarationId,
     ]
   }
 
@@ -237,89 +250,62 @@ describe('file d’attente', () => {
   })
 })
 
-describe('bureau d’une seule personne — repli sur la règle de séparation §2.4', () => {
+describe('le président ne cotise pas — la règle de séparation n’a plus de repli', () => {
   /** Retire au trésorier sa casquette : le président reste seul au bureau. */
   async function bureauSeul() {
     await db.update(memberships).set({ role: 'member' }).where(eq(memberships.userId, TRESORIER))
   }
 
-  async function maCotisation() {
+  it('n’a aucune cotisation : il préside, il ne cotise pas', async () => {
     const sienne = (await db.select().from(memberships)).find(m => m.userId === PRESIDENT)!
-    return (await cotisationDe(sienne.id)).id
-  }
-
-  it('ne voit aucun valideur possible quand le président est seul au bureau', async () => {
-    await bureauSeul()
-    expect(await confirmateursPossibles(db, T, PRESIDENT)).toHaveLength(0)
+    expect((await db.select().from(contributions)).filter(c => c.membershipId === sienne.id)).toHaveLength(0)
   })
 
-  it('confirme d’office la cotisation du président, faute de tiers', async () => {
-    await bureauSeul()
-    const resultat = await declarerPaiement(db, await maCotisation(), PRESIDENT, ENVOI)
-
-    // Sans ce repli, sa cotisation resterait « déclarée » à chaque tour : il
-    // serait en retard chez lui-même, et le pot toujours incomplet.
-    expect(resultat.autoConfirmee).toBe(true)
-    expect(resultat.contributionStatus).toBe('confirmed')
-
-    const [c] = await db.select().from(contributions).where(eq(contributions.id, await maCotisation()))
-    expect(c!.status).toBe('confirmed')
-    expect(c!.confirmedAmount).toBe(25_000)
-  })
-
-  it('inscrit au registre que personne ne l’a vérifiée', async () => {
-    await bureauSeul()
-    await declarerPaiement(db, await maCotisation(), PRESIDENT, ENVOI)
-
-    const [ecriture] = (await db.select().from(ledgerEntries))
-      .filter(e => e.type === 'contribution_confirmed')
-    const payload = ecriture!.payload as { autoConfirmee?: boolean, motif?: string }
-
-    // Le groupe doit pouvoir distinguer au registre une cotisation validée par
-    // un tiers d'une cotisation que son auteur a validée faute de tiers.
-    expect(payload.autoConfirmee).toBe(true)
-    expect(payload.motif).toBe('aucun_second_valideur')
-  })
-
-  it('ne s’annonce pas à soi-même que le trésorier a confirmé', async () => {
-    await bureauSeul()
-    await declarerPaiement(db, await maCotisation(), PRESIDENT, ENVOI)
-
-    const siennes = (await db.select().from(notifications))
-      .filter(n => n.userId === PRESIDENT && n.type === 'cotisation_confirmee')
-    expect(siennes).toHaveLength(0)
-  })
-
-  it('ne confirme pas d’office la déclaration d’un membre : le président peut la voir', async () => {
+  it('confirme seul les cotisations des membres quand le bureau tient en une personne', async () => {
     await bureauSeul()
     const sienne = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!
     const resultat = await declarerPaiement(db, (await cotisationDe(sienne.id)).id, MEMBRE, ENVOI)
 
-    // Le repli ne vaut que pour celui qui n'a personne au-dessus de lui. La
-    // cotisation d'un membre a un valideur — le président — et l'attend.
-    expect(resultat.autoConfirmee).toBe(false)
+    // Rien n'est confirmé d'office : la déclaration attend en file, et le
+    // président — qui n'est jamais le déclarant — la voit.
     expect(resultat.contributionStatus).toBe('declared')
     expect(await fileDAttente(db, T)).toHaveLength(1)
+
+    await confirmerDeclaration(db, resultat.declarationId, PRESIDENT)
+    const [c] = await db.select().from(contributions).where(eq(contributions.id, (await cotisationDe(sienne.id)).id))
+    expect(c!.status).toBe('confirmed')
   })
 
-  it('reprend la règle de séparation dès qu’un second membre de bureau existe', async () => {
-    // Bureau garni : le président ne peut plus valider sa propre déclaration.
-    const { declarationId } = await declarerPaiement(db, await maCotisation(), PRESIDENT, ENVOI)
+  it('refuse à quiconque de confirmer sa propre déclaration, même seul au bureau', async () => {
+    await bureauSeul()
+    const sienne = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!
+    const { declarationId } = await declarerPaiement(db, (await cotisationDe(sienne.id)).id, MEMBRE, ENVOI)
 
+    // Il n'existe plus de « confirmée d'office » : la règle ne cède jamais.
+    await expect(confirmerDeclaration(db, declarationId, MEMBRE)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+  })
+
+  it('fait attendre un trésorier aux espèces enregistrées par un président seul', async () => {
+    await bureauSeul()
+    const sienne = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!
+    const { declarationId } = await declarerEspeces(db, (await cotisationDe(sienne.id)).id, PRESIDENT, { amount: 25_000 })
+
+    // C'est le prix de la règle : ce qu'il a enregistré lui-même, il ne le
+    // valide pas. Une seconde paire d'yeux se nomme, elle ne se contourne pas.
     await expect(confirmerDeclaration(db, declarationId, PRESIDENT)).rejects.toThrow(
       expect.objectContaining({ statusCode: 403 }),
     )
   })
 
-  it('ne marque rien au registre quand la confirmation vient bien d’un tiers', async () => {
-    const { declarationId } = await declarerPaiement(db, await maCotisation(), PRESIDENT, ENVOI)
+  it('n’écrit plus jamais de confirmation « d’office » au registre', async () => {
+    const sienne = (await db.select().from(memberships)).find(m => m.userId === MEMBRE)!
+    const { declarationId } = await declarerPaiement(db, (await cotisationDe(sienne.id)).id, MEMBRE, ENVOI)
     await confirmerDeclaration(db, declarationId, TRESORIER)
 
     const [ecriture] = (await db.select().from(ledgerEntries))
       .filter(e => e.type === 'contribution_confirmed')
-
-    // Le cas courant garde exactement le payload qu'il avait : le marqueur
-    // n'apparaît que là où il veut dire quelque chose.
     expect(ecriture!.payload).not.toHaveProperty('autoConfirmee')
   })
 })

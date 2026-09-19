@@ -7,7 +7,6 @@ import {
 import type { PaymentChannel } from '../../shared/schemas/index.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
-import { confirmateursPossibles, confirmerDeclaration } from './confirmations.ts'
 import { appendLedger } from './ledger.ts'
 import { notifierTontine } from './notifications.ts'
 
@@ -34,20 +33,13 @@ export interface DeclarationInput {
 export interface ResultatDeclaration {
   declarationId: string
   /**
-   * L'état réel de la cotisation après coup. Vaut `declared` dans le cas
-   * courant ; `confirmed` ou `due` quand la déclaration a été confirmée
-   * d'office faute de second valideur — voir `autoConfirmee`.
+   * L'état réel de la cotisation après coup. Vaut `declared` pour une
+   * déclaration nouvelle ; sur un doublon reconnu, c'est l'état courant — la
+   * première déclaration a pu être confirmée entre-temps.
    */
   contributionStatus: 'declared' | 'confirmed' | 'due'
   /** Vrai si l'on a reconnu un doublon récent au lieu d'en créer un second. */
   doublonEvite: boolean
-  /**
-   * Vrai quand la déclaration a été confirmée dans la foulée parce que le
-   * bureau n'a qu'un membre : personne d'autre ne pouvait le faire. L'écran
-   * s'en sert pour le dire au lieu d'annoncer une confirmation à venir qui ne
-   * viendrait jamais.
-   */
-  autoConfirmee: boolean
 }
 
 /**
@@ -91,10 +83,10 @@ export async function declarerPaiement(
   // reconnaît. Le placer après ferait répondre « passage impossible » à un
   // membre qui a simplement tapé deux fois.
   //
-  // Une déclaration déjà confirmée compte donc aussi comme doublon : sur une
-  // tontine où le bureau confirme d'office, la première n'est plus en attente
-  // au moment où la seconde arrive. Seul un rejet est exclu — après un rejet,
-  // re-déclarer est un geste légitime, pas un doublon.
+  // Une déclaration déjà confirmée compte donc aussi comme doublon : un
+  // trésorier réactif peut avoir décidé la première avant que la seconde
+  // arrive. Seul un rejet est exclu — après un rejet, re-déclarer est un
+  // geste légitime, pas un doublon.
   const depuis = new Date(Date.now() - FENETRE_DOUBLON_SECONDES * 1000)
   const [recente] = await db
     .select()
@@ -114,7 +106,6 @@ export async function declarerPaiement(
       declarationId: recente.id,
       contributionStatus: ligne.contribution.status as 'declared' | 'confirmed' | 'due',
       doublonEvite: true,
-      autoConfirmee: recente.decision === 'confirmed',
     }
   }
 
@@ -155,24 +146,7 @@ export async function declarerPaiement(
     },
   })
 
-  // Bureau d'une seule personne : nul autre ne peut confirmer cette
-  // déclaration, et la laisser en attente la bloquerait pour de bon. On
-  // enchaîne donc la confirmation, que `confirmerDeclaration` n'accorde que
-  // s'il constate lui-même l'absence de second valideur — et qui l'inscrit au
-  // registre comme telle.
-  if ((await confirmateursPossibles(db, ligne.tontineId, declarantId)).length === 0) {
-    const confirmation = await confirmerDeclaration(db, declarationId, declarantId)
-    if (confirmation.autoConfirmee) {
-      return {
-        declarationId,
-        contributionStatus: confirmation.contributionStatus as 'confirmed' | 'due',
-        doublonEvite: false,
-        autoConfirmee: true,
-      }
-    }
-  }
-
-  return { declarationId, contributionStatus: 'declared', doublonEvite: false, autoConfirmee: false }
+  return { declarationId, contributionStatus: 'declared', doublonEvite: false }
 }
 
 /**

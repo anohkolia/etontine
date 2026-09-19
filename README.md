@@ -114,6 +114,8 @@ code ni dans la configuration.
 * **Base de données** : Postgres partout, via Drizzle et `postgres-js`. En
 développement, `pnpm db:local` lance un serveur PGlite sur `127.0.0.1:5433` ;
 en production, Supabase par `DATABASE_URL` (pooler en mode transaction pour
-l'application, mode session pour `pnpm db:migrate`). Le pilote n'est importé
-que dans `server/db/index.ts`.
+l'application, mode session pour `pnpm db:migrate`). Toute base distante est
+jointe en TLS **vérifié** (`verify-full`) ; `DATABASE_CA_CERT` reçoit l'autorité
+privée de Supabase, téléchargée dans son tableau de bord. Le pilote n'est
+importé que dans `server/db/index.ts`.
 

@@ -52,6 +52,22 @@ export async function ajouterMembreGere(db: Db, tontineId: string, input: {
 export async function attribuerParts(db: Db, tontineId: string, membershipId: string, nombre: number) {
   if (nombre < 1) throw apiError('VALIDATION_ERROR', 'Un membre a au moins une part.', { field: 'shares' })
 
+  // Le président ne cotise pas : il tient le canal de collecte et confirme les
+  // autres, il ne peut pas être aussi celui qu'on vérifie. Une part sur son
+  // adhésion recréerait le cas où il se déclare à jour tout seul.
+  const [adhesion] = await db
+    .select({ role: memberships.role })
+    .from(memberships)
+    .where(eq(memberships.id, membershipId))
+    .limit(1)
+  if (adhesion?.role === 'president') {
+    throw apiError(
+      'FORBIDDEN',
+      'Le président ne cotise pas. Pour participer, il rejoint la tontine avec un compte membre.',
+      { field: 'shares' },
+    )
+  }
+
   const existantes = await db
     .select()
     .from(shares)
@@ -268,9 +284,9 @@ const LIBELLE_ROLE: Record<MembershipRole, string> = {
  *
  * Un trésorier ou un censeur peut être nommé **avant** d'avoir l'application :
  * « Koffi sera trésorier, il installe l'application demain » est le cas
- * courant. Tant qu'il n'a pas de compte, il ne confirme rien, et le repli
- * « bureau d'une seule personne » (§2.4) ne le compte pas — il ne regarde que
- * les adhésions qui portent un compte. Le rôle prend effet au rattachement.
+ * courant. Tant qu'il n'a pas de compte, il ne confirme rien ; le président,
+ * qui ne cotise pas, confirme seul en attendant. Le rôle prend effet au
+ * rattachement.
  */
 export async function definirRole(
   db: Db,
@@ -335,10 +351,14 @@ export async function definirRole(
  * le refuse — à raison, le groupe perdrait son seul rôle capable de confirmer
  * et de clore — et rien ne permettait de désigner un successeur.
  *
- * Le successeur doit avoir un compte et être actif. L'ancien président devient
- * simple membre : ses parts, ses cotisations et sa place dans la rotation ne
- * bougent pas, un rôle n'est pas une part. Tout le groupe est prévenu — c'est
- * la personne à qui l'on envoie de l'argent qui change.
+ * Le successeur doit avoir un compte et être actif. Et le geste n'existe
+ * qu'**avant le démarrage** : le président ne cotise pas, or les parts d'un
+ * membre sont engagées dès le premier tour — cotisations dues, place dans la
+ * rotation, pot attendu. En cours de cycle, on ne peut ni les lui retirer ni
+ * les lui laisser. Avant, on les retire : le successeur cesse de cotiser, et
+ * l'ancien président, devenu simple membre, peut en prendre s'il veut
+ * participer. Tout le groupe est prévenu — c'est la personne à qui l'on
+ * envoie de l'argent qui change.
  */
 export async function transfererPresidence(
   db: Db,
@@ -366,6 +386,22 @@ export async function transfererPresidence(
       { field: 'role' },
     )
   }
+
+  const [tontine] = await db
+    .select({ status: tontines.status })
+    .from(tontines)
+    .where(eq(tontines.id, tontineId))
+    .limit(1)
+  if (tontine && tontine.status !== 'draft' && tontine.status !== 'open') {
+    throw apiError(
+      'FORBIDDEN',
+      'La présidence ne se transmet qu’avant le démarrage : le président ne cotise pas, et les parts de ce membre sont déjà engagées dans le cycle.',
+      { field: 'role' },
+    )
+  }
+
+  // Le successeur ne cotise plus : ses parts partent avec sa casquette de membre.
+  await db.delete(shares).where(eq(shares.membershipId, cible.id))
 
   const [actuel] = await db
     .select()

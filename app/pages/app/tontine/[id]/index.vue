@@ -301,9 +301,10 @@ useHead({ title: t('tontine.index.ma_tontine_etontine') })
         </p>
       </section>
 
-      <!-- Ce que je dois, et le bouton pour m'en acquitter. -->
+      <!-- Ce que je dois, et le bouton pour m'en acquitter. Pas pour le
+           président : il ne cotise pas, et « tu es à jour » lui mentirait. -->
       <section
-        v-if="tontine.status === 'running'"
+        v-if="tontine.status === 'running' && !estPresident"
         class="card-surface flex flex-col gap-3 p-4"
         data-testid="bloc-ma-part"
       >

@@ -25,8 +25,13 @@ let tour1: string
 const PRESIDENT = 'f1000000-0000-4000-8000-000000000001'
 const TRESORIER = 'f1000000-0000-4000-8000-000000000002'
 const CENSEUR = 'f1000000-0000-4000-8000-000000000003'
+const BENEFICIAIRE = 'f1000000-0000-4000-8000-000000000004'
 
-/** Le président est bénéficiaire du tour 1 : il occupe la position 1. */
+/**
+ * Le président ne cotise pas. Quatre cotisants : Yao, inscrit le premier,
+ * occupe la position 1 et prend la main au tour 1 ; Koffi est trésorier,
+ * Fatou censeure, Mariam n'a pas l'application.
+ */
 beforeEach(async () => {
   const ctx = await createTestDb()
   db = ctx.db
@@ -35,13 +40,15 @@ beforeEach(async () => {
   await createTestUser(db, PRESIDENT, '+2250707001111')
   await createTestUser(db, TRESORIER, '+2250707002222')
   await createTestUser(db, CENSEUR, '+2250707003333')
+  await createTestUser(db, BENEFICIAIRE, '+2250707004444')
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
+  await ajouterMembreGere(db, T, { name: 'Yao', phone: '+2250707004444', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707002222', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
-  await ajouterMembreGere(db, T, { name: 'Yao', phone: '+2250707004444', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Mariam', phone: '+2250707005555', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
   await marquerVerifie(db, canal)
@@ -49,7 +56,9 @@ beforeEach(async () => {
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)
 
-  for (const [nom, id, role] of [['Koffi', TRESORIER, 'treasurer'], ['Fatou', CENSEUR, 'auditor']] as const) {
+  for (const [nom, id, role] of [
+    ['Yao', BENEFICIAIRE, 'member'], ['Koffi', TRESORIER, 'treasurer'], ['Fatou', CENSEUR, 'auditor'],
+  ] as const) {
     const gere = (await db.select().from(memberships)).find(m => m.managedName === nom)!
     await db.update(memberships).set({ userId: id, role }).where(eq(memberships.id, gere.id))
   }
@@ -59,21 +68,15 @@ beforeEach(async () => {
 
 afterEach(() => cleanup())
 
-/** Confirme toutes les cotisations du tour, pour un pot complet. */
+/** Confirme toutes les cotisations du tour, pour un pot complet : le trésorier déclare, le président confirme. */
 async function potComplet() {
   for (const c of (await db.select().from(contributions)).filter(x => x.roundId === tour1)) {
-    const declarant = c.membershipId === (await db.select().from(memberships))
-      .find(m => m.userId === PRESIDENT)!.id
-      ? PRESIDENT
-      : TRESORIER
-    const decideur = declarant === PRESIDENT ? TRESORIER : PRESIDENT
-
-    const { declarationId } = await declarerPaiement(db, c.id, declarant, { amount: 25_000, channel: 'wave' })
-    await confirmerDeclaration(db, declarationId, decideur)
+    const { declarationId } = await declarerPaiement(db, c.id, TRESORIER, { amount: 25_000, channel: 'wave' })
+    await confirmerDeclaration(db, declarationId, PRESIDENT)
   }
 }
 
-const QUATRE = '1111' // les quatre derniers chiffres du numéro du président
+const QUATRE = '4444' // les quatre derniers chiffres du numéro de Yao, bénéficiaire du tour 1
 
 describe('état du pot', () => {
   it('distingue le pot constitué du pot attendu', async () => {
@@ -99,7 +102,7 @@ describe('état du pot', () => {
   it('alerte si le numéro du bénéficiaire a changé il y a moins de 48 h', async () => {
     await db.update(users)
       .set({ phoneChangedAt: new Date(Date.now() - 3_600_000) })
-      .where(eq(users.id, PRESIDENT))
+      .where(eq(users.id, BENEFICIAIRE))
 
     // Un numéro changé récemment est le signal d'un détournement par prise de
     // contrôle de compte.
@@ -109,7 +112,7 @@ describe('état du pot', () => {
   it('n’alerte plus au-delà de 48 h', async () => {
     await db.update(users)
       .set({ phoneChangedAt: new Date(Date.now() - 50 * 3_600_000) })
-      .where(eq(users.id, PRESIDENT))
+      .where(eq(users.id, BENEFICIAIRE))
 
     expect((await etatVersement(db, tour1)).beneficiary.phoneRecentlyChanged).toBe(false)
   })
@@ -245,7 +248,7 @@ describe('accusé de réception — acceptation T19', () => {
   })
 
   it('clôt le tour au moment de l’accusé du bénéficiaire', async () => {
-    const resultat = await accuserReception(db, tour1, PRESIDENT, 100_000)
+    const resultat = await accuserReception(db, tour1, BENEFICIAIRE, 100_000)
 
     expect(resultat.roundClosed).toBe(true)
     const tour = (await db.select().from(rounds)).find(r => r.id === tour1)!
@@ -255,7 +258,7 @@ describe('accusé de réception — acceptation T19', () => {
 
   it('consigne l’écart entre le montant déclaré et le montant reçu', async () => {
     // Un écart est un signal : il ne bloque pas, il se voit.
-    const resultat = await accuserReception(db, tour1, PRESIDENT, 95_000)
+    const resultat = await accuserReception(db, tour1, BENEFICIAIRE, 95_000)
     expect(resultat.ecart).toBe(-5_000)
 
     const ecriture = (await db.select().from(ledgerEntries))
@@ -264,9 +267,9 @@ describe('accusé de réception — acceptation T19', () => {
   })
 
   it('refuse un second accusé', async () => {
-    await accuserReception(db, tour1, PRESIDENT, 100_000)
+    await accuserReception(db, tour1, BENEFICIAIRE, 100_000)
 
-    await expect(accuserReception(db, tour1, PRESIDENT, 100_000)).rejects.toThrow(
+    await expect(accuserReception(db, tour1, BENEFICIAIRE, 100_000)).rejects.toThrow(
       expect.objectContaining({ statusCode: 409 }),
     )
   })
@@ -335,11 +338,15 @@ describe('contre-validation ouverte au bénéficiaire — docs/data-model.md §2
   })
 
   it('passe outre quand personne ne peut contre-valider, et l’inscrit au registre', async () => {
-    // Le tour où le président est lui-même bénéficiaire d'une tontine qu'il
-    // tient seul : plus aucun second acteur. Bloquer là gèlerait le pot.
+    // Le tour où Mariam, qui n'a pas l'application, prend la main dans une
+    // tontine que le président tient seul : plus aucun second acteur. Bloquer
+    // là gèlerait le pot.
     await simpleMembre(TRESORIER)
     await simpleMembre(CENSEUR)
-    await preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: QUATRE, acceptIncompletePot: false })
+    const mariam = (await db.select().from(memberships)).find(m => m.managedName === 'Mariam')!
+    const part = (await db.select().from(shares)).find(p => p.membershipId === mariam.id)!
+    await db.update(rounds).set({ beneficiaryShareId: part.id }).where(eq(rounds.id, tour1))
+    await preparerVersement(db, tour1, PRESIDENT, { beneficiaryPhoneLast4: '5555', acceptIncompletePot: false })
 
     expect(await contreValidateursPossibles(db, tour1, PRESIDENT)).toHaveLength(0)
     await declarerVersement(db, tour1, PRESIDENT, { channel: 'wave' })
@@ -458,10 +465,8 @@ describe('fin du cycle — une tontine finissait par ne jamais finir', () => {
         await confirmerDeclaration(db, declarationId, PRESIDENT)
       }
 
-      const beneficiaire = (await db.select().from(memberships))
-        .find(async m => m.id === (await db.select().from(shares))
-          .find(p => p.id === tour.beneficiaryShareId)!.membershipId)!
-
+      const part = (await db.select().from(shares)).find(p => p.id === tour.beneficiaryShareId)!
+      const beneficiaire = (await db.select().from(memberships)).find(m => m.id === part.membershipId)!
       const msisdn = (await db.select().from(users)).find(u => u.id === beneficiaire.userId)?.phone
         ?? beneficiaire.managedPhone!
 

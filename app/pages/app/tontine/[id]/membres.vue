@@ -440,12 +440,19 @@ useHead({ title: t('tontine.membres.membres_etontine') })
               >{{ membre.phone }}</span>
 
               <!-- Un double part occupe deux positions distinctes : on les montre
-                 toutes les deux, c'est ce que le bureau vient vérifier. -->
+                 toutes les deux, c'est ce que le bureau vient vérifier. Le
+                 président, lui, n'a pas de part : « 0 part » se lirait comme
+                 un oubli, alors que c'est la règle. -->
               <span
                 class="text-sm text-ink-muted"
                 :data-testid="`parts-${membre.id}`"
               >
-                {{ $t('tontine.membres.p0_part_p1', { p0: membre.shares, p1: membre.shares > 1 ? 's' : '' }) }}
+                <template v-if="membre.role === 'president'">
+                  {{ $t('tontine.membres.ne_cotise_pas') }}
+                </template>
+                <template v-else>
+                  {{ $t('tontine.membres.p0_part_p1', { p0: membre.shares, p1: membre.shares > 1 ? 's' : '' }) }}
+                </template>
                 <template v-if="membre.positions.length > 0">
                   {{ $t('tontine.membres.position_p0_p1', { p0: membre.positions.length > 1 ? 's' : '', p1: membre.positions.join(` ${$t('tontine.membres.et')} `) }) }}
                 </template>

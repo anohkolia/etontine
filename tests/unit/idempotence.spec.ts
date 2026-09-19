@@ -68,7 +68,7 @@ describe('idempotence — acceptation T05', () => {
     // Réutiliser une clé pour autre chose n'est pas un rejeu, c'est un bug
     // d'appelant : on refuse au lieu de renvoyer la réponse d'une autre opération.
     await expect(
-      await runIdempotent(db, { ...params, body: { name: 'Autre' } }, creerTontine('quatre')),
+      runIdempotent(db, { ...params, body: { name: 'Autre' } }, creerTontine('quatre')),
     ).rejects.toMatchObject({
       statusCode: 409,
       data: { error: { code: 'IDEMPOTENCY_CONFLICT' } },

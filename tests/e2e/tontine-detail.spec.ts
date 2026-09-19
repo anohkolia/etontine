@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { canalVerifie, renseignerNom, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
+import { tontineLanceeAvecCotisant } from './helpers/tontine'
 
 /**
  * Détail et réglages d'une tontine.
@@ -64,8 +65,9 @@ async function sessionPour(page: import('@playwright/test').Page, telephone: str
   await renseignerNom(page, 'Koffi', 'N’Guessan')
 }
 
-test('le détail montre le tour en cours et ce que je dois', async ({ page }) => {
-  const { id } = await tontineLancee(page)
+test('le détail montre le tour en cours et ce que je dois', async ({ page, browser }) => {
+  // Vu par Koffi : le président, qui ne cotise pas, n'a pas de « ce que je dois ».
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}`)
   await waitForHydration(page)
 
@@ -74,7 +76,7 @@ test('le détail montre le tour en cours et ce que je dois', async ({ page }) =>
   await expect(tour).toContainText('Tour 1')
   await expect(tour.getByTestId('pot-gauge')).toBeVisible()
 
-  // Le président a une part : il doit 25 000 FCFA comme les autres.
+  // Koffi a une part : il doit 25 000 FCFA.
   await expect(page.getByTestId('mon-du')).toContainText('25 000 FCFA')
   await expect(page.getByTestId('lien-cotiser')).toBeVisible()
 
@@ -82,8 +84,8 @@ test('le détail montre le tour en cours et ce que je dois', async ({ page }) =>
   await expect(page.getByTestId('bloc-reglages')).toContainText('75 000 FCFA')
 })
 
-test('le calendrier de passage dit quand chacun prend la main', async ({ page }) => {
-  const { id } = await tontineLancee(page)
+test('le calendrier de passage dit quand chacun prend la main', async ({ page, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
 
   await page.goto(`/app/tontine/${id}`)
   await waitForHydration(page)
@@ -95,7 +97,7 @@ test('le calendrier de passage dit quand chacun prend la main', async ({ page })
   await expect(calendrier).toBeVisible()
   await expect(calendrier.locator('li')).toHaveCount(3)
 
-  // Le tour du président est le premier, et il est signalé par le **mot**,
+  // Le tour de Koffi est le premier, et il est signalé par le **mot**,
   // jamais par la seule teinte de la carte.
   await expect(page.getByTestId('tour-1')).toContainText('c’est toi')
 })

@@ -44,15 +44,14 @@ beforeEach(async () => {
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
-  const [msPresident] = await db.select().from(memberships).where(eq(memberships.tontineId, T))
-  await attribuerParts(db, T, msPresident!.id, 1)
-
-  // Koffi et Fatou ont un compte ; Yao est géré, sans application.
+  // Le président ne cotise pas : quatre cotisants, quatre parts, quatre tours.
+  // Koffi et Fatou ont un compte ; Yao et Mariam sont gérés, sans application.
   const koffi = await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707100002', shares: 1 })
   await db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi))
   const fatou = await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707100003', shares: 1 })
   await db.update(memberships).set({ userId: FATOU }).where(eq(memberships.id, fatou))
   await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707100004', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Mariam Touré', phone: '+2250707100005', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, {
     provider: 'wave', msisdn: '+2250707100001', holderName: 'Aya Koné',
@@ -178,11 +177,31 @@ describe('passer la présidence', () => {
     expect((await adhesion(PRESIDENT)).status).toBe('left')
   })
 
-  it('ne touche ni aux parts ni à la rotation', async () => {
+  it('retire ses parts au successeur — le président ne cotise pas — et laisse les autres', async () => {
     const avant = await db.select().from(shares).where(eq(shares.tontineId, T))
-    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
+    const koffi = (await adhesion(KOFFI)).id
+
+    await transfererPresidence(db, T, koffi, PRESIDENT)
+
     const apres = await db.select().from(shares).where(eq(shares.tontineId, T))
-    expect(apres).toEqual(avant)
+    expect(apres.some(part => part.membershipId === koffi)).toBe(false)
+    expect(apres).toEqual(avant.filter(part => part.membershipId !== koffi))
+  })
+
+  it('laisse l’ancien président, devenu membre, prendre une part', async () => {
+    await transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)
+
+    const ancien = (await adhesion(PRESIDENT)).id
+    await attribuerParts(db, T, ancien, 1)
+    expect(await db.select().from(shares).where(eq(shares.membershipId, ancien))).toHaveLength(1)
+  })
+
+  it('refuse une fois la tontine démarrée : les parts du successeur sont engagées', async () => {
+    await demarrerTontine(db, T, PRESIDENT)
+
+    await expect(transfererPresidence(db, T, (await adhesion(KOFFI)).id, PRESIDENT)).rejects.toThrow(erreur(403, /démarrage/))
+    expect((await adhesion(PRESIDENT)).role).toBe('president')
+    expect(await db.select().from(shares).where(eq(shares.membershipId, (await adhesion(KOFFI)).id))).toHaveLength(1)
   })
 })
 

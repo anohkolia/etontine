@@ -17,7 +17,7 @@ import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { migrer, rollbackLast } from './migrator.ts'
 import { creerComptesAdministrateurs } from './admin-bootstrap.ts'
-import { databaseUrl, estDistante, estPoolerTransaction, useDb } from './index.ts'
+import { databaseUrl, estPoolerTransaction, optionsTls, refuserBaseDistante, useDb } from './index.ts'
 import type { Db } from './index.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -34,7 +34,7 @@ function connexion() {
     )
     process.exit(1)
   }
-  const client = postgres(url, { max: 1, ssl: estDistante(url) ? 'require' : undefined })
+  const client = postgres(url, { max: 1, ssl: optionsTls(url) })
   return { client, db: drizzle(client) }
 }
 
@@ -46,6 +46,7 @@ try {
     await client.end()
   }
   else if (commande === 'rollback') {
+    refuserBaseDistante(databaseUrl(), 'db:rollback')
     const { client, db } = connexion()
     const nom = await rollbackLast(db as unknown as Db)
     console.log(nom ? `Migration annulée : ${nom}` : 'Aucune migration à annuler.')

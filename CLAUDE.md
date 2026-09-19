@@ -37,30 +37,6 @@ pnpm db:migrate     # migrations drizzle
 
 Si une bibliothèque supplémentaire semble nécessaire, **demande avant de l'ajouter**.
 
-\---
-
-## Architecture
-
-```
-app/
-  components/       # composants Vue, PascalCase, un dossier par domaine
-  composables/      # useMoney, useTontine, useAuth...
-  pages/            # routes (voir docs/api-contract.md §Routes)
-  middleware/       # auth, role, kyc-palier
-  stores/           # Pinia
-server/
-  api/v1/           # routes Nitro
-  services/         # logique métier — les transitions d'état vivent ICI
-  db/               # schéma drizzle + migrations
-  utils/            # ledger, idempotency, auth
-shared/
-  schemas/          # Zod, importés des deux côtés
-  constants/        # statuts, rôles, canaux
-docs/               # spécifications
-```
-
-\---
-
 ### Sécurité
 
 * Session par cookie `httpOnly`, `SameSite=Lax`, `Secure`.
@@ -77,9 +53,4 @@ docs/               # spécifications
 * Un ticket n'est pas terminé sans ses tests.
 
 \---
-
-## Style de travail attendu
-
-1. Avant d'écrire du code, **propose un plan court** (fichiers touchés, approche) et attends la validation.
-2. Après chaque ticket : `pnpm typecheck \&\& pnpm lint \&\& pnpm test` doivent passer.
 

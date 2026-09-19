@@ -3,7 +3,8 @@
  *
  * Compose exactement le jeu demandé par le ticket T04 : **une tontine de six
  * membres dont un à double part**, trois tours, et des statuts variés pour que
- * chaque écran ait de quoi s'afficher sans qu'on ait à cliquer une heure.
+ * chaque écran ait de quoi s'afficher sans qu'on ait à cliquer une heure. La
+ * présidente ne cotise pas : cinq cotisants, six parts.
  *
  * Le membre à double part n'est pas un détail de confort : c'est la source
  * d'erreur n°1 du modèle. Avoir en permanence, dans les données de
@@ -14,13 +15,22 @@
  * identifiants fixes. `pnpm db:seed` deux fois de suite donne le même état.
  */
 import { existsSync } from 'node:fs'
-import { eq, inArray } from 'drizzle-orm'
-import { useDb } from './index.ts'
+import { inArray } from 'drizzle-orm'
+import { databaseUrl, refuserBaseDistante, useDb } from './index.ts'
 import * as t from './schema.ts'
 
 // Même raison que pour `cli.ts` : un script Node ordinaire ne lit pas `.env`,
 // et le seed doit viser la même base que le serveur.
 if (existsSync('.env')) process.loadEnvFile('.env')
+
+// Des comptes de démonstration n'ont rien à faire dans une base de production.
+try {
+  refuserBaseDistante(databaseUrl(), 'db:seed')
+}
+catch (e) {
+  console.error(e instanceof Error ? e.message : e)
+  process.exit(1)
+}
 
 const db = useDb()
 
@@ -47,7 +57,8 @@ const ID = {
 } as const
 
 const MEMBRES = [
-  { id: ID.users[0], firstName: 'Aya', lastName: 'Koné', phone: '+2250707000001', role: 'president' as const, parts: 1 },
+  // La présidente ne cotise pas : aucune part, elle tient le canal et confirme.
+  { id: ID.users[0], firstName: 'Aya', lastName: 'Koné', phone: '+2250707000001', role: 'president' as const, parts: 0 },
   { id: ID.users[1], firstName: 'Koffi', lastName: 'N’Guessan', phone: '+2250707000002', role: 'treasurer' as const, parts: 1 },
   { id: ID.users[2], firstName: 'Fatou', lastName: 'Diarra', phone: '+2250707000003', role: 'auditor' as const, parts: 1 },
   // Le double part. Il occupe deux positions et cotise deux fois par tour.
@@ -58,8 +69,8 @@ const MEMBRES = [
 ]
 
 const MONTANT_PART = 25_000
-const TOTAL_PARTS = MEMBRES.reduce((n, m) => n + m.parts, 0) // 7
-const POT_ATTENDU = MONTANT_PART * TOTAL_PARTS // 175 000 FCFA
+const TOTAL_PARTS = MEMBRES.reduce((n, m) => n + m.parts, 0) // 6
+const POT_ATTENDU = MONTANT_PART * TOTAL_PARTS // 150 000 FCFA
 
 /**
  * Fabrique un UUID stable à partir d'une famille et de deux indices. Stable
@@ -90,11 +101,17 @@ async function nettoyer() {
     .from(t.users)
     .where(inArray(t.users.phone, telephones))
 
-  // L'effacement part des tontines : le reste suit en cascade.
-  await db.delete(t.tontines).where(eq(t.tontines.id, ID.tontine))
-  for (const u of anciens) {
-    await db.delete(t.tontines).where(eq(t.tontines.createdBy, u.id))
-  }
+  // L'effacement part des tontines : le reste suit en cascade — sauf les
+  // versements, dont le lien vers l'adhésion du bénéficiaire ne cascade pas
+  // (un versement ne s'efface pas avec un membre). On les retire d'abord.
+  const cibles = [
+    ID.tontine,
+    ...(await db.select({ id: t.tontines.id }).from(t.tontines)
+      .where(inArray(t.tontines.createdBy, anciens.map(u => u.id)))).map(x => x.id),
+  ]
+  const tours = await db.select({ id: t.rounds.id }).from(t.rounds).where(inArray(t.rounds.tontineId, cibles))
+  if (tours.length > 0) await db.delete(t.payouts).where(inArray(t.payouts.roundId, tours.map(r => r.id)))
+  await db.delete(t.tontines).where(inArray(t.tontines.id, cibles))
   await db.delete(t.users).where(inArray(t.users.phone, telephones))
 }
 
@@ -211,7 +228,10 @@ async function semer() {
       closedAt: tour.statut === 'closed' ? maintenant : null,
     })
 
-    toutesLesParts.forEach(async (part, i) => {
+    // Une insertion après l'autre : `forEach(async …)` les lançait toutes en
+    // parallèle sur la même connexion, et postgres-js mélangeait alors les
+    // requêtes préparées (« bind message supplies 8 parameters… »).
+    for (const [i, part] of toutesLesParts.entries()) {
       // Le bénéficiaire du tour cotise **aussi** : ne pas l'exclure.
       const statut = statutDeCotisation(tour.statut, i)
       await db.insert(t.contributions).values({
@@ -224,7 +244,7 @@ async function semer() {
         status: statut,
         dueDate: tour.echeance,
       })
-    })
+    }
 
     if (tour.statut === 'closed') {
       await db.insert(t.payouts).values({
@@ -233,9 +253,11 @@ async function semer() {
         beneficiaryMembershipId: beneficiaire.membershipId,
         amount: POT_ATTENDU,
         channel: 'wave',
-        preparedBy: ID.users[1],
-        counterValidatedBy: ID.users[0],
-        declaredBy: ID.users[1],
+        // Koffi prend la main au tour 1 : ce n'est pas lui qui prépare son
+        // propre versement. La présidente prépare, la censeure contre-valide.
+        preparedBy: ID.users[0],
+        counterValidatedBy: ID.users[2],
+        declaredBy: ID.users[0],
         acknowledgedAt: maintenant,
         status: 'acknowledged',
       })
@@ -248,8 +270,8 @@ function statutDeCotisation(statutTour: 'closed' | 'collecting' | 'pending', i: 
   if (statutTour === 'closed') return 'confirmed' as const
   if (statutTour === 'pending') return 'due' as const
 
-  // Tour en cours : 3 confirmées, 1 déclarée en attente, 1 en retard, 2 dues.
-  const grille = ['confirmed', 'confirmed', 'confirmed', 'declared', 'late', 'due', 'due'] as const
+  // Tour en cours : 3 confirmées, 1 déclarée en attente, 1 en retard, 1 due.
+  const grille = ['confirmed', 'confirmed', 'confirmed', 'declared', 'late', 'due'] as const
   return grille[i] ?? 'due'
 }
 
@@ -261,3 +283,7 @@ console.log(
   + `${TOTAL_PARTS} parts (Yao Brou en a deux), 3 tours, `
   + `pot attendu ${POT_ATTENDU} FCFA par tour.`,
 )
+
+// Le pool garderait ses connexions ouvertes jusqu'à leur délai d'inactivité :
+// le script paraîtrait bloqué une minute après avoir fini.
+process.exit(0)

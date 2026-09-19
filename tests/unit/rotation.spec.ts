@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  ajouterMembreGere, attribuerParts, definirRotation, membresDe, resteDu, retirerMembre, rotationDe,
+  ajouterMembreGere, definirRotation, membresDe, resteDu, retirerMembre, rotationDe,
 } from '../../server/services/membres.ts'
 import { melangerAvecGraine, verifierTirage } from '../../server/services/rotation.ts'
 import { dateDuTour, demarrerTontine } from '../../server/services/tours.ts'
@@ -26,9 +26,7 @@ beforeEach(async () => {
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: '2026-01-15' })
 
-  // Le président est déjà adhérent : on lui attribue sa part.
-  const [msPresident] = await db.select().from(memberships).where(eq(memberships.tontineId, T))
-  await attribuerParts(db, T, msPresident!.id, 1)
+  // Le président est déjà adhérent, sans part : il préside, il ne cotise pas.
 
   // Un canal vérifié, puis publication : `demarrerTontine` exige `open`, et
   // sauter la publication reviendrait à tester une transition qui n'existe pas.
@@ -42,13 +40,14 @@ beforeEach(async () => {
 
 afterEach(() => cleanup())
 
-/** Six membres, dont Yao Brou à **deux parts** — sept parts au total. */
+/** Six cotisants, dont Yao Brou à **deux parts** — sept parts au total. Le président n'en a pas. */
 async function groupeAvecDoublePart() {
   await ajouterMembreGere(db, T, { name: 'Koffi N’Guessan', phone: '+2250707000002', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
   const yao = await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: '+2250707000004', shares: 2 })
   await ajouterMembreGere(db, T, { name: 'Mariam Touré', phone: '+2250707000005', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Ibrahim Sanogo', phone: '+2250707000006', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Aminata Coulibaly', phone: '+2250707000007', shares: 1 })
   return yao
 }
 

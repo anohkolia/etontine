@@ -1,39 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
-import { numeroDeTest } from './helpers/telephone'
+import { tontineLanceeAvecCotisant } from './helpers/tontine'
 
-async function tontineLancee(page: import('@playwright/test').Page) {
-  await seConnecter(page)
-  await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+/**
+ * Hors ligne, c'est Koffi qui déclare — le président ne cotise pas. La page
+ * du test est la sienne ; c'est elle qu'on coupe du réseau.
+ */
 
-  const creation = await page.request.post('/api/v1/tontines', {
-    data: { name: 'Tontine des tantines', access: 'private' },
-  })
-  const { id } = await creation.json() as { id: string }
-
-  await page.request.fetch(`/api/v1/tontines/${id}`, {
-    method: 'PATCH',
-    data: {
-      shareAmount: 25_000,
-      frequency: 'monthly',
-      startDate: new Date().toISOString().slice(0, 10),
-      collectionChannelIds: [canal],
-    },
-  })
-  for (const nom of ['Koffi N’Guessan', 'Fatou Diarra']) {
-    await page.request.post(`/api/v1/tontines/${id}/members`, {
-      data: { name: nom, phone: `+225${numeroDeTest()}`, shares: 1 },
-    })
-  }
-  await page.request.post(`/api/v1/tontines/${id}/publish`)
-  await page.request.post(`/api/v1/tontines/${id}/start`)
-  return id
-}
-
-test('déclarer sans réseau, puis retrouver la déclaration synchronisée', async ({ page, context }) => {
-  const id = await tontineLancee(page)
+test('déclarer sans réseau, puis retrouver la déclaration synchronisée', async ({ page, context, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
 
@@ -56,16 +31,15 @@ test('déclarer sans réseau, puis retrouver la déclaration synchronisée', asy
   await expect(page.getByTestId('offline-banner')).toBeHidden()
   await expect(page.getByTestId('file-en-attente')).toBeHidden({ timeout: 15_000 })
 
-  // Et la déclaration est bien arrivée côté serveur. Le président étant seul au
-  // bureau, elle y est confirmée dans la foulée — ce qui compte ici, c'est
-  // qu'elle soit partie, pas l'état où elle atterrit.
+  // Et la déclaration est bien arrivée côté serveur : elle attend le
+  // président. Ce qui compte ici, c'est qu'elle soit partie.
   await page.reload()
   await waitForHydration(page)
-  await expect(page.getByTestId('liste-cotisations')).toContainText('Confirmé')
+  await expect(page.getByTestId('liste-cotisations')).toContainText('Déclaré')
 })
 
-test('la file ne déclare pas deux fois, même vidée plusieurs fois', async ({ page, context }) => {
-  const id = await tontineLancee(page)
+test('la file ne déclare pas deux fois, même vidée plusieurs fois', async ({ page, context, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -87,8 +61,8 @@ test('la file ne déclare pas deux fois, même vidée plusieurs fois', async ({ 
   expect(items).toHaveLength(1)
 })
 
-test('aucune saisie n’est perdue si l’on quitte la page hors ligne', async ({ page, context }) => {
-  const id = await tontineLancee(page)
+test('aucune saisie n’est perdue si l’on quitte la page hors ligne', async ({ page, context, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)
   await page.locator('[data-testid^="bouton-envoyer-"]').first().click()
@@ -123,8 +97,8 @@ test('la page d’aide reste consultable et répond aux questions d’argent', a
   await expect(page.locator('body')).toContainText('confirmé')
 })
 
-test('la promesse « ta saisie est gardée » ne suit pas d’un écran à l’autre', async ({ page, context }) => {
-  const id = await tontineLancee(page)
+test('la promesse « ta saisie est gardée » ne suit pas d’un écran à l’autre', async ({ page, context, browser }) => {
+  const { id } = await tontineLanceeAvecCotisant(browser, page)
 
   await page.goto(`/app/tontine/${id}/cotiser`)
   await waitForHydration(page)

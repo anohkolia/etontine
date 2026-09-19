@@ -20,9 +20,11 @@ async function tontineLancee(graceDays: number, depart = '2026-01-15') {
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', startDate: depart, graceDays })
 
+  // Quatre cotisants : le président, lui, ne cotise pas.
   await ajouterMembreGere(db, T, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
   await ajouterMembreGere(db, T, { name: 'Yao', phone: '+2250707000004', shares: 1 })
+  await ajouterMembreGere(db, T, { name: 'Mariam', phone: '+2250707000005', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
   await marquerVerifie(db, canal)

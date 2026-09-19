@@ -1,6 +1,5 @@
 # Compilations natives explicitement autorisées (pnpm 11 : `allowBuilds`).
 allowBuilds:
-  better-sqlite3: set this to true or false
   esbuild: true
   unrs-resolver: true
 minimumReleaseAgeExclude:

@@ -8,7 +8,6 @@ import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
 import { canauxDeTontine, rattacherCanal } from './canaux.ts'
 import { appendLedger } from './ledger.ts'
-import { attribuerParts } from './membres.ts'
 import { notifierTontine } from './notifications.ts'
 
 type Db = ReturnType<typeof useDb>
@@ -52,21 +51,19 @@ export async function creerBrouillon(db: Db, userId: string, input: {
   })
 
   // Le créateur est président de sa tontine. Le rôle est par tontine.
-  const membershipId = randomUUID()
+  //
+  // Il ne reçoit **pas** de part : le président ne cotise pas. Il tient le
+  // canal de collecte, confirme les cotisations des autres et verse le pot —
+  // il ne peut pas être en même temps celui qu'on vérifie. S'il veut
+  // participer, il rejoint avec un compte membre, comme n'importe qui.
   await db.insert(memberships).values({
-    id: membershipId,
+    id: randomUUID(),
     tontineId: id,
     userId,
     role: 'president',
     status: 'active',
     joinedAt: new Date(),
   })
-
-  // Et il reçoit une part : l'organisateur d'une tontine y participe. Sans
-  // cela il serait membre sans jamais cotiser ni prendre la main, le pot
-  // attendu serait sous-évalué, et la phrase d'engagement annoncerait un
-  // cycle plus court que la réalité. Il pourra en prendre une seconde.
-  await attribuerParts(db, id, membershipId, 1)
 
   return id
 }

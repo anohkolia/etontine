@@ -62,17 +62,6 @@ const ICONE: Record<string, string> = {
 }
 
 /**
- * Une cotisation confirmée d'office ne se lit pas comme une cotisation
- * confirmée par un tiers. Même type d'écriture, même chaîne de hachage — mais
- * le registre doit dire lequel des deux il montre, sans quoi le mot
- * « confirmée » recouvrirait deux choses très différentes : une vérification,
- * et une absence de vérificateur.
- */
-function estAutoConfirmee(e: Ecriture): boolean {
-  return e.type === 'contribution_confirmed' && e.payload.autoConfirmee === true
-}
-
-/**
  * Un « réglage modifié » ne dit rien : c'est le `changement` du contenu qui
  * dit s'il s'agit d'un démarrage, d'une nomination, d'une annulation. Sans
  * cette table, la moitié des faits marquants de la vie d'une tontine se
@@ -95,7 +84,6 @@ const CHANGEMENT: Record<string, string> = {
 }
 
 function libelleDe(e: Ecriture): string {
-  if (estAutoConfirmee(e)) return t('tontine.registre.cotisation_confirmee_d_office')
   if (e.type === 'settings_changed') {
     const changement = e.payload.changement
     if (typeof changement === 'string' && CHANGEMENT[changement]) return CHANGEMENT[changement]!
@@ -129,7 +117,7 @@ const ROLE_FR: Record<string, string> = {
 }
 
 function iconeDe(e: Ecriture): string {
-  return estAutoConfirmee(e) ? 'lucide:flag' : (ICONE[e.type] ?? 'lucide:circle-dashed')
+  return ICONE[e.type] ?? 'lucide:circle-dashed'
 }
 
 const CANAUX_CONNUS = new Set(Object.keys(PAYMENT_CHANNEL))
@@ -485,15 +473,6 @@ useHead({ title: t('tontine.registre.registre_etontine') })
             >
               {{ detailDe(ecriture) }}
             </span>
-            <!-- Dit pourquoi, sinon « d'office » ressemble à un passe-droit. -->
-            <span
-              v-if="estAutoConfirmee(ecriture)"
-              class="text-sm text-ink-muted"
-              data-testid="mention-auto-confirmee"
-            >
-              {{ $t('tontine.registre.aucun_autre_membre_du') }}
-            </span>
-
             <!-- La soupape : rien ne s'efface d'un registre append-only, on
                  écrit à côté. Ouverte à tout membre, pas au seul bureau. -->
             <p

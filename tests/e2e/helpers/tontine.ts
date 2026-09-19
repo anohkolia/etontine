@@ -109,3 +109,36 @@ export async function adhesionDe(page: Page, tontineId: string, nom: string): Pr
   if (!membre) throw new Error(`membre introuvable : ${nom}`)
   return membre.id
 }
+
+/**
+ * Une tontine lancée par un président, vue par Koffi qui y cotise.
+ *
+ * Le président — qui ne cotise pas — monte et lance la tontine dans un
+ * contexte à part, puis Koffi, premier membre inscrit et bénéficiaire du
+ * tour 1, ouvre sa session sur `page` et rejoint son siège par le lien. C'est
+ * **sa** page qu'un test de cotisation pilote : c'est lui qui déclare, qu'on
+ * coupe du réseau, qui lit ce qu'il doit.
+ */
+export async function tontineLanceeAvecCotisant(browser: Browser, page: Page): Promise<{ id: string }> {
+  const contextePresident = await browser.newContext()
+  const president = await contextePresident.newPage()
+  await inscriptionOtp(president)
+
+  const numeroKoffi = numeroDeTest()
+  // Trois cotisants à une part : trois tours, un pot de 75 000 FCFA.
+  const { id, lien } = await tontinePubliee(president, [
+    { nom: 'Koffi N’Guessan', numero: numeroKoffi },
+    { nom: 'Fatou Diarra', numero: numeroDeTest() },
+    { nom: 'Yao Brou', numero: numeroDeTest() },
+  ])
+  const demarrage = await president.request.post(`/api/v1/tontines/${id}/start`)
+  if (!demarrage.ok()) throw new Error(`démarrage refusé : ${await demarrage.text()}`)
+  await contextePresident.close()
+
+  await inscriptionOtp(page, numeroKoffi)
+  await page.request.fetch('/api/v1/me', { method: 'PATCH', data: { firstName: 'Koffi', lastName: 'N’Guessan' } })
+  const acceptation = await page.request.post(`/api/v1/invites/${lien.split('/join/')[1]}/accept`)
+  if (!acceptation.ok()) throw new Error(`rattachement refusé : ${await acceptation.text()}`)
+
+  return { id }
+}

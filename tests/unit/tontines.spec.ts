@@ -5,7 +5,7 @@ import {
   annulerTontine, archiverTontine, blocagesPublication, creerBrouillon, majTontine, definirCanaux,
   potAttendu, publier, supprimerBrouillon, totalParts,
 } from '../../server/services/tontines.ts'
-import { ajouterMembreGere } from '../../server/services/membres.ts'
+import { ajouterMembreGere, attribuerParts } from '../../server/services/membres.ts'
 import { blocagesDemarrage, demarrerTontine, toursDe } from '../../server/services/tours.ts'
 import { ledgerEntries, memberships, notifications, shares, tontines } from '../../server/db/schema.ts'
 import { tontineEmoji } from '../../shared/schemas/index.ts'
@@ -49,11 +49,19 @@ describe('brouillon de tontine', () => {
     expect(t!.shareAmount).toBe(0)
   })
 
-  it('attribue d’emblée une part au président', async () => {
-    // L'organisateur participe à sa tontine. Sans part, il serait membre sans
-    // jamais cotiser ni prendre la main, et le pot attendu serait sous-évalué.
+  it('ne donne aucune part au président : il préside, il ne cotise pas', async () => {
     const id = await brouillon()
-    expect(await totalParts(db, id)).toBe(1)
+    expect(await totalParts(db, id)).toBe(0)
+  })
+
+  it('refuse de lui en attribuer une — pour participer, il faut un compte membre', async () => {
+    const id = await brouillon()
+    const [ms] = await db.select().from(memberships).where(eq(memberships.tontineId, id))
+
+    await expect(attribuerParts(db, id, ms!.id, 1)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+    expect(await totalParts(db, id)).toBe(0)
   })
 
   it('enregistre les réglages étape par étape', async () => {
@@ -169,16 +177,10 @@ describe('calcul du pot — règle n°1', () => {
     const id = await brouillon()
     await majTontine(db, id, { shareAmount: 25_000 })
 
-    const [ms] = await db.select().from(memberships).where(eq(memberships.tontineId, id))
+    // Un membre à double part : ses deux parts comptent deux fois dans le pot.
+    // C'est la source d'erreur n°1 du modèle.
+    await ajouterMembreGere(db, id, { name: 'Yao Brou', phone: '+2250707000004', shares: 2 })
 
-    // Le président a déjà une part à la création du brouillon : on lui en
-    // donne une seconde, comme un membre à double part.
-    expect(await totalParts(db, id)).toBe(1)
-    await db.insert(shares).values({
-      id: 's2', tontineId: id, membershipId: ms!.id, rotationPosition: 2,
-    })
-
-    // Le double part compte deux fois : c'est la source d'erreur n°1 du modèle.
     expect(await totalParts(db, id)).toBe(2)
     expect(await potAttendu(db, id)).toBe(50_000)
   })
