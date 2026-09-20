@@ -24,17 +24,23 @@ if (existsSync('.env')) process.loadEnvFile('.env')
 
 const commande = process.argv[2]
 
-/** Une connexion dédiée, fermée à la fin : un script qui ne rend pas la main gêne le pooler. */
+/**
+ * Une connexion dédiée, fermée à la fin : un script qui ne rend pas la main
+ * gêne le pooler.
+ *
+ * Le pooler en mode transaction (port 6543) convient aussi : le migrateur de
+ * Drizzle joue toutes les migrations en attente dans **une seule
+ * transaction**, et la descente fait de même — une transaction reste collée
+ * à une même connexion serveur. Ce qu'il faut couper, ce sont les requêtes
+ * préparées, comme pour l'application. Le mode session (5432) reste le
+ * chemin naturel ; celui-ci sert quand le réseau filtre le 5432, ce qui
+ * arrive.
+ */
 function connexion() {
   const url = databaseUrl()
-  if (estPoolerTransaction(url)) {
-    console.error(
-      'DATABASE_URL vise le pooler en mode transaction (port 6543) : les migrations '
-      + 'doivent passer par la connexion directe ou le mode session (port 5432).',
-    )
-    process.exit(1)
-  }
-  const client = postgres(url, { max: 1, ssl: optionsTls(url) })
+  const pooler = estPoolerTransaction(url)
+  if (pooler) console.info('DATABASE_URL vise le pooler en mode transaction : requêtes préparées désactivées.')
+  const client = postgres(url, { max: 1, prepare: !pooler, ssl: optionsTls(url) })
   return { client, db: drizzle(client) }
 }
 

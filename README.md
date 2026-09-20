@@ -120,4 +120,8 @@ l'application, mode session pour `pnpm db:migrate`). Toute base distante est
 jointe en TLS **vérifié** (`verify-full`) ; `DATABASE_CA_CERT` reçoit l'autorité
 privée de Supabase, téléchargée dans son tableau de bord. Le pilote n'est
 importé que dans `server/db/index.ts`.
+* **Migrer Supabase depuis sa machine** : les chaînes de connexion vont dans
+`.env.supabase` (ignoré par git, modèle dans le fichier lui-même), et
+`pnpm db:migrate:supabase` / `pnpm db:admin:supabase` les lisent — le `.env`
+ordinaire reste sur le PGlite local, les tests ne changent pas de base.
 
