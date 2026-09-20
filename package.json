@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node server/db/cli.ts migrate",
+    "db:migrate:supabase": "node --env-file=.env.supabase server/db/cli.ts migrate",
     "db:rollback": "node server/db/cli.ts rollback",
     "db:seed": "node server/db/seed.ts",
     "db:reset": "node server/db/cli.ts rollback && node server/db/cli.ts migrate && node server/db/seed.ts",
@@ -27,6 +28,7 @@
     "dev:admin": "nuxt dev admin --port 3001 --dotenv ../.env",
     "build:admin": "nuxt build admin --dotenv ../.env",
     "db:admin": "node server/db/cli.ts admin",
+    "db:admin:supabase": "node --env-file=.env.supabase server/db/cli.ts admin",
     "db:local": "node server/db/local.ts"
   },
   "dependencies": {
