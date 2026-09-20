@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { GEL_HEURES, canauxDeTontine, creerCanal, marquerVerifie, rattacherCanal } from '../../server/services/canaux.ts'
+import { GEL_HEURES, canauxDeTontine, creerCanal, rattacherCanal } from '../../server/services/canaux.ts'
 import { definirCanaux } from '../../server/services/tontines.ts'
 import { notifierTontine, NotificationAvecMontantError } from '../../server/services/notifications.ts'
 import { ledgerEntries, memberships, notifications, tontineChannels, tontines } from '../../server/db/schema.ts'
@@ -38,57 +38,40 @@ async function canal(nom = 'Aya Koné', numero = '+2250707000001') {
 }
 
 describe('canaux de collecte — acceptation T09', () => {
-  it('refuse de rattacher un canal non vérifié', async () => {
+  it('rattache un canal déclaré', async () => {
     const id = await canal()
 
-    // Sans vérification, n'importe qui ferait collecter les cotisations du
-    // groupe sur son propre numéro : l'arnaque la plus simple contre une tontine.
-    await expect(rattacherCanal(db, T, id, PRESIDENT)).rejects.toThrow(
-      expect.objectContaining({ statusCode: 403 }),
-    )
-  })
-
-  it('accepte le rattachement une fois le numéro vérifié', async () => {
-    const id = await canal()
-    await marquerVerifie(db, id)
-
+    // Plus de vérification par SMS : ce qui protège, c'est le code d'accès
+    // redemandé à la déclaration (route), le nom du titulaire, et le gel.
     await rattacherCanal(db, T, id, PRESIDENT)
     expect(await canauxDeTontine(db, T)).toHaveLength(1)
   })
 
+  it('refuse un canal inconnu', async () => {
+    await expect(rattacherCanal(db, T, 'inexistant', PRESIDENT)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 404 }),
+    )
+  })
+
   it('exige un nom de titulaire', async () => {
     const id = await canal('Aya Koné')
-    await marquerVerifie(db, id)
     await rattacherCanal(db, T, id, PRESIDENT)
 
     // Le membre lit ce nom dans son application de paiement pour vérifier
     // qu'il envoie bien à la bonne personne (T14).
     expect((await canauxDeTontine(db, T))[0]!.holderName).toBe('Aya Koné')
   })
-
-  it('n’expose pas un canal non vérifié parmi les canaux de la tontine', async () => {
-    const verifie = await canal('Aya Koné', '+2250707000001')
-    await marquerVerifie(db, verifie)
-    await rattacherCanal(db, T, verifie, PRESIDENT)
-
-    const douteux = await canal('Inconnu', '+2250707000099')
-    await db.insert(tontineChannels).values({ tontineId: T, channelId: douteux })
-
-    expect((await canauxDeTontine(db, T)).map(c => c.id)).toEqual([verifie])
-  })
 })
 
 describe('changement de canal sur une tontine active', () => {
   beforeEach(async () => {
     const initial = await canal('Aya Koné', '+2250707000001')
-    await marquerVerifie(db, initial)
     await rattacherCanal(db, T, initial, PRESIDENT)
     await db.update(tontines).set({ status: 'running' }).where(eq(tontines.id, T))
   })
 
   it('gèle le nouveau canal pendant 48 heures', async () => {
     const nouveau = await canal('Aya Koné', '+2250505000009')
-    await marquerVerifie(db, nouveau)
 
     const avant = Date.now()
     const { frozenUntil } = await rattacherCanal(db, T, nouveau, PRESIDENT)
@@ -103,7 +86,6 @@ describe('changement de canal sur une tontine active', () => {
 
   it('notifie tous les membres', async () => {
     const nouveau = await canal('Aya Koné', '+2250505000009')
-    await marquerVerifie(db, nouveau)
     await rattacherCanal(db, T, nouveau, PRESIDENT)
 
     const envoyees = await db.select().from(notifications)
@@ -115,7 +97,6 @@ describe('changement de canal sur une tontine active', () => {
 
   it('écrit le changement au registre, sans exposer le numéro complet', async () => {
     const nouveau = await canal('Aya Koné', '+2250505000009')
-    await marquerVerifie(db, nouveau)
     await rattacherCanal(db, T, nouveau, PRESIDENT)
 
     const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.tontineId, T))
@@ -175,9 +156,7 @@ describe('règle 22 par le chemin de l’écran de réglages', () => {
    * vert tout en ne se déclenchant jamais.
    */
   async function canalVerifie(numero: string) {
-    const id = await canal('Aya Koné', numero)
-    await marquerVerifie(db, id)
-    return id
+    return await canal('Aya Koné', numero)
   }
 
   beforeEach(async () => {

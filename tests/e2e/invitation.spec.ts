@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
+import { canalDeclare, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
 
 /** Monte une tontine publiée avec des membres, et renvoie son lien d'invitation. */
 async function tontineAvecLien(page: import('@playwright/test').Page) {
   await seConnecter(page)
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: 'Tontine des tantines', locality: 'Abobo', access: 'private' },
@@ -130,10 +130,10 @@ test('le président obtient un lien partageable, à envoi manuel', async ({ page
   expect(await reponse.text()).toContain('<svg')
 })
 
-test('un membre géré qui confirme est rattaché, sans doublon', async ({ page, browser }) => {
+test('un membre géré qui confirme est rattaché, sans doublon, une fois le président d’accord', async ({ page, browser }) => {
   await seConnecter(page)
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: 'Tontine de rattachement', access: 'private' },
@@ -158,15 +158,7 @@ test('un membre géré qui confirme est rattaché, sans doublon', async ({ page,
   // Yao arrive enfin avec l'application, sur son propre numéro.
   const contexteYao = await browser.newContext()
   const pageYao = await contexteYao.newPage()
-  await pageYao.goto('/login')
-  await waitForHydration(pageYao)
-  await pageYao.getByTestId('champ-telephone').fill(numeroYao)
-  await pageYao.getByTestId('bouton-recevoir-code').click()
-  const code = (await pageYao.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  const cases = pageYao.locator('[data-testid="champ-code"] input')
-  for (const [i, chiffre] of [...code!].entries()) await cases.nth(i).fill(chiffre)
-  await pageYao.getByTestId('bouton-valider-code').click()
-  await pageYao.waitForURL(/\/app/)
+  await seConnecter(pageYao, numeroYao)
 
   await pageYao.request.fetch('/api/v1/me', {
     method: 'PATCH',
@@ -175,11 +167,26 @@ test('un membre géré qui confirme est rattaché, sans doublon', async ({ page,
   await pageYao.goto(url)
   await waitForHydration(pageYao)
   await pageYao.getByTestId('bouton-rejoindre').click()
-  await expect(pageYao.getByTestId('message-adhesion')).toBeVisible()
+  // Le numéro n'est plus prouvé par SMS : le siège attend le président.
+  await expect(pageYao.getByTestId('message-adhesion')).toContainText('président doit confirmer')
 
-  const apres = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as {
-    members: Array<{ name: string | null, userId: string | null, shares: number }>
-  }
+  type Membre = { id: string, name: string | null, userId: string | null, shares: number, claim: unknown }
+  const pendant = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as { members: Membre[] }
+  expect(pendant.members).toHaveLength(avant.members.length)
+  const yaoAvant = pendant.members.find(m => m.name === 'Yao Brou')
+  expect(yaoAvant?.userId).toBeNull()
+  expect(yaoAvant?.claim).not.toBeNull()
+
+  // Le président reconnaît Yao depuis l'écran des membres.
+  await page.goto(`/app/tontine/${id}/membres`)
+  await waitForHydration(page)
+  const bloc = page.getByTestId(`rattachement-${yaoAvant!.id}`)
+  await expect(bloc).toContainText('Yao Brou')
+  await expect(bloc).toContainText(numeroYao.slice(-4))
+  await page.getByTestId(`bouton-confirmer-rattachement-${yaoAvant!.id}`).click()
+  await expect(bloc).toHaveCount(0)
+
+  const apres = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as { members: Membre[] }
 
   // Acceptation T12 : rattaché, pas dupliqué. Ses deux parts sont conservées.
   expect(apres.members).toHaveLength(avant.members.length)

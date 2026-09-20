@@ -41,15 +41,17 @@ Si une bibliothèque supplémentaire semble nécessaire, **demande avant de l'aj
 
 * Session par cookie `httpOnly`, `SameSite=Lax`, `Secure`.
 * Numéros de téléphone normalisés en E.164 (`+225XXXXXXXXXX`) avant toute persistance.
-* Les notifications ne contiennent **jamais de montant** (écran de verrouillage, téléphone partagé). « Nouvelle activité sur ta tontine », pas « Tu as reçu 250 000 FCFA ».
-* Tout changement de canal de collecte d'un organisateur : re-vérification OTP + notification à tous les membres + gel de 48 h.
+* **Pas de SMS.** Inscription confirmée par un lien e-mail ; connexion par numéro + code d'accès à 4 chiffres ; « code oublié » par lien e-mail. Le même code protège l'écran de verrouillage.
+* Le code d'accès n'a que 10 000 valeurs : compteur d'échecs **en base** (5 échecs → blocage progressif, 10 → compte verrouillé, rouvert seulement par e-mail), limitation par IP en production, réponse identique que le numéro existe ou non.
+* Le numéro n'étant plus prouvé, un membre géré qui rejoint par le lien ne fait que **demander** son siège : le président confirme.
+* Tout geste sensible — changer de numéro, d'adresse, déclarer un numéro de collecte — redemande le code d'accès. Changement de canal sur une tontine lancée : notification à tous les membres + gel de 48 h.
 
 \---
 
 ## Tests
 
 * **Unitaires obligatoires** sur : calcul des dus, calcul des amendes, ordre de rotation avec parts multiples, transitions d'état. Zéro tolérance d'erreur sur ces quatre-là.
-* **E2E Playwright** sur les quatre parcours critiques : inscription OTP, rejoindre par lien, cotiser (déclarer → confirmer), verser le pot (déclarer → accuser réception).
+* **E2E Playwright** sur les quatre parcours critiques : inscription par e-mail, rejoindre par lien, cotiser (déclarer → confirmer), verser le pot (déclarer → accuser réception).
 * Un ticket n'est pas terminé sans ses tests.
 
 \---

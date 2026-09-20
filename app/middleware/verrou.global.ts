@@ -1,5 +1,5 @@
 /**
- * Verrou d'écran : quand un code est défini, l'application ne s'ouvre pas sans lui.
+ * Verrou d'écran : l'application ne s'ouvre pas sans le code d'accès.
  *
  * Global plutôt que déclaré page par page : oublier le middleware sur un seul
  * écran de `/app/**` ferait un trou dans le verrou, et c'est exactement le
@@ -15,7 +15,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   const session = useSessionStore()
   await session.charger()
-  if (!session.user?.hasPin) return
+  // Pas de session : c'est au middleware d'authentification de renvoyer vers
+  // la connexion, pas au verrou.
+  if (!session.connecte) return
 
   const verrou = useVerrou()
   verrou.rafraichir()

@@ -110,7 +110,13 @@ export function useDb(): Db {
     const serverless = Boolean(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME)
     const client = postgres(url, {
       prepare: !estPoolerTransaction(url),
-      max: serverless ? 1 : 5,
+      // Une seule connexion vers le PGlite local : son multiplexeur met en
+      // file chaque message du protocole, toutes connexions confondues, et un
+      // `Parse` d'une connexion peut s'intercaler entre le `Parse` et le
+      // `Bind` d'une autre — « bind message supplies 5 parameters, but
+      // prepared statement requires 2 » sous les tests de bout en bout. Le
+      // moteur est monothread : une connexion ne coûte aucun débit.
+      max: serverless || !estDistante(url) ? 1 : 5,
       ssl: optionsTls(url),
       connect_timeout: 10,
       // Une connexion qui dort est rendue au pooler : en serverless, elle

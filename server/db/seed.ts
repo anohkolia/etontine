@@ -18,6 +18,7 @@ import { existsSync } from 'node:fs'
 import { inArray } from 'drizzle-orm'
 import { databaseUrl, refuserBaseDistante, useDb } from './index.ts'
 import * as t from './schema.ts'
+import { hashPin } from '../utils/pin.ts'
 
 // Même raison que pour `cli.ts` : un script Node ordinaire ne lit pas `.env`,
 // et le seed doit viser la même base que le serveur.
@@ -55,6 +56,10 @@ const ID = {
   ],
   channel: '5eed0000-0000-4000-8000-000000000201',
 } as const
+
+/** Le code d'accès de tous les comptes de démonstration. */
+export const CODE_DEMO = '2604'
+const CODE_DEMO_HASH = hashPin(CODE_DEMO)
 
 const MEMBRES = [
   // La présidente ne cotise pas : aucune part, elle tient le canal et confirme.
@@ -125,6 +130,12 @@ async function semer() {
     await db.insert(t.users).values({
       id: m.id,
       phone: m.phone,
+      // Comptes de démonstration : confirmés d'office, code d'accès « 2604 ».
+      // La liste des codes interdits exclut les suites et répétitions ; celui-ci
+      // est assez banal pour un jeu de développement, et pas dans la liste.
+      email: `${m.phone.slice(-8)}@exemple.ci`,
+      emailVerifiedAt: maintenant,
+      pinHash: CODE_DEMO_HASH,
       firstName: m.firstName,
       lastName: m.lastName,
       kycLevel: m.role === 'president' ? 2 : 1,
@@ -138,7 +149,6 @@ async function semer() {
     provider: 'wave',
     msisdn: '+2250707000001',
     holderName: 'Aya Koné',
-    verifiedAt: maintenant,
   })
 
   await db.insert(t.tontines).values({

@@ -10,7 +10,7 @@
  *
  * Ici, tout `401` de l'API vide le cache et renvoie à la connexion, en gardant
  * l'intention dans `?redirect=`. Les routes d'authentification sont exclues :
- * un mauvais code SMS est un `401` légitime qui se traite sur place.
+ * un mauvais code d'accès est un `401` légitime qui se traite sur place.
  *
  * L'interception se fait sur `fetch` lui-même, pas sur `$fetch` : l'import
  * automatique `$fetch` est une liaison de module figée au chargement, la

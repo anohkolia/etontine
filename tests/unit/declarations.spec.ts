@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { FENETRE_DOUBLON_SECONDES, declarerEspeces, declarerPaiement } from '../../server/services/declarations.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
 import { contributions, ledgerEntries, memberships, notifications, paymentDeclarations } from '../../server/db/schema.ts'
@@ -38,7 +38,6 @@ beforeEach(async () => {
     .where(eq(memberships.id, fatou))
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-  await marquerVerifie(db, canal)
   await definirCanaux(db, T, [canal], PRESIDENT)
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)

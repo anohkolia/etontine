@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, seConnecter, renseignerNom, verifierIdentite } from './helpers/session'
+import { canalDeclare, seConnecter, renseignerNom, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
 
 test('sans pièce d’identité, l’option « tontine ouverte » est grisée mais visible', async ({ page }) => {
@@ -40,7 +40,7 @@ test('avec la pièce d’identité vérifiée, l’option ouverte reste annoncé
 test('le simulateur se met à jour à chaque frappe', async ({ page }) => {
   await seConnecter(page)
   await verifierIdentite(page)
-  await canalVerifie(page, `+225${numeroDeTest()}`)
+  await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
@@ -69,7 +69,7 @@ test('le simulateur se met à jour à chaque frappe', async ({ page }) => {
 test('l’alerte de plafond apparaît quand le pot devient gros', async ({ page }) => {
   await seConnecter(page)
   await verifierIdentite(page)
-  await canalVerifie(page, `+225${numeroDeTest()}`)
+  await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
@@ -90,7 +90,7 @@ test('l’alerte de plafond apparaît quand le pot devient gros', async ({ page 
 test('fermer et rouvrir l’application restaure le brouillon à la bonne étape', async ({ page }) => {
   await seConnecter(page)
   await verifierIdentite(page)
-  await canalVerifie(page, `+225${numeroDeTest()}`)
+  await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)

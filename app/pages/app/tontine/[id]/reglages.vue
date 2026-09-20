@@ -37,7 +37,6 @@ interface Canal {
   provider: 'wave' | 'orange' | 'mtn' | 'moov'
   msisdn: string
   holderName: string
-  verifiedAt?: string | null
   frozenUntil?: string | null
 }
 
@@ -91,7 +90,8 @@ const form = reactive({
 
 const EMOJIS = TONTINE_EMOJIS
 
-const canauxVerifies = computed(() => mesCanaux.value.filter(c => c.verifiedAt))
+/** Tous les canaux du compte : il n'y a plus de vérification par SMS qui en écarterait. */
+const canauxVerifies = computed(() => mesCanaux.value)
 const lancee = computed(() => tontine.value?.status === 'running')
 
 /**

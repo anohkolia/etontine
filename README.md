@@ -35,7 +35,9 @@ pnpm db:admin
 pnpm dev:admin        # http://localhost:3001
 ```
 
-En développement, le code à usage unique s'affiche directement à l'écran.
+En développement, le lien de confirmation (inscription, code oublié) s'affiche
+directement à l'écran au lieu de partir par e-mail. Les comptes de `pnpm db:seed`
+ont tous le code d'accès `2604`.
 
 `/demo` est la page de vérification du socle : les composants PrimeVue en mode
 unstyled habillés par le préréglage pass-through, et les composants de base du
@@ -73,7 +75,7 @@ Ce qui doit être renseigné ou choisi, et que le code ne peut pas deviner :
 |Quoi|Où|
 |-|-|
 |L'identité de l'éditeur (raison sociale, RCCM, adresse, contact, hébergeur)|`shared/constants/editeur.ts` — les valeurs entre crochets s'affichent telles quelles sur `/legal/*` tant qu'elles ne sont pas complétées|
-|L'envoi des codes SMS|`NUXT\_SMS\_PROVIDER=http` avec `NUXT\_SMS\_HTTP\_URL` et `NUXT\_SMS\_HTTP\_TOKEN` ; le mode `log` est refusé en production. Brancher un opérateur précis se fait dans `server/services/sms.ts`|
+|L'envoi des e-mails (confirmation d'inscription, code oublié)|`NUXT\_EMAIL\_PROVIDER=resend` avec `NUXT\_EMAIL\_RESEND\_API\_KEY` et `NUXT\_EMAIL\_FROM` ; le mode `log` est refusé en production. Brancher un autre fournisseur se fait dans `server/services/email.ts`|
 |Où régler l'abonnement|`NUXT\_PUBLIC\_ABONNEMENT\_REGLEMENT\_*` — le numéro de mobile money, son titulaire et le WhatsApp de contact ; sans eux, l'écran renvoie vers l'adresse de l'éditeur|
 |Les notifications push|`NUXT\_VAPID\_*` — facultatives, les notifications restent lisibles dans l'application|
 |Le secret de session et l'adresse publique|`NUXT\_SESSION\_SECRET`, `NUXT\_PUBLIC\_SITE\_URL`|

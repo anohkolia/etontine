@@ -15,7 +15,7 @@
  * - `lecture` — il n'y a rien à saisir. Promettre de garder une saisie sur une
  *   page d'aide ou un reçu ne veut rien dire ;
  * - `reseau-requis` — il y a un formulaire, mais rien n'est mis en file. Un
- *   code par SMS ne se demande pas hors réseau, et une invitation ne s'accepte
+ *   code d'accès ne se vérifie pas hors réseau, et une invitation ne s'accepte
  *   pas non plus. Annoncer le contraire est pire que se taire : le membre
  *   attend un envoi qui n'a jamais eu lieu.
  *

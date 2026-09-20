@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Connexion par code à usage unique.
+ * Connexion par numéro et code d'accès.
  *
- * Deux étapes sur une seule page : le numéro, puis le code. Pas de navigation
- * entre les deux — un membre qui perd la page perd son code.
+ * Une seule étape : le numéro et les quatre chiffres. Plus de SMS — le code
+ * a été choisi à l'inscription, confirmée par e-mail. « Code oublié ? » mène
+ * à la réinitialisation par lien.
  */
-import { otpRequestInput } from '#shared/schemas'
+import { loginInput } from '#shared/schemas'
 
 definePageMeta({ layout: false })
 const { t } = useI18n()
@@ -13,20 +14,16 @@ const { t } = useI18n()
 const { format, extraire, estComplet } = usePhoneMask()
 
 /**
- * Le numéro est validé par `otpRequestInput`, le schéma du serveur : un numéro
+ * Le numéro est validé par `loginInput`, le schéma du serveur : un numéro
  * ivoirien commence par 01, 05 ou 07. La règle s'affiche sous le champ à la
  * perte de focus, avant l'envoi — et le numéro part normalisé en E.164.
  */
-const connexion = useFormulaire(otpRequestInput, { phone: '' })
+const connexion = useFormulaire(loginInput, { phone: '', code: '' })
 
-const etape = ref<'numero' | 'code'>('numero')
 const saisieNumero = ref('')
 const code = ref('')
 const enCours = ref(false)
 const erreur = ref<string | null>(null)
-const secondesAvantRenvoi = ref(0)
-const echecs = ref(0)
-const codeDeDeveloppement = ref<string | null>(null)
 
 const numeroAffiche = computed(() => format(saisieNumero.value))
 
@@ -35,9 +32,8 @@ const numeroAffiche = computed(() => format(saisieNumero.value))
  *
  * Avec un `computed` en écriture, taper « 07.07 » puis « 07 07 » donne la même
  * valeur normalisée : le modèle ne change pas, Vue ne repeint pas le champ, et
- * la saisie brute reste affichée telle quelle. Le masque « saute » de façon
- * imprévisible. En reposant nous-mêmes la valeur de l'élément, l'affichage
- * suit toujours.
+ * la saisie brute reste affichée telle quelle. En reposant nous-mêmes la
+ * valeur de l'élément, l'affichage suit toujours.
  */
 function onSaisieNumero(evenement: Event) {
   const champ = evenement.target as HTMLInputElement
@@ -48,69 +44,30 @@ function onSaisieNumero(evenement: Event) {
 
 /** À la perte de focus seulement : signaler l'erreur à la première frappe serait harceler. */
 async function verifierNumero() {
-  if (saisieNumero.value.length > 0) await connexion.valider()
+  if (saisieNumero.value.length > 0) await connexion.validerChamp('phone')
 }
 
-const numeroValide = computed(() => estComplet(saisieNumero.value))
-/** L'appel vocal n'est proposé qu'après deux essais infructueux. */
-const vocalDisponible = computed(() => echecs.value >= 2)
-
-let minuterie: ReturnType<typeof setInterval> | undefined
-
-function lancerCompteARebours(secondes: number) {
-  secondesAvantRenvoi.value = secondes
-  clearInterval(minuterie)
-  minuterie = setInterval(() => {
-    secondesAvantRenvoi.value--
-    if (secondesAvantRenvoi.value <= 0) clearInterval(minuterie)
-  }, 1000)
-}
-
-onBeforeUnmount(() => clearInterval(minuterie))
+const pret = computed(() => estComplet(saisieNumero.value) && /^\d{4}$/.test(code.value))
 
 function messageErreur(e: unknown): string {
   const data = (e as { data?: { error?: { message?: string } } })?.data
   return data?.error?.message ?? t('commun.serveur_injoignable_connexion')
 }
 
-async function demanderCode(canal: 'sms' | 'voice' = 'sms') {
+async function seConnecter() {
   erreur.value = null
+  connexion.setFieldValue('code', code.value, false)
   const valeurs = await connexion.valider()
   if (!valeurs) return
   enCours.value = true
   try {
-    const reponse = await $fetch<{ resendAfterSeconds: number, devCode?: string }>(
-      canal === 'sms' ? '/api/v1/auth/otp/request' : '/api/v1/auth/otp/voice',
-      { method: 'POST', body: { phone: valeurs.phone } },
-    )
-    etape.value = 'code'
-    codeDeDeveloppement.value = reponse.devCode ?? null
-    lancerCompteARebours(reponse.resendAfterSeconds)
-  }
-  catch (e) {
-    erreur.value = messageErreur(e)
-  }
-  finally {
-    enCours.value = false
-  }
-}
-
-async function verifier() {
-  erreur.value = null
-  enCours.value = true
-  try {
-    const { isNewUser } = await $fetch<{ isNewUser: boolean }>('/api/v1/auth/otp/verify', {
-      method: 'POST',
-      body: { phone: saisieNumero.value, code: code.value },
-    })
+    await $fetch('/api/v1/auth/login', { method: 'POST', body: valeurs })
     await useSessionStore().charger(true)
-    // Un code SMS prouve plus qu'un code d'écran : l'onglet est déverrouillé,
-    // et c'est aussi la sortie de secours de « code oublié ».
+    // Le code vient d'être saisi : l'écran de verrouillage n'a pas à le redemander.
     useVerrou().deverrouiller()
-    await navigateTo(destination(isNewUser))
+    await navigateTo(destination())
   }
   catch (e) {
-    echecs.value++
     code.value = ''
     erreur.value = messageErreur(e)
   }
@@ -130,11 +87,17 @@ async function verifier() {
  * pointant vers un autre domaine transformerait l'écran de connexion en
  * tremplin d'hameçonnage.
  */
-function destination(nouveauCompte: boolean): string {
+function destination(): string {
   const demandee = useRoute().query.redirect
   if (typeof demandee === 'string' && /^\/(?!\/)/.test(demandee)) return demandee
-  return nouveauCompte ? '/app/profil' : '/app'
+  return '/app'
 }
+
+/** Le lien vers l'inscription garde l'intention : rejoindre une tontine, puis s'inscrire, puis y arriver. */
+const lienInscription = computed(() => {
+  const demandee = useRoute().query.redirect
+  return typeof demandee === 'string' ? { path: '/inscription', query: { redirect: demandee } } : '/inscription'
+})
 
 /**
  * Quelqu'un de déjà connecté n'a rien à faire ici : on le renvoie dans
@@ -145,25 +108,16 @@ const sessionExpiree = computed(() => useRoute().query.motif === 'expiree')
 onMounted(async () => {
   const session = useSessionStore()
   await session.charger()
-  if (session.connecte) await navigateTo(destination(false), { replace: true })
+  if (session.connecte) await navigateTo(destination(), { replace: true })
 })
-
-function changerDeNumero() {
-  etape.value = 'numero'
-  code.value = ''
-  erreur.value = null
-  echecs.value = 0
-  clearInterval(minuterie)
-}
 
 useHead({ title: t('public.login.connexion_etontine') })
 </script>
 
 <template>
   <div class="flex min-h-dvh flex-col bg-surface">
-    <!-- un code par SMS ne se demande pas hors réseau : rien n'est mis en file
-         ici, et promettre le contraire ferait attendre un envoi qui n'a pas eu
-         lieu. -->
+    <!-- La connexion se vérifie côté serveur : rien n'est mis en file ici, et
+         promettre le contraire ferait attendre une ouverture qui n'a pas eu lieu. -->
     <OfflineBanner nature="reseau-requis" />
 
     <main class="mx-auto flex w-full max-w-sm flex-1 flex-col gap-6 px-6 py-8">
@@ -180,21 +134,8 @@ useHead({ title: t('public.login.connexion_etontine') })
         {{ $t('public.login.retour_a_l_accueil') }}
       </NuxtLink>
 
-      <!-- Deux segments pour deux étapes, repris du template : le membre voit
-           où il en est sans avoir à lire. -->
-      <ol
-        class="flex items-center gap-2"
-        aria-hidden="true"
-      >
-        <li class="h-1.5 flex-1 rounded-full bg-brand" />
-        <li
-          class="h-1.5 flex-1 rounded-full transition-colors"
-          :class="etape === 'code' ? 'bg-brand' : 'bg-surface-sunken'"
-        />
-      </ol>
-
       <p
-        v-if="sessionExpiree && etape === 'numero'"
+        v-if="sessionExpiree"
         role="status"
         class="flex items-start gap-2 rounded-control bg-late-surface p-3 text-sm text-late-ink"
         data-testid="session-expiree"
@@ -210,23 +151,16 @@ useHead({ title: t('public.login.connexion_etontine') })
 
       <header class="flex flex-col gap-2">
         <h1 class="text-2xl font-bold text-ink">
-          {{ etape === 'numero' ? $t('public.login.ton_numero_c_est') : $t('public.login.ton_code') }}
+          {{ $t('public.login.titre') }}
         </h1>
         <p class="text-ink-muted">
-          <template v-if="etape === 'numero'">
-            {{ $t('public.login.on_t_envoie_un') }}
-          </template>
-          <template v-else>
-            {{ $t('public.login.code_envoye_au') }} <span class="font-medium text-ink">{{ numeroAffiche }}</span>.
-          </template>
+          {{ $t('public.login.ton_numero_et_ton_code') }}
         </p>
       </header>
 
-      <!-- Étape 1 : le numéro -->
       <form
-        v-if="etape === 'numero'"
         class="flex flex-1 flex-col gap-4"
-        @submit.prevent="demanderCode('sms')"
+        @submit.prevent="seConnecter"
       >
         <label
           class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
@@ -262,6 +196,27 @@ useHead({ title: t('public.login.connexion_etontine') })
           {{ $t('public.login.un_numero_ivoirien_01') }}
         </p>
 
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="code"
+        >
+          {{ $t('public.login.code_d_acces') }}
+          <!-- `current-password` : le gestionnaire de mots de passe du
+               téléphone propose le code, comme pour n'importe quel compte. -->
+          <InputText
+            id="code"
+            v-model="code"
+            type="password"
+            inputmode="numeric"
+            autocomplete="current-password"
+            maxlength="4"
+            class="text-center text-2xl tracking-[0.5em]"
+            :aria-describedby="erreur ? 'erreur-login' : undefined"
+            data-testid="champ-code"
+            @input="erreur = null"
+          />
+        </label>
+
         <p
           v-if="erreur"
           id="erreur-login"
@@ -278,113 +233,31 @@ useHead({ title: t('public.login.connexion_etontine') })
           {{ erreur }}
         </p>
 
+        <NuxtLink
+          to="/code-oublie"
+          class="min-h-touch inline-flex items-center self-start text-sm text-brand underline underline-offset-4"
+          data-testid="lien-code-oublie"
+        >
+          {{ $t('public.login.code_oublie') }}
+        </NuxtLink>
+
         <!-- Règle 13 : l'action primaire est en bas d'écran, à portée de pouce. -->
         <div class="mt-auto flex flex-col gap-3 pt-4">
           <Button
             type="submit"
-            :label="enCours ? $t('commun.envoi_en_cours') : $t('commun.recevoir_le_code')"
-            :disabled="!numeroValide || enCours"
+            :label="enCours ? $t('commun.verification_en_cours') : $t('public.login.se_connecter')"
+            :disabled="!pret || enCours"
             class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
-            data-testid="bouton-recevoir-code"
+            data-testid="bouton-connexion"
           />
-          <!-- Le compte se crée à la validation du code : c'est ici qu'on
-               accepte les conditions, et elles doivent être lisibles avant. -->
-          <p class="text-center text-xs text-ink-subtle">
-            {{ $t('public.login.en_continuant_tu_acceptes') }}
+          <p class="text-center text-sm text-ink-muted">
+            {{ $t('public.login.pas_encore_de_compte') }}
             <NuxtLink
-              to="/legal/cgu"
-              class="text-brand underline underline-offset-4"
-              data-testid="lien-cgu-login"
-            >{{ $t('public.login.conditions_d_utilisation') }}</NuxtLink>
-            {{ $t('public.login.et_la') }}
-            <NuxtLink
-              to="/legal/confidentialite"
-              class="text-brand underline underline-offset-4"
-            >{{ $t('public.login.politique_de_confidentialite') }}</NuxtLink>.
+              :to="lienInscription"
+              class="font-semibold text-brand underline underline-offset-4"
+              data-testid="lien-inscription"
+            >{{ $t('public.login.creer_un_compte') }}</NuxtLink>
           </p>
-        </div>
-      </form>
-
-      <!-- Étape 2 : le code -->
-      <form
-        v-else
-        class="flex flex-1 flex-col gap-4"
-        @submit.prevent="verifier"
-      >
-        <!-- `one-time-code` permet à Android et iOS de proposer le code reçu
-             sans que le membre ait à quitter l'application pour le recopier. -->
-        <InputOtp
-          v-model="code"
-          :length="6"
-          integer-only
-          data-testid="champ-code"
-          @update:model-value="erreur = null"
-        />
-
-        <p
-          v-if="codeDeDeveloppement"
-          class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
-          data-testid="code-dev"
-        >
-          {{ $t('public.login.developpement_code') }} <strong>{{ codeDeDeveloppement }}</strong>
-        </p>
-
-        <p
-          v-if="erreur"
-          role="alert"
-          class="flex items-start gap-2 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
-          data-testid="erreur-login"
-        >
-          <Icon
-            name="lucide:octagon-alert"
-            size="1rem"
-            class="mt-0.5 shrink-0"
-            aria-hidden="true"
-          />
-          {{ erreur }}
-        </p>
-
-        <div class="flex flex-col gap-2 text-sm">
-          <button
-            type="button"
-            class="min-h-touch text-left text-brand underline underline-offset-4 disabled:text-ink-subtle disabled:no-underline"
-            :disabled="secondesAvantRenvoi > 0 || enCours"
-            data-testid="bouton-renvoyer"
-            @click="demanderCode('sms')"
-          >
-            {{ secondesAvantRenvoi > 0
-              ? $t('public.login.renvoyer_le_code_dans', { s: secondesAvantRenvoi })
-              : $t('commun.renvoyer_le_code') }}
-          </button>
-
-          <button
-            v-if="vocalDisponible"
-            type="button"
-            class="min-h-touch text-left text-brand underline underline-offset-4"
-            data-testid="bouton-vocal"
-            @click="demanderCode('voice')"
-          >
-            {{ $t('public.login.recevoir_le_code_par') }}
-          </button>
-
-          <button
-            type="button"
-            class="min-h-touch text-left text-ink-muted underline underline-offset-4"
-            data-testid="bouton-changer-numero"
-            @click="changerDeNumero"
-          >
-            {{ $t('public.login.changer_de_numero') }}
-          </button>
-        </div>
-
-        <div class="mt-auto pt-4">
-          <Button
-            type="submit"
-            :label="enCours ? $t('commun.verification_en_cours') : $t('public.login.valider')"
-            :disabled="code.length !== 6 || enCours"
-            class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
-            data-testid="bouton-valider-code"
-          />
         </div>
       </form>
     </main>
@@ -393,9 +266,9 @@ useHead({ title: t('public.login.connexion_etontine') })
 
 <!--
   États d'écran (règle 14) :
-  · chargement — indiqué dans les libellés des boutons (« Envoi… », « Vérification… »)
+  · chargement — indiqué dans le libellé du bouton (« Vérification… »)
   · vide       — sans objet : un formulaire n'est jamais vide
   · erreur     — message en ligne avec `role="alert"`, à côté du champ fautif
   · hors-ligne — <OfflineBanner> en tête de page
-  · contenu    — le formulaire, en deux étapes
+  · contenu    — le formulaire
 -->

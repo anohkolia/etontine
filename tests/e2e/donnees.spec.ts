@@ -1,9 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { numeroDeTest } from './helpers/telephone'
-import { remplirCode } from './helpers/otp'
-import { seConnecter } from './helpers/session'
-import { adhesionDe, inscriptionOtp, rattacherMembre, tontinePubliee } from './helpers/tontine'
+import { CODE_TEST, seConnecter } from './helpers/session'
+import { adhesionDe, inscription, rattacherMembre, tontinePubliee } from './helpers/tontine'
 
 /**
  * Ce que le membre voit de ses données : le registre en entier, le fil d'une
@@ -17,13 +16,13 @@ const PNG = Buffer.from(
 )
 
 test('le registre se charge page par page', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
   await page.request.fetch(`/api/v1/tontines/${id}/members/${await adhesionDe(page, id, 'Koffi N’Guessan')}`, {
     method: 'PATCH', data: { role: 'treasurer' },
   })
@@ -66,15 +65,15 @@ test('le registre se charge page par page', async ({ page, browser }) => {
 })
 
 test('un membre suit sa contestation, et le censeur la tranche', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const numeroFatou = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroFatou },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
-  const fatou = await rattacherMembre(browser, lien, numeroFatou, 'Fatou', 'Diarra')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
+  const fatou = await rattacherMembre(browser, { president: page, id, lien }, numeroFatou, 'Fatou', 'Diarra')
   await page.request.fetch(`/api/v1/tontines/${id}/members/${await adhesionDe(page, id, 'Fatou Diarra')}`, {
     method: 'PATCH', data: { role: 'auditor' },
   })
@@ -117,7 +116,7 @@ test('un membre suit sa contestation, et le censeur la tranche', async ({ page, 
 })
 
 test('l’historique montre le tour passé et donne le reçu', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   // Trois cotisants : Koffi, premier inscrit, prend la main au tour 1, et
   // deux tours restent à venir. Le président, lui, ne cotise pas.
@@ -126,7 +125,7 @@ test('l’historique montre le tour passé et donne le reçu', async ({ page, br
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
     { nom: 'Yao Brou', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
   await page.request.post(`/api/v1/tontines/${id}/start`)
 
   // Koffi déclare sa cotisation ; le président la confirme.
@@ -156,13 +155,13 @@ test('l’historique montre le tour passé et donne le reçu', async ({ page, br
 })
 
 test('une déclaration en attente peut recevoir sa capture après coup', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
   await page.request.fetch(`/api/v1/tontines/${id}/members/${await adhesionDe(page, id, 'Koffi N’Guessan')}`, {
     method: 'PATCH', data: { role: 'treasurer' },
   })
@@ -190,13 +189,13 @@ test('une déclaration en attente peut recevoir sa capture après coup', async (
 })
 
 test('le versement du pot accepte une capture', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
   await page.request.fetch(`/api/v1/tontines/${id}/members/${await adhesionDe(page, id, 'Koffi N’Guessan')}`, {
     method: 'PATCH', data: { role: 'treasurer' },
   })
@@ -249,16 +248,17 @@ test('le lien de paiement d’un canal se saisit et se propose au membre', async
   await expect(page.getByTestId('bouton-ajouter-canal')).toBeDisabled()
 
   await page.getByTestId('champ-lien-paiement').fill('https://pay.wave.com/m/M_ci_test')
+  await page.getByTestId('champ-code-canal').fill(CODE_TEST)
   await page.getByTestId('bouton-ajouter-canal').click()
-  // Le canal créé enchaîne sur sa vérification : c'est le signe que l'envoi
-  // est passé — interroger l'API avant serait une course.
-  await expect(page.getByTestId('bloc-verification')).toBeVisible()
+  // Le canal créé apparaît dans la liste : c'est le signe que l'envoi est
+  // passé — interroger l'API avant serait une course.
+  await expect(page.getByTestId('liste-canaux')).toBeVisible()
 
   const canaux = await (await page.request.get('/api/v1/me/channels')).json() as Array<{ paymentLinkUrl: string | null }>
   expect(canaux.some(c => c.paymentLinkUrl === 'https://pay.wave.com/m/M_ci_test')).toBe(true)
 })
 
-test('changer de numéro passe par un code sur le nouveau numéro', async ({ page }) => {
+test('changer de numéro exige le code d’accès', async ({ page }) => {
   await seConnecter(page)
   await page.goto('/app/profil')
   await waitForHydration(page)
@@ -266,10 +266,14 @@ test('changer de numéro passe par un code sur le nouveau numéro', async ({ pag
   const nouveau = numeroDeTest()
   await page.getByTestId('bouton-changer-numero').click()
   await page.getByTestId('champ-nouveau-numero').fill(nouveau)
-  await page.getByTestId('bouton-valider-numero').click()
 
-  const code = (await page.getByTestId('code-dev-numero').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code-numero', code!)
+  // Le mauvais code ne change rien : le numéro est l'identifiant du compte
+  // et l'adresse du pot, la session seule ne suffit pas.
+  await page.getByTestId('champ-code-numero').fill('9999')
+  await page.getByTestId('bouton-valider-numero').click()
+  await expect(page.getByTestId('message-numero')).toContainText('incorrect')
+
+  await page.getByTestId('champ-code-numero').fill(CODE_TEST)
   await page.getByTestId('bouton-valider-numero').click()
 
   await expect(page.getByTestId('profil-enregistre')).toContainText('Numéro changé')
@@ -277,14 +281,14 @@ test('changer de numéro passe par un code sur le nouveau numéro', async ({ pag
 })
 
 test('un simple membre ne voit pas les numéros des autres', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const numeroFatou = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroFatou },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
 
   // Le président voit tout.
   await page.goto(`/app/tontine/${id}/membres`)

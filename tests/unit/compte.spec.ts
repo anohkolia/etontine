@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import {
   appliquerChangementNumero, blocagesSuppression, demanderChangementNumero, exporterDonnees,
 } from '../../server/services/compte.ts'
-import { consommerCode, requestOtp } from '../../server/services/otp.ts'
 import { hashPin, verifyPin } from '../../server/utils/pin.ts'
 import {
   contributions, ledgerEntries, memberships, notifications, rounds, shares, tontines, users,
@@ -131,7 +130,7 @@ describe('export des données personnelles', () => {
   })
 })
 
-describe('code de verrouillage', () => {
+describe('code d’accès — empreinte', () => {
   it('ne stocke jamais le code, et vérifie correctement', () => {
     const empreinte = hashPin('1234')
 
@@ -205,15 +204,5 @@ describe('changement de numéro', () => {
     const prevenus = await db.select().from(notifications)
     expect(prevenus.map(n => n.userId)).toEqual([AUTRE])
     expect(prevenus[0]!.body).not.toContain('9999')
-  })
-
-  it('consommer un code ne crée jamais de compte', async () => {
-    const { devCode } = await requestOtp(db, '+2250707009999')
-    await consommerCode(db, '+2250707009999', devCode!)
-    expect(await db.select().from(users).where(eq(users.phone, '+2250707009999'))).toHaveLength(0)
-    // Et il ne se consomme qu'une fois.
-    await expect(consommerCode(db, '+2250707009999', devCode!)).rejects.toThrow(
-      expect.objectContaining({ statusCode: 422 }),
-    )
   })
 })

@@ -4,7 +4,9 @@ import { memberUpdateInput } from '../../../../../../../shared/schemas/index.ts'
 import { useDb } from '../../../../../../db/index.ts'
 import { memberships, tontines } from '../../../../../../db/schema.ts'
 import { attribuerParts, declarerDefaillant, definirRole } from '../../../../../../services/membres.ts'
-import { approuverAdhesion, refuserAdhesion } from '../../../../../../services/invitations.ts'
+import {
+  approuverAdhesion, confirmerRattachement, refuserAdhesion, refuserRattachement,
+} from '../../../../../../services/invitations.ts'
 import { requireMembership } from '../../../../../../utils/auth.ts'
 import { apiError, validationError } from '../../../../../../utils/errors.ts'
 
@@ -35,6 +37,17 @@ export default defineEventHandler(async (event) => {
     .limit(1)
 
   if (!membre) throw apiError('NOT_FOUND', 'Membre introuvable.')
+
+  // Un compte demande à reprendre ce siège de membre géré : le président
+  // tranche. Rien d'autre ne se combine avec ce geste.
+  if (parsed.data.claim === 'confirm') {
+    await confirmerRattachement(db, membershipId, user.id)
+    return { ok: true }
+  }
+  if (parsed.data.claim === 'reject') {
+    await refuserRattachement(db, membershipId, user.id)
+    return { ok: true }
+  }
 
   if (parsed.data.role) await definirRole(db, tontineId, membershipId, parsed.data.role, user.id)
 

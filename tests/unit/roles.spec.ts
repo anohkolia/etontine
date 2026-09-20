@@ -5,7 +5,7 @@ import {
   retirerMembre, transfererPresidence,
 } from '../../server/services/membres.ts'
 import { envoyerRappels } from '../../server/services/rappels.ts'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
 import { ledgerEntries, memberships, notifications, rounds, shares } from '../../server/db/schema.ts'
@@ -56,7 +56,6 @@ beforeEach(async () => {
   const canal = await creerCanal(db, PRESIDENT, {
     provider: 'wave', msisdn: '+2250707100001', holderName: 'Aya Koné',
   })
-  await marquerVerifie(db, canal)
   await definirCanaux(db, T, [canal], PRESIDENT)
   await publier(db, T)
 })

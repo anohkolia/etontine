@@ -104,7 +104,6 @@ interface Canal {
   provider: string
   msisdn: string
   holderName: string
-  verifiedAt: string | null
 }
 const canaux = ref<Canal[]>([])
 
@@ -130,7 +129,8 @@ const dateValide = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.startDate) && 
 const potEstime = computed(() => potParTour(form.shareAmount, brouillon.membresPrevus))
 const alertePlafond = computed(() => potEstime.value > seuilAlerte)
 
-const canauxVerifies = computed(() => canaux.value.filter(c => c.verifiedAt !== null))
+/** Tous les canaux du compte : il n'y a plus de vérification par SMS qui en écarterait. */
+const canauxVerifies = computed(() => canaux.value)
 
 type ErreurApi = { data?: { error?: { code?: string, message?: string } } }
 

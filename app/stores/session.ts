@@ -4,6 +4,8 @@ import type { MembershipRole } from '#shared/schemas'
 export interface SessionUser {
   id: string
   phone: string
+  /** L'adresse confirmée du compte — nulle sur un compte d'avant l'e-mail. */
+  email: string | null
   firstName: string | null
   lastName: string | null
   avatarUrl: string | null
@@ -13,7 +15,6 @@ export interface SessionUser {
   /** Le motif du refus, obligatoire côté back-office. */
   kycRejectionReason: string | null
   kycSubmittedAt: string | null
-  hasPin: boolean
 }
 
 export interface SessionMembership {

@@ -53,12 +53,31 @@ export const users = pgTable('users', {
   id: id(),
   /** E.164 obligatoire, `+225XXXXXXXXXX` (règle 20). Normalisé avant insertion. */
   phone: text('phone').notNull().unique(),
+  /**
+   * L'adresse qui a confirmé le compte, en minuscules. Nulle sur un compte
+   * jamais confirmé — il peut alors être **repris** par une inscription sur le
+   * même numéro, voir `server/services/connexion.ts`.
+   */
+  email: text('email').unique(),
+  emailVerifiedAt: horodatage('email_verified_at'),
   firstName: text('first_name'),
   lastName: text('last_name'),
   avatarUrl: text('avatar_url'),
   /** Palier KYC 0–3, voir docs/data-model.md §4. */
   kycLevel: integer('kyc_level').notNull().default(0),
+  /**
+   * Empreinte scrypt du code d'accès (`server/utils/pin.ts`). Le même code
+   * ouvre la session et l'écran de verrouillage. Nul sur un compte qui n'a
+   * pas fini son inscription.
+   */
   pinHash: text('pin_hash'),
+  /**
+   * Échecs de connexion consécutifs et verrouillage — **en base**, pas en
+   * mémoire : quatre chiffres se devinent en dix mille essais, et un compteur
+   * perdu au redémarrage du serveur remettrait le chronomètre à zéro.
+   */
+  failedLogins: integer('failed_logins').notNull().default(0),
+  lockedUntil: horodatage('locked_until'),
   /** Déclenche le gel de 48 h sur les versements. */
   phoneChangedAt: horodatage('phone_changed_at'),
   /**
@@ -109,16 +128,24 @@ export const sessions = pgTable('sessions', {
  * Demandes d'OTP. Le code n'est jamais stocké en clair : seule son empreinte
  * l'est, comme un mot de passe.
  */
-export const otpRequests = pgTable('otp_requests', {
+/**
+ * Les liens envoyés par e-mail : confirmation d'inscription, changement
+ * d'adresse, réinitialisation du code d'accès.
+ *
+ * Seule l'empreinte du jeton est stockée : une fuite de la base ne donne pas
+ * les liens. `email` est l'adresse **visée** — celle qu'on confirme —, pas
+ * forcément celle du compte au moment de l'envoi.
+ */
+export const emailTokens = pgTable('email_tokens', {
   id: id(),
-  phone: text('phone').notNull(),
-  codeHash: text('code_hash').notNull(),
-  channel: text('channel', { enum: ['sms', 'voice'] }).notNull().default('sms'),
-  attempts: integer('attempts').notNull().default(0),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: text('purpose', { enum: ['confirm_email', 'change_email', 'reset_code'] }).notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  email: text('email').notNull(),
   consumedAt: horodatage('consumed_at'),
   expiresAt: horodatage('expires_at').notNull(),
   createdAt: createdAt(),
-}, t => [index('otp_phone_idx').on(t.phone, t.createdAt)])
+}, t => [index('email_tokens_user_idx').on(t.userId, t.createdAt)])
 
 /* ------------------------------------------------------------------ *
  * Canaux de collecte
@@ -132,8 +159,6 @@ export const collectionChannels = pgTable('collection_channels', {
   /** Affiché au membre pour vérification anti-arnaque. Obligatoire (T09). */
   holderName: text('holder_name').notNull(),
   paymentLinkUrl: text('payment_link_url'),
-  /** `null` = canal inutilisable. L'OTP sur le numéro de collecte est obligatoire. */
-  verifiedAt: horodatage('verified_at'),
   createdAt: createdAt(),
 }, t => [index('channels_user_idx').on(t.userId)])
 
@@ -189,6 +214,13 @@ export const memberships = pgTable('memberships', {
   userId: text('user_id').references(() => users.id),
   managedName: text('managed_name'),
   managedPhone: text('managed_phone'),
+  /**
+   * Quelqu'un demande à reprendre ce siège de membre géré. Le numéro n'est
+   * plus prouvé par SMS : c'est le président qui confirme, et jusque-là
+   * `userId` reste nul — le demandeur ne voit rien de la tontine.
+   */
+  claimedByUserId: text('claimed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  claimedAt: horodatage('claimed_at'),
   /** Le rôle est **par tontine**, jamais global. */
   role: text('role', { enum: membershipRole.options }).notNull().default('member'),
   status: text('status', { enum: membershipStatus.options }).notNull().default('invited'),
@@ -545,6 +577,7 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Tontine = typeof tontines.$inferSelect
 export type Membership = typeof memberships.$inferSelect
+export type EmailToken = typeof emailTokens.$inferSelect
 export type Share = typeof shares.$inferSelect
 export type Round = typeof rounds.$inferSelect
 export type Contribution = typeof contributions.$inferSelect

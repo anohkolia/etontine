@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { numeroDeTest } from './helpers/telephone'
-import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
-import { inscriptionOtp, rattacherMembre, tontinePubliee } from './helpers/tontine'
+import { canalDeclare, seConnecter, verifierIdentite } from './helpers/session'
+import { inscription, rattacherMembre, tontinePubliee } from './helpers/tontine'
 import { terminerTontine } from './helpers/base'
 
 /**
@@ -18,7 +18,7 @@ const DANS_UN_MOIS = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(
 test('le wizard demande la date du premier tour et refuse le passé', async ({ page }) => {
   await seConnecter(page)
   await verifierIdentite(page)
-  await canalVerifie(page, `+225${numeroDeTest()}`)
+  await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
@@ -42,7 +42,7 @@ test('le wizard demande la date du premier tour et refuse le passé', async ({ p
 })
 
 test('une date de départ passée bloque le démarrage, jusqu’à ce qu’on la change', async ({ page }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const { id } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
@@ -76,13 +76,13 @@ test('une date de départ passée bloque le démarrage, jusqu’à ce qu’on la
 })
 
 test('annuler une tontine publiée la retire du tableau de bord et prévient les membres', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
 
   await page.goto(`/app/tontine/${id}/reglages`)
   await waitForHydration(page)
@@ -104,7 +104,7 @@ test('annuler une tontine publiée la retire du tableau de bord et prévient les
 })
 
 test('une tontine en cours ne s’annule pas, et l’écran le dit', async ({ page }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const { id } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
@@ -135,7 +135,7 @@ test('supprimer un brouillon', async ({ page }) => {
 })
 
 test('une tontine terminée est rangée à part, puis archivée', async ({ page }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const { id } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },

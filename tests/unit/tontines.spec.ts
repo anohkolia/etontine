@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import {
   annulerTontine, archiverTontine, blocagesPublication, creerBrouillon, majTontine, definirCanaux,
   potAttendu, publier, supprimerBrouillon, totalParts,
@@ -96,7 +96,6 @@ describe('publication — draft vers open', () => {
     await majTontine(db, id, { shareAmount: 25_000 })
 
     const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya Koné' })
-    await marquerVerifie(db, canal)
     await definirCanaux(db, id, [canal], U)
 
     expect(await blocagesPublication(db, id)).toEqual([])
@@ -110,7 +109,6 @@ describe('publication — draft vers open', () => {
     const id = await brouillon()
     await majTontine(db, id, { shareAmount: 25_000 })
     const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    await marquerVerifie(db, canal)
     await definirCanaux(db, id, [canal], U)
     await publier(db, id)
 
@@ -194,7 +192,6 @@ describe('démarrage — ce qui bloque, et la date du premier tour', () => {
     await ajouterMembreGere(db, id, { name: 'Koffi', phone: '+2250707000002', shares: 1 })
     await ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
     const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    await marquerVerifie(db, canal)
     await definirCanaux(db, id, [canal], U)
     await publier(db, id)
     return id
@@ -270,7 +267,6 @@ describe('fin de vie — annuler, archiver, supprimer', () => {
     await db.update(memberships).set({ userId: KOFFI }).where(eq(memberships.id, koffi))
     await ajouterMembreGere(db, id, { name: 'Fatou', phone: '+2250707000003', shares: 1 })
     const canal = await creerCanal(db, U, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-    await marquerVerifie(db, canal)
     await definirCanaux(db, id, [canal], U)
     await publier(db, id)
     return id

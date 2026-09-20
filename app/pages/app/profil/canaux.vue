@@ -18,16 +18,15 @@ import { PAYMENT_CHANNEL } from '#shared/constants/statuts'
  * d'une tontine à l'autre. L'enfermer dans le wizard obligerait à le ressaisir
  * à chaque création.
  *
- * Trois règles portées par cet écran :
+ * Deux règles portées par cet écran :
  *
  * 1. **Le titulaire est obligatoire.** C'est ce que le membre lit dans son
  *    application de paiement pour vérifier qu'il envoie à la bonne personne
  *    (T14) — la protection anti-arnaque n°1.
- * 2. **Un canal naît non vérifié, donc inutilisable.** Le serveur refuse de le
- *    rattacher à une tontine tant qu'il ne l'est pas.
- * 3. **Le code part sur le numéro de collecte lui-même**, pas sur celui du
- *    compte. C'est ce qui prouve que l'organisateur contrôle ce numéro : on
- *    peut déclarer le numéro de n'importe qui.
+ * 2. **Le code d'accès est redemandé pour déclarer un numéro.** C'est là que
+ *    l'argent des membres va partir : une session ouverte sur un téléphone
+ *    prêté ne doit pas suffire. Le numéro n'est plus prouvé par SMS ; le gel
+ *    de 48 h et la notification à tous restent sur une tontine lancée.
  */
 definePageMeta({ layout: 'app', middleware: 'auth' })
 const { t } = useI18n()
@@ -41,7 +40,6 @@ interface Canal {
   msisdn: string
   holderName: string
   paymentLinkUrl: string | null
-  verifiedAt: string | null
 }
 
 const OPERATEURS = ['wave', 'orange', 'mtn', 'moov'] as const
@@ -70,39 +68,28 @@ const formulaire = useFormulaire(collectionChannelInput, {
   msisdn: '',
   holderName: '',
   paymentLinkUrl: undefined,
+  code: '',
 })
 const [provider] = formulaire.champ('provider')
 const [holderName, holderNameAttrs] = formulaire.champ('holderName')
 const form = reactive({
   saisieNumero: '',
   paymentLinkUrl: '',
+  code: '',
 })
 const numeroAffiche = computed(() => formatTel(form.saisieNumero))
 
 watch(() => form.saisieNumero, v => formulaire.setFieldValue('msisdn', v))
 watch(() => form.paymentLinkUrl, v => formulaire.setFieldValue('paymentLinkUrl', v.trim() || undefined))
+watch(() => form.code, v => formulaire.setFieldValue('code', v, false))
 
 const lienValide = computed(() =>
   form.paymentLinkUrl.trim() === '' || /^https:\/\/\S+$/.test(form.paymentLinkUrl.trim()),
 )
 const formValide = computed(() =>
-  estComplet(form.saisieNumero) && (holderName.value ?? '').trim().length >= 3 && lienValide.value,
+  estComplet(form.saisieNumero) && (holderName.value ?? '').trim().length >= 3 && lienValide.value
+  && /^\d{4}$/.test(form.code),
 )
-
-/** Vérification en cours : l'identifiant du canal, et le code saisi. */
-const verification = ref<{ canalId: string, code: string, devCode: string | null } | null>(null)
-const secondesAvantRenvoi = ref(0)
-let minuterie: ReturnType<typeof setInterval> | undefined
-
-function lancerCompteARebours(secondes: number) {
-  secondesAvantRenvoi.value = secondes
-  clearInterval(minuterie)
-  minuterie = setInterval(() => {
-    secondesAvantRenvoi.value--
-    if (secondesAvantRenvoi.value <= 0) clearInterval(minuterie)
-  }, 1000)
-}
-onBeforeUnmount(() => clearInterval(minuterie))
 
 function message(e: unknown): string {
   return (e as { data?: { error?: { message?: string } } })?.data?.error?.message
@@ -131,64 +118,19 @@ async function ajouter() {
   if (!valeurs) return
   enCours.value = true
   try {
-    const { id } = await $fetch<{ id: string }>('/api/v1/me/channels', {
+    await $fetch<{ id: string }>('/api/v1/me/channels', {
       method: 'POST',
       body: valeurs,
     })
     ajoutOuvert.value = false
     form.saisieNumero = ''
     form.paymentLinkUrl = ''
-    formulaire.resetForm({ values: { provider: 'wave', msisdn: '', holderName: '', paymentLinkUrl: undefined } })
-    await charger()
-    // On enchaîne sur la vérification : un canal non vérifié ne sert à rien,
-    // et repartir le chercher dans la liste est une étape de plus pour rien.
-    await demanderCode(id)
-  }
-  catch (e) {
-    erreur.value = message(e)
-  }
-  finally {
-    enCours.value = false
-  }
-}
-
-/** Envoie un code sur le numéro de collecte. Corps vide = demande d'envoi. */
-async function demanderCode(canalId: string) {
-  erreur.value = null
-  enCours.value = true
-  try {
-    const reponse = await $fetch<{ resendAfterSeconds: number, devCode?: string }>(
-      `/api/v1/me/channels/${canalId}/verify`,
-      { method: 'POST', body: {} },
-    )
-    verification.value = { canalId, code: '', devCode: reponse.devCode ?? null }
-    lancerCompteARebours(reponse.resendAfterSeconds)
-  }
-  catch (e) {
-    erreur.value = message(e)
-  }
-  finally {
-    enCours.value = false
-  }
-}
-
-async function valider() {
-  const en = verification.value
-  if (!en) return
-
-  erreur.value = null
-  enCours.value = true
-  try {
-    await $fetch(`/api/v1/me/channels/${en.canalId}/verify`, {
-      method: 'POST',
-      body: { code: en.code },
-    })
-    verification.value = null
-    clearInterval(minuterie)
+    form.code = ''
+    formulaire.resetForm({ values: { provider: 'wave', msisdn: '', holderName: '', paymentLinkUrl: undefined, code: '' } })
     await charger()
   }
   catch (e) {
-    if (verification.value) verification.value.code = ''
+    form.code = ''
     erreur.value = message(e)
   }
   finally {
@@ -212,9 +154,9 @@ async function supprimer(canalId: string) {
 /**
  * Retour à l'intention initiale.
  *
- * On arrive souvent ici depuis le wizard, faute de canal vérifié. Sans ce
- * retour, l'organisateur qui vient d'en vérifier un doit retrouver son
- * brouillon tout seul — et beaucoup ne le retrouvent pas.
+ * On arrive souvent ici depuis le wizard, faute de canal. Sans ce retour,
+ * l'organisateur qui vient d'en déclarer un doit retrouver son brouillon
+ * tout seul — et beaucoup ne le retrouvent pas.
  *
  * La destination n'est acceptée que si elle est **interne**, comme sur l'écran
  * de connexion : un `redirect=` vers un autre domaine ferait de cette page un
@@ -225,7 +167,7 @@ const retourDemande = computed(() => {
   return typeof demandee === 'string' && /^\/(?!\/)/.test(demandee) ? demandee : null
 })
 
-const auMoinsUnVerifie = computed(() => canaux.value.some(c => c.verifiedAt !== null))
+const auMoinsUn = computed(() => canaux.value.length > 0)
 
 onMounted(charger)
 
@@ -253,7 +195,7 @@ useHead({ title: t('profil.canaux.mes_numeros_de_collecte_2') })
 
     <template v-else>
       <NuxtLink
-        v-if="retourDemande && auMoinsUnVerifie"
+        v-if="retourDemande && auMoinsUn"
         :to="retourDemande"
         class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control bg-brand px-5 font-semibold text-brand-ink"
         data-testid="lien-retour-intention"
@@ -281,317 +223,233 @@ useHead({ title: t('profil.canaux.mes_numeros_de_collecte_2') })
         {{ erreur }}
       </p>
 
-      <!-- Vérification en cours : elle prend tout l'écran tant qu'elle dure.
-           Un code à saisir au milieu d'une liste se perd. -->
-      <section
-        v-if="verification"
-        class="card-surface flex flex-col gap-4 p-4"
-        data-testid="bloc-verification"
+      <EmptyState
+        v-if="canaux.length === 0 && !ajoutOuvert"
+        :title="$t('profil.canaux.aucun_numero_de_collecte')"
+        :description="$t('profil.canaux.c_est_le_numero')"
+        icon="lucide:smartphone"
       >
-        <div class="flex flex-col gap-1">
-          <h2 class="font-semibold text-ink">
-            {{ $t('profil.canaux.verifie_ce_numero') }}
-          </h2>
-          <p class="text-sm text-ink-muted">
-            {{ $t('profil.canaux.un_code_a_six') }} <strong class="text-ink">{{ $t('profil.canaux.sur_le_numero_de') }}</strong>{{ $t('profil.canaux.c_est_ce_qui') }}
-          </p>
-        </div>
+        <template #action>
+          <button
+            type="button"
+            class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control bg-brand px-5 font-semibold text-brand-ink"
+            data-testid="bouton-ouvrir-ajout"
+            @click="ajoutOuvert = true"
+          >
+            <Icon
+              name="lucide:plus"
+              size="1rem"
+              aria-hidden="true"
+            />
+            {{ $t('profil.canaux.ajouter_un_numero') }}
+          </button>
+        </template>
+      </EmptyState>
 
-        <InputOtp
-          v-model="verification.code"
-          :length="6"
-          integer-only
-          data-testid="champ-code-canal"
-        />
-
-        <p
-          v-if="verification.devCode"
-          class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
-          data-testid="code-dev-canal"
+      <ul
+        v-else-if="canaux.length > 0"
+        class="flex flex-col gap-2"
+        data-testid="liste-canaux"
+      >
+        <li
+          v-for="canal in canaux"
+          :key="canal.id"
+          class="card-surface flex flex-col gap-3 p-3"
+          :data-testid="`canal-${canal.id}`"
         >
-          {{ $t('profil.canaux.developpement_code') }} <strong>{{ verification.devCode }}</strong>
-        </p>
+          <div class="flex items-start gap-3">
+            <CanalPill
+              :canal="canal.provider"
+              compact
+            />
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span class="truncate font-semibold text-ink">{{ canal.holderName }}</span>
+              <span class="tabular truncate text-sm text-ink-muted">{{ canal.msisdn }}</span>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink sm:flex-1"
+              :data-testid="`bouton-supprimer-${canal.id}`"
+              @click="supprimer(canal.id)"
+            >
+              <Icon
+                name="lucide:trash-2"
+                size="1rem"
+                aria-hidden="true"
+              />
+              {{ $t('profil.canaux.retirer') }}
+            </button>
+          </div>
+        </li>
+      </ul>
+
+      <!-- Formulaire d'ajout -->
+      <section
+        v-if="ajoutOuvert"
+        class="card-surface flex flex-col gap-4 p-4"
+        data-testid="formulaire-canal"
+      >
+        <h2 class="font-semibold text-ink">
+          {{ $t('profil.canaux.nouveau_numero_de_collecte') }}
+        </h2>
+
+        <fieldset class="flex flex-col gap-2">
+          <legend class="pb-1 text-sm font-medium text-ink-muted">
+            {{ $t('profil.canaux.service_de_paiement') }}
+          </legend>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="operateur in OPERATEURS"
+              :key="operateur"
+              class="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border px-3 text-sm font-semibold transition-colors"
+              :class="provider === operateur
+                ? 'border-brand bg-brand-surface text-brand-strong'
+                : 'border-line bg-surface text-ink-muted'"
+            >
+              <input
+                v-model="provider"
+                type="radio"
+                :value="operateur"
+                class="sr-only"
+                :data-testid="`operateur-${operateur}`"
+              >
+              <Icon
+                :name="presentation(operateur).icon"
+                size="1rem"
+                aria-hidden="true"
+              />
+              {{ motDuCanal(operateur, presentation(operateur).label) }}
+            </label>
+          </div>
+        </fieldset>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="numero-collecte"
+        >
+          {{ $t('profil.canaux.numero_qui_recevra_les') }}
+          <span class="flex items-stretch gap-2">
+            <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface-muted px-3 text-base font-semibold text-ink">
+              +225
+            </span>
+            <InputText
+              id="numero-collecte"
+              :value="numeroAffiche"
+              inputmode="tel"
+              placeholder="07 07 12 34 56"
+              class="text-lg tracking-wider tabular-nums"
+              :aria-invalid="Boolean(formulaire.erreur('msisdn'))"
+              data-testid="champ-numero-collecte"
+              @input="(e: Event) => form.saisieNumero = extraire((e.target as HTMLInputElement).value)"
+            />
+          </span>
+          <ErreurChamp :message="formulaire.erreur('msisdn')" />
+        </label>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="titulaire"
+        >
+          {{ $t('profil.canaux.nom_du_titulaire_du') }}
+          <InputText
+            id="titulaire"
+            v-model="holderName"
+            v-bind="holderNameAttrs"
+            :placeholder="$t('profil.canaux.aya_kone')"
+            :aria-invalid="Boolean(formulaire.erreur('holderName'))"
+            data-testid="champ-titulaire"
+          />
+          <ErreurChamp :message="formulaire.erreur('holderName')" />
+          <!-- Obligatoire, et on dit pourquoi : c'est ce nom que le membre
+               compare à ce qu'affiche son application avant de valider. -->
+          <span class="text-sm font-normal text-ink-subtle">
+            {{ $t('profil.canaux.ecris_le_exactement_comme') }}
+          </span>
+        </label>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="lien-paiement"
+        >
+          {{ $t('profil.canaux.lien_de_paiement_facultatif') }}
+          <InputText
+            id="lien-paiement"
+            v-model="form.paymentLinkUrl"
+            type="url"
+            inputmode="url"
+            :placeholder="$t('profil.canaux.https_pay_wave_com')"
+            data-testid="champ-lien-paiement"
+          />
+          <span class="text-sm font-normal text-ink-subtle">
+            {{ $t('profil.canaux.si_ton_application_te') }}
+          </span>
+          <span
+            v-if="!lienValide"
+            class="text-sm font-normal text-disputed-ink"
+            role="alert"
+            data-testid="erreur-lien-paiement"
+          >
+            {{ $t('profil.canaux.le_lien_doit_commencer') }}
+          </span>
+        </label>
+
+        <label
+          class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+          for="code-canal"
+        >
+          {{ $t('profil.canaux.ton_code_pour_confirmer') }}
+          <InputText
+            id="code-canal"
+            v-model="form.code"
+            type="password"
+            inputmode="numeric"
+            autocomplete="current-password"
+            maxlength="4"
+            class="tracking-[0.5em]"
+            :aria-invalid="Boolean(formulaire.erreur('code'))"
+            data-testid="champ-code-canal"
+          />
+          <ErreurChamp :message="formulaire.erreur('code')" />
+          <span class="text-sm font-normal text-ink-subtle">
+            {{ $t('profil.canaux.c_est_la_que_l_argent') }}
+          </span>
+        </label>
 
         <div class="flex flex-col gap-2">
           <Button
-            :label="enCours ? $t('commun.verification_en_cours') : $t('profil.canaux.valider_le_code')"
-            :disabled="verification.code.length !== 6 || enCours"
+            :label="enCours ? $t('profil.canaux.enregistrement') : $t('profil.canaux.ajouter')"
+            :disabled="!formValide || enCours"
             class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
-            data-testid="bouton-valider-canal"
-            @click="valider"
+            data-testid="bouton-ajouter-canal"
+            @click="ajouter"
           />
           <button
             type="button"
-            class="min-h-touch text-sm text-brand underline underline-offset-4 disabled:text-ink-subtle disabled:no-underline"
-            :disabled="secondesAvantRenvoi > 0 || enCours"
-            data-testid="bouton-renvoyer-canal"
-            @click="demanderCode(verification.canalId)"
-          >
-            {{ secondesAvantRenvoi > 0
-              ? $t('profil.canaux.renvoyer_le_code_dans', { s: secondesAvantRenvoi })
-              : $t('commun.renvoyer_le_code') }}
-          </button>
-          <button
-            type="button"
             class="min-h-touch text-sm text-ink-muted underline underline-offset-4"
-            @click="verification = null"
+            @click="ajoutOuvert = false"
           >
-            {{ $t('profil.canaux.plus_tard') }}
+            {{ $t('profil.canaux.annuler') }}
           </button>
         </div>
       </section>
 
-      <template v-else>
-        <EmptyState
-          v-if="canaux.length === 0 && !ajoutOuvert"
-          :title="$t('profil.canaux.aucun_numero_de_collecte')"
-          :description="$t('profil.canaux.c_est_le_numero')"
-          icon="lucide:smartphone"
-        >
-          <template #action>
-            <button
-              type="button"
-              class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control bg-brand px-5 font-semibold text-brand-ink"
-              data-testid="bouton-ouvrir-ajout"
-              @click="ajoutOuvert = true"
-            >
-              <Icon
-                name="lucide:plus"
-                size="1rem"
-                aria-hidden="true"
-              />
-              {{ $t('profil.canaux.ajouter_un_numero') }}
-            </button>
-          </template>
-        </EmptyState>
-
-        <ul
-          v-else-if="canaux.length > 0"
-          class="flex flex-col gap-2"
-          data-testid="liste-canaux"
-        >
-          <li
-            v-for="canal in canaux"
-            :key="canal.id"
-            class="card-surface flex flex-col gap-3 p-3"
-            :data-testid="`canal-${canal.id}`"
-          >
-            <div class="flex items-start gap-3">
-              <CanalPill
-                :canal="canal.provider"
-                compact
-              />
-              <div class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate font-semibold text-ink">{{ canal.holderName }}</span>
-                <span class="tabular truncate text-sm text-ink-muted">{{ canal.msisdn }}</span>
-              </div>
-
-              <!-- Couleur + icône + mot (règle 10) : « vérifié » ne se devine
-                   pas à une teinte. -->
-              <span
-                v-if="canal.verifiedAt"
-                class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-confirmed-surface px-2.5 py-1 text-xs font-semibold text-confirmed-ink"
-                :data-testid="`etat-canal-${canal.id}`"
-              >
-                <Icon
-                  name="lucide:circle-check"
-                  size="0.875rem"
-                  aria-hidden="true"
-                />
-                {{ $t('profil.canaux.verifie') }}
-              </span>
-              <span
-                v-else
-                class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-late-surface px-2.5 py-1 text-xs font-semibold text-late-ink"
-                :data-testid="`etat-canal-${canal.id}`"
-              >
-                <Icon
-                  name="lucide:triangle-alert"
-                  size="0.875rem"
-                  aria-hidden="true"
-                />
-                {{ $t('profil.canaux.a_verifier') }}
-              </span>
-            </div>
-
-            <p
-              v-if="!canal.verifiedAt"
-              class="text-sm text-ink-muted"
-            >
-              {{ $t('profil.canaux.tant_qu_il_n') }}
-            </p>
-
-            <div class="flex flex-col gap-2 sm:flex-row">
-              <button
-                v-if="!canal.verifiedAt"
-                type="button"
-                class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control bg-brand px-4 text-sm font-semibold text-brand-ink sm:flex-1"
-                :disabled="enCours"
-                :data-testid="`bouton-verifier-${canal.id}`"
-                @click="demanderCode(canal.id)"
-              >
-                {{ $t('profil.canaux.verifier_par_sms') }}
-              </button>
-              <button
-                type="button"
-                class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink sm:flex-1"
-                :data-testid="`bouton-supprimer-${canal.id}`"
-                @click="supprimer(canal.id)"
-              >
-                <Icon
-                  name="lucide:trash-2"
-                  size="1rem"
-                  aria-hidden="true"
-                />
-                {{ $t('profil.canaux.retirer') }}
-              </button>
-            </div>
-          </li>
-        </ul>
-
-        <!-- Formulaire d'ajout -->
-        <section
-          v-if="ajoutOuvert"
-          class="card-surface flex flex-col gap-4 p-4"
-          data-testid="formulaire-canal"
-        >
-          <h2 class="font-semibold text-ink">
-            {{ $t('profil.canaux.nouveau_numero_de_collecte') }}
-          </h2>
-
-          <fieldset class="flex flex-col gap-2">
-            <legend class="pb-1 text-sm font-medium text-ink-muted">
-              {{ $t('profil.canaux.service_de_paiement') }}
-            </legend>
-            <div class="flex flex-wrap gap-2">
-              <label
-                v-for="operateur in OPERATEURS"
-                :key="operateur"
-                class="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border px-3 text-sm font-semibold transition-colors"
-                :class="provider === operateur
-                  ? 'border-brand bg-brand-surface text-brand-strong'
-                  : 'border-line bg-surface text-ink-muted'"
-              >
-                <input
-                  v-model="provider"
-                  type="radio"
-                  :value="operateur"
-                  class="sr-only"
-                  :data-testid="`operateur-${operateur}`"
-                >
-                <Icon
-                  :name="presentation(operateur).icon"
-                  size="1rem"
-                  aria-hidden="true"
-                />
-                {{ motDuCanal(operateur, presentation(operateur).label) }}
-              </label>
-            </div>
-          </fieldset>
-
-          <label
-            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
-            for="numero-collecte"
-          >
-            {{ $t('profil.canaux.numero_qui_recevra_les') }}
-            <span class="flex items-stretch gap-2">
-              <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface-muted px-3 text-base font-semibold text-ink">
-                +225
-              </span>
-              <InputText
-                id="numero-collecte"
-                :value="numeroAffiche"
-                inputmode="tel"
-                placeholder="07 07 12 34 56"
-                class="text-lg tracking-wider tabular-nums"
-                :aria-invalid="Boolean(formulaire.erreur('msisdn'))"
-                data-testid="champ-numero-collecte"
-                @input="(e: Event) => form.saisieNumero = extraire((e.target as HTMLInputElement).value)"
-              />
-            </span>
-            <ErreurChamp :message="formulaire.erreur('msisdn')" />
-          </label>
-
-          <label
-            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
-            for="titulaire"
-          >
-            {{ $t('profil.canaux.nom_du_titulaire_du') }}
-            <InputText
-              id="titulaire"
-              v-model="holderName"
-              v-bind="holderNameAttrs"
-              :placeholder="$t('profil.canaux.aya_kone')"
-              :aria-invalid="Boolean(formulaire.erreur('holderName'))"
-              data-testid="champ-titulaire"
-            />
-            <ErreurChamp :message="formulaire.erreur('holderName')" />
-            <!-- Obligatoire, et on dit pourquoi : c'est ce nom que le membre
-                 compare à ce qu'affiche son application avant de valider. -->
-            <span class="text-sm font-normal text-ink-subtle">
-              {{ $t('profil.canaux.ecris_le_exactement_comme') }}
-            </span>
-          </label>
-
-          <label
-            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
-            for="lien-paiement"
-          >
-            {{ $t('profil.canaux.lien_de_paiement_facultatif') }}
-            <InputText
-              id="lien-paiement"
-              v-model="form.paymentLinkUrl"
-              type="url"
-              inputmode="url"
-              :placeholder="$t('profil.canaux.https_pay_wave_com')"
-              data-testid="champ-lien-paiement"
-            />
-            <span class="text-sm font-normal text-ink-subtle">
-              {{ $t('profil.canaux.si_ton_application_te') }}
-            </span>
-            <span
-              v-if="!lienValide"
-              class="text-sm font-normal text-disputed-ink"
-              role="alert"
-              data-testid="erreur-lien-paiement"
-            >
-              {{ $t('profil.canaux.le_lien_doit_commencer') }}
-            </span>
-          </label>
-
-          <div class="flex flex-col gap-2">
-            <Button
-              :label="enCours ? $t('profil.canaux.enregistrement') : $t('profil.canaux.ajouter_et_verifier')"
-              :disabled="!formValide || enCours"
-              class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
-              data-testid="bouton-ajouter-canal"
-              @click="ajouter"
-            />
-            <button
-              type="button"
-              class="min-h-touch text-sm text-ink-muted underline underline-offset-4"
-              @click="ajoutOuvert = false"
-            >
-              {{ $t('profil.canaux.annuler') }}
-            </button>
-          </div>
-        </section>
-
-        <button
-          v-else-if="canaux.length > 0"
-          type="button"
-          class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-surface px-5 font-semibold text-ink"
-          data-testid="bouton-ouvrir-ajout"
-          @click="ajoutOuvert = true"
-        >
-          <Icon
-            name="lucide:plus"
-            size="1rem"
-            aria-hidden="true"
-          />
-          {{ $t('profil.canaux.ajouter_un_numero') }}
-        </button>
-      </template>
+      <button
+        v-else-if="canaux.length > 0"
+        type="button"
+        class="min-h-touch inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-surface px-5 font-semibold text-ink"
+        data-testid="bouton-ouvrir-ajout"
+        @click="ajoutOuvert = true"
+      >
+        <Icon
+          name="lucide:plus"
+          size="1rem"
+          aria-hidden="true"
+        />
+        {{ $t('profil.canaux.ajouter_un_numero') }}
+      </button>
     </template>
   </div>
 </template>

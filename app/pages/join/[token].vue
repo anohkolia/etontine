@@ -74,9 +74,13 @@ async function rejoindre() {
       { method: 'POST' },
     )
     adhesion.value = 'faite'
+    // Un membre géré qui reprend son siège attend la confirmation du
+    // président, pas une place : le message le dit.
     messageAdhesion.value = resultat.status === 'active'
       ? t('public.join.tu_fais_partie_de')
-      : t('public.join.ta_demande_est_envoyee')
+      : resultat.rattache
+        ? t('public.join.ton_siege_attend_le_president')
+        : t('public.join.ta_demande_est_envoyee')
   }
   catch (e) {
     adhesion.value = 'repos'

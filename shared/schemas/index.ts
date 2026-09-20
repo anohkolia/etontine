@@ -29,7 +29,43 @@ export const phoneCI = z
   })
   .transform(v => (v.startsWith('+225') ? v : `+225${v}`))
 
-export const otpCode = z.string().regex(/^\d{6}$/, 'Le code doit contenir 6 chiffres')
+/**
+ * Le code d'accès : quatre chiffres, choisis à l'inscription.
+ *
+ * Il ouvre la session **et** l'écran de verrouillage — un seul code à retenir.
+ * Dix mille valeurs possibles : ce qui le rend tenable, c'est le verrouillage
+ * du compte après quelques échecs (`server/services/connexion.ts`), pas sa
+ * longueur. Les suites et répétitions évidentes sont refusées : « 0000 » ou
+ * « 1234 » sont les premiers essais de n'importe qui.
+ */
+export const CODES_ACCES_INTERDITS = new Set([
+  '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+  '0123', '1234', '2345', '3456', '4567', '5678', '6789', '9876', '8765', '7654',
+  '6543', '5432', '4321', '3210', '1212', '2580', '0852', '1122', '6969', '2468',
+])
+
+export const codeAcces = z
+  .string()
+  .regex(/^\d{4}$/, 'Le code contient exactement 4 chiffres')
+  .refine(v => !CODES_ACCES_INTERDITS.has(v), { message: 'Ce code est trop facile à deviner' })
+
+/**
+ * Un code **saisi pour vérification** — connexion, geste sensible. Pas de
+ * liste interdite ici : un code ancien peut y figurer, et refuser la forme
+ * avant de vérifier révèlerait la règle sans rien protéger.
+ */
+export const codeSaisi = z.string().regex(/^\d{4}$/, 'Le code contient 4 chiffres')
+
+/** Adresse e-mail, en minuscules : `Aya@Mail.ci` et `aya@mail.ci` sont la même boîte. */
+export const emailAdresse = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email('Adresse e-mail invalide')
+  .max(254)
+
+/** Jeton d'un lien reçu par e-mail (confirmation, réinitialisation). */
+export const jetonEmail = z.string().regex(/^[A-Za-z0-9_-]{32,64}$/, 'Lien invalide')
 
 /**
  * Adresse d'une capture déposée par `POST /uploads/proof`.
@@ -152,8 +188,30 @@ export const ROUND_TRANSITIONS = {
 /* Authentification                                                    */
 /* ------------------------------------------------------------------ */
 
-export const otpRequestInput = z.object({ phone: phoneCI })
-export const otpVerifyInput = z.object({ phone: phoneCI, code: otpCode })
+/**
+ * Inscription : le numéro identifie, l'e-mail confirme, le code ouvre.
+ *
+ * Le compte n'existe vraiment qu'une fois le lien reçu par e-mail cliqué :
+ * sans cette étape, n'importe qui pourrait s'inscrire avec le numéro d'un
+ * autre et s'asseoir à sa place dans une tontine.
+ */
+export const registerInput = z.object({
+  phone: phoneCI,
+  email: emailAdresse,
+  code: codeAcces,
+})
+
+export const loginInput = z.object({ phone: phoneCI, code: codeSaisi })
+
+export const confirmInput = z.object({ token: jetonEmail })
+
+/** Code oublié : on demande par numéro, le lien part sur l'e-mail du compte. */
+export const resetRequestInput = z.object({ phone: phoneCI })
+export const resetConfirmInput = z.object({ token: jetonEmail, code: codeAcces })
+
+/** Changer de numéro ou d'e-mail exige le code : la session seule ne suffit pas. */
+export const phoneChangeInput = z.object({ phone: phoneCI, code: codeSaisi })
+export const emailChangeInput = z.object({ email: emailAdresse, code: codeSaisi })
 
 export const profileInput = z.object({
   firstName: z.string().trim().min(2).max(50),
@@ -172,6 +230,12 @@ export const collectionChannelInput = z.object({
   // qu'il envoie bien à la bonne personne. Protection anti-arnaque n°1.
   holderName: z.string().trim().min(3).max(80),
   paymentLinkUrl: z.string().url().optional(),
+  /**
+   * Le code d'accès, redemandé : c'est **là** que l'argent des membres va
+   * partir. Une session ouverte sur un téléphone prêté ne doit pas suffire à
+   * détourner la collecte vers un autre numéro.
+   */
+  code: codeSaisi,
 })
 
 /* ------------------------------------------------------------------ */
@@ -259,6 +323,13 @@ export const memberUpdateInput = z.object({
    * parcours d'invitation.
    */
   status: z.enum(['active', 'left', 'defaulted']).optional(),
+  /**
+   * Un membre géré dont quelqu'un demande à reprendre le siège : `confirm`
+   * rattache le compte à l'adhésion, `reject` refuse. Le président tranche —
+   * plus personne ne prouve son numéro par SMS, c'est lui qui connaît ses
+   * membres.
+   */
+  claim: z.enum(['confirm', 'reject']).optional(),
 })
 
 /* ------------------------------------------------------------------ */

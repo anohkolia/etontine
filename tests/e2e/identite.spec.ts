@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, renseignerNom, seConnecter } from './helpers/session'
+import { canalDeclare, renseignerNom, seConnecter } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
 
 /**
@@ -27,7 +27,7 @@ test.use({
 
 /** Mène le wizard jusqu'au récapitulatif, sans publier. */
 async function allerAuRecapitulatif(page: import('@playwright/test').Page) {
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)

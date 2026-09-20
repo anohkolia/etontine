@@ -1,38 +1,36 @@
 import { readBody } from 'h3'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
+import { codeAcces, codeSaisi } from '../../../../shared/schemas/index.ts'
 import { useDb } from '../../../db/index.ts'
 import { users } from '../../../db/schema.ts'
 import { requireUser } from '../../../utils/auth.ts'
-import { apiError, validationError } from '../../../utils/errors.ts'
-import { hashPin, verifyPin } from '../../../utils/pin.ts'
+import { validationError } from '../../../utils/errors.ts'
+import { hashPin } from '../../../utils/pin.ts'
+import { verifierCodeAcces } from '../../../services/connexion.ts'
 
 /**
- * Définit ou change le code de verrouillage.
+ * Change le code d'accès.
  *
- * Le PIN ne protège pas le compte — la session, elle, tient au cookie. Il
- * protège l'écran : les téléphones se prêtent, et personne n'a envie que le
- * neveu qui emprunte l'appareil lise le registre de la tontine.
+ * Le code courant est exigé : la session seule ne suffit pas, sinon un
+ * téléphone prêté cinq minutes permettrait de le remplacer. Il n'y a pas de
+ * retrait : le code ouvre la session, un compte sans code n'ouvrirait plus.
  */
-const pinInput = z.object({
-  pin: z.string().regex(/^\d{4,6}$/, 'Le code doit contenir 4 à 6 chiffres'),
-  /** Obligatoire pour remplacer un code existant. */
-  currentPin: z.string().regex(/^\d{4,6}$/).optional(),
+const input = z.object({
+  code: codeAcces,
+  currentCode: codeSaisi,
 })
 
 export default defineEventHandler(async (event) => {
   const user = requireUser(event)
-  const parsed = pinInput.safeParse(await readBody(event))
+  const parsed = input.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  if (user.pinHash) {
-    if (!parsed.data.currentPin || !verifyPin(parsed.data.currentPin, user.pinHash)) {
-      throw apiError('FORBIDDEN', 'Code actuel incorrect.', { field: 'currentPin' })
-    }
-  }
+  const db = useDb()
+  await verifierCodeAcces(db, user, parsed.data.currentCode)
 
-  await useDb().update(users)
-    .set({ pinHash: hashPin(parsed.data.pin) })
+  await db.update(users)
+    .set({ pinHash: hashPin(parsed.data.code) })
     .where(eq(users.id, user.id))
 
   return { ok: true }
