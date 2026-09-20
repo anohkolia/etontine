@@ -5,7 +5,7 @@ import { useDb } from '../../../server/db/index.ts'
 import { users } from '../../../server/db/schema.ts'
 import { waitForHydration } from '../helpers/hydration'
 import { numeroDeTest } from '../helpers/telephone'
-import { remplirCode } from '../helpers/otp'
+import { CODE_TEST, sessionSurAppMembre } from '../helpers/session'
 
 /**
  * Back-office — vérification d'identité.
@@ -15,8 +15,8 @@ import { remplirCode } from '../helpers/otp'
  * au passage.
  *
  * La session d'administration est ouverte une fois par le projet
- * `admin-setup` : les demandes de code sont plafonnées par numéro, et cette
- * garde ne doit pas être désactivée pour la commodité des tests.
+ * `admin-setup` : c'est le même geste qu'en production, et le refaire à
+ * chaque test n'éprouverait rien de plus.
  */
 
 const APP_MEMBRE = 'http://localhost:3000'
@@ -24,17 +24,9 @@ const APP_MEMBRE = 'http://localhost:3000'
 /** Un contexte vierge, pour les tests qui vérifient l'écran de connexion. */
 const SANS_SESSION = { storageState: { cookies: [], origins: [] } }
 
-/** Inscrit un compte sur l'application des membres. */
+/** Inscrit un compte sur l'application des membres, et y ouvre une session. */
 async function inscrireSurAppMembre(page: Page, numero: string) {
-  await page.goto(`${APP_MEMBRE}/login`)
-  await waitForHydration(page)
-  await page.getByTestId('champ-telephone').fill(numero)
-  await page.getByTestId('bouton-recevoir-code').click()
-
-  const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code', code!)
-  await page.getByTestId('bouton-valider-code').click()
-  await page.waitForURL(url => !url.pathname.startsWith('/login'))
+  await sessionSurAppMembre(page, numero, APP_MEMBRE)
 }
 
 /**
@@ -88,21 +80,20 @@ test.describe('parcours de connexion', () => {
     await expect(page.getByTestId('champ-telephone')).toBeVisible()
   })
 
-  test('un numéro non autorisé est refusé, même avec un code valide', async ({ page }) => {
+  test('un numéro non autorisé est refusé, même avec le bon code', async ({ page }) => {
+    // Un compte de membre ordinaire, confirmé, avec son code.
+    const numero = numeroDeTest()
+    await sessionSurAppMembre(page, numero, APP_MEMBRE)
+    await page.request.post(`${APP_MEMBRE}/api/v1/auth/logout`)
+
     await page.goto('/')
     await waitForHydration(page)
+    await page.getByTestId('champ-telephone').fill(numero)
+    await page.getByTestId('champ-code').fill(CODE_TEST)
+    await page.getByTestId('bouton-connexion').click()
 
-    await page.getByTestId('champ-telephone').fill(numeroDeTest())
-    await page.getByTestId('bouton-recevoir-code').click()
-
-    // Le code est bien envoyé : ce point d'entrée ne révèle pas qui est
-    // administrateur. C'est la vérification qui filtre.
-    const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-    expect(code).toMatch(/^\d{6}$/)
-
-    await remplirCode(page, 'champ-code', code!)
-    await page.getByTestId('bouton-valider-code').click()
-
+    // Le code est bon, le numéro n'est pas dans la liste blanche : c'est
+    // la vérification qui filtre, et elle ne dit rien de plus.
     await expect(page.getByTestId('erreur-connexion')).toContainText('refusé')
     expect(page.url()).not.toContain('/dossiers')
   })

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { seConnecter } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
-import { inscriptionOtp, tontinePubliee } from './helpers/tontine'
+import { inscription, tontinePubliee } from './helpers/tontine'
 
 /**
  * La validation côté client, par les schémas partagés avec le serveur.
@@ -18,7 +18,7 @@ test('la connexion refuse un numéro qui n’est pas ivoirien, sous le champ, sa
 
   const demandes: string[] = []
   page.on('request', (r) => {
-    if (r.url().includes('/api/v1/auth/otp/request')) demandes.push(r.url())
+    if (r.url().includes('/api/v1/auth/login')) demandes.push(r.url())
   })
 
   // Dix chiffres, mais un préfixe qui n'existe pas.
@@ -26,15 +26,17 @@ test('la connexion refuse un numéro qui n’est pas ivoirien, sous le champ, sa
   await page.getByTestId('champ-telephone').blur()
   await expect(page.getByTestId('erreur-champ')).toContainText('01, 05 ou 07')
 
-  await page.getByTestId('bouton-recevoir-code').click()
-  await expect(page.getByTestId('champ-code')).toHaveCount(0)
+  await page.getByTestId('champ-code').fill('2604')
+  await page.getByTestId('bouton-connexion').click()
   expect(demandes).toHaveLength(0)
 
-  // Corrigé, l'erreur disparaît et le code part.
+  // Corrigé, l'erreur disparaît et la demande part.
   await page.getByTestId('champ-telephone').fill(numeroDeTest())
-  await page.getByTestId('bouton-recevoir-code').click()
-  await expect(page.getByTestId('champ-code')).toBeVisible()
+  await page.getByTestId('champ-telephone').blur()
   await expect(page.getByTestId('erreur-champ')).toHaveCount(0)
+  await page.getByTestId('bouton-connexion').click()
+  await expect(page.getByTestId('erreur-login')).toBeVisible()
+  expect(demandes).toHaveLength(1)
 })
 
 test('le profil signale un prénom trop court avant d’enregistrer', async ({ page }) => {
@@ -55,7 +57,7 @@ test('le profil signale un prénom trop court avant d’enregistrer', async ({ p
 })
 
 test('l’ajout d’un membre refuse un numéro invalide sous le champ', async ({ page }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const { id } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },

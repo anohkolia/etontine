@@ -7,6 +7,7 @@ import { assertTransition } from '../utils/transitions.ts'
 import { placeDisponible, verifierQuotaMembres } from './abonnement.ts'
 import { appendLedger } from './ledger.ts'
 import { attribuerParts } from './membres.ts'
+import { notifier } from './notifications.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -116,7 +117,11 @@ export async function apercuInvitation(db: Db, token: string): Promise<ApercuInv
 
 export interface ResultatAdhesion {
   membershipId: string
-  /** Vrai si l'on a rattaché une adhésion existante au lieu d'en créer une. */
+  /**
+   * Vrai si l'on a demandé à reprendre une adhésion existante — un siège de
+   * membre géré — au lieu d'en créer une. Le statut est alors
+   * `pending_approval` : le président doit confirmer.
+   */
   rattache: boolean
   status: 'pending_approval' | 'active'
 }
@@ -131,8 +136,12 @@ export interface ResultatAdhesion {
  * seconde. Créer un doublon dédoublerait son historique, ses parts, ses dus,
  * et fausserait le pot de toute la tontine.
  *
- * Le rapprochement se fait sur le numéro en E.164, seule clé fiable : deux
- * membres peuvent porter le même nom, jamais le même numéro.
+ * Le rapprochement se fait sur le numéro en E.164 — mais **le numéro n'est
+ * plus prouvé** : depuis que la connexion se fait par e-mail et code,
+ * n'importe qui peut s'inscrire avec le numéro d'un autre. Le rattachement
+ * est donc une *demande* : `userId` reste nul, le président est prévenu, et
+ * c'est lui qui confirme (`confirmerRattachement`). Jusque-là, le demandeur
+ * ne voit rien de la tontine.
  */
 export async function accepterInvitation(db: Db, token: string, userId: string): Promise<ResultatAdhesion> {
   const apercu = await apercuInvitation(db, token)
@@ -172,26 +181,37 @@ export async function accepterInvitation(db: Db, token: string, userId: string):
     .limit(1)
 
   if (gere) {
+    // Une demande déjà posée par ce même compte : on la renvoie telle quelle,
+    // sans prévenir le président une seconde fois.
+    if (gere.claimedByUserId === userId) {
+      return { membershipId: gere.id, rattache: true, status: 'pending_approval' }
+    }
+
     await db.update(memberships)
-      .set({ userId, joinedAt: gere.joinedAt ?? new Date() })
+      .set({ claimedByUserId: userId, claimedAt: new Date() })
       .where(eq(memberships.id, gere.id))
 
     await db.update(invites)
       .set({ usedCount: invitation!.usedCount + 1 })
       .where(eq(invites.id, invitation!.id))
 
-    await appendLedger(db, {
-      tontineId: apercu.tontineId,
-      type: 'member_joined',
-      actorId: userId,
-      payload: {
-        membershipId: gere.id,
-        rattachement: true,
-        name: gere.managedName,
-      },
-    })
+    const [president] = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(and(eq(memberships.tontineId, apercu.tontineId), eq(memberships.role, 'president')))
+      .limit(1)
 
-    return { membershipId: gere.id, rattache: true, status: gere.status === 'active' ? 'active' : 'pending_approval' }
+    if (president?.userId) {
+      await notifier(db, president.userId, {
+        type: 'rattachement_demande',
+        tontineId: apercu.tontineId,
+        title: 'Un membre demande à reprendre son siège',
+        body: `${gere.managedName ?? 'Un membre'} s’est inscrit et demande à être rattaché. Confirme que c’est bien lui.`,
+        url: `/app/tontine/${apercu.tontineId}/membres`,
+      })
+    }
+
+    return { membershipId: gere.id, rattache: true, status: 'pending_approval' }
   }
 
   // Une tontine démarrée n'accueille plus personne : les tours et les
@@ -296,5 +316,83 @@ export async function refuserAdhesion(db: Db, membershipId: string, acteurId: st
     type: 'member_left',
     actorId: acteurId,
     payload: { membershipId, refuse: true },
+  })
+}
+
+/**
+ * Le président confirme qu'un compte est bien le membre géré qu'il avait
+ * saisi : le compte prend le siège, avec son historique.
+ *
+ * C'est le remplacement de la preuve par SMS : plus personne ne prouve son
+ * numéro, mais le président connaît ses membres, et c'est lui qui a saisi le
+ * numéro au départ.
+ */
+export async function confirmerRattachement(db: Db, membershipId: string, acteurId: string): Promise<void> {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
+  if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
+  if (!m.claimedByUserId) {
+    throw apiError('INVALID_TRANSITION', 'Aucune demande de rattachement sur ce membre.', { field: 'claim' })
+  }
+  if (m.userId) {
+    throw apiError('INVALID_TRANSITION', 'Ce siège est déjà rattaché à un compte.', { field: 'claim' })
+  }
+
+  // Le même compte ne peut pas siéger deux fois dans une tontine : l'unicité
+  // est tenue par la base, on le dit avant qu'elle ne le refuse.
+  const [deja] = await db.select({ id: memberships.id }).from(memberships)
+    .where(and(eq(memberships.tontineId, m.tontineId), eq(memberships.userId, m.claimedByUserId)))
+    .limit(1)
+  if (deja) {
+    throw apiError('INVALID_TRANSITION', 'Ce compte est déjà membre de la tontine.', { field: 'claim' })
+  }
+
+  const demandeur = m.claimedByUserId
+
+  await db.update(memberships)
+    .set({ userId: demandeur, claimedByUserId: null, claimedAt: null, joinedAt: m.joinedAt ?? new Date() })
+    .where(eq(memberships.id, membershipId))
+
+  await appendLedger(db, {
+    tontineId: m.tontineId,
+    type: 'member_joined',
+    actorId: acteurId,
+    payload: { membershipId, rattachement: true, name: m.managedName, userId: demandeur },
+  })
+
+  await notifier(db, demandeur, {
+    type: 'rattachement_confirme',
+    tontineId: m.tontineId,
+    title: 'Ton siège est confirmé',
+    body: 'Le président a confirmé ton rattachement. Tu retrouves ton historique dans la tontine.',
+    url: `/app/tontine/${m.tontineId}`,
+  })
+}
+
+/** Le président refuse : la demande s'efface, le siège reste géré, le demandeur l'apprend. */
+export async function refuserRattachement(db: Db, membershipId: string, acteurId: string): Promise<void> {
+  const [m] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1)
+  if (!m) throw apiError('NOT_FOUND', 'Adhésion introuvable.')
+  if (!m.claimedByUserId) {
+    throw apiError('INVALID_TRANSITION', 'Aucune demande de rattachement sur ce membre.', { field: 'claim' })
+  }
+
+  const demandeur = m.claimedByUserId
+
+  await db.update(memberships)
+    .set({ claimedByUserId: null, claimedAt: null })
+    .where(eq(memberships.id, membershipId))
+
+  await appendLedger(db, {
+    tontineId: m.tontineId,
+    type: 'settings_changed',
+    actorId: acteurId,
+    payload: { changement: 'rattachement_refuse', membershipId, name: m.managedName },
+  })
+
+  await notifier(db, demandeur, {
+    type: 'rattachement_refuse',
+    tontineId: m.tontineId,
+    title: 'Rattachement refusé',
+    body: 'Le président n’a pas reconnu ta demande. Si c’est une erreur, contacte-le directement.',
   })
 }

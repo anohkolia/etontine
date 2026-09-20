@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import type { useDb } from '../db/index.ts'
 import { contributions, memberships, payouts, rounds, shares, tontines, users } from '../db/schema.ts'
 import type { MembershipRole } from '../../shared/schemas/index.ts'
@@ -134,24 +135,44 @@ export async function rotationDe(db: Db, tontineId: string) {
  */
 export async function membresDe(db: Db, tontineId: string) {
   const parts = await rotationDe(db, tontineId)
+  const demandeurs = alias(users, 'demandeurs')
   const lignes = await db
     .select({
       membership: memberships,
       firstName: users.firstName,
       lastName: users.lastName,
       userPhone: users.phone,
+      claimFirstName: demandeurs.firstName,
+      claimLastName: demandeurs.lastName,
+      claimPhone: demandeurs.phone,
     })
     .from(memberships)
     .leftJoin(users, eq(users.id, memberships.userId))
+    .leftJoin(demandeurs, eq(demandeurs.id, memberships.claimedByUserId))
     .where(eq(memberships.tontineId, tontineId))
 
-  return await Promise.all(lignes.map(async ({ membership: m, firstName, lastName, userPhone }) => ({
+  return await Promise.all(lignes.map(async ({
+    membership: m, firstName, lastName, userPhone, claimFirstName, claimLastName, claimPhone,
+  }) => ({
     id: m.id,
     userId: m.userId,
     name: [firstName, lastName].filter(Boolean).join(' ') || m.managedName,
     phone: m.managedPhone ?? userPhone,
     role: m.role,
     status: m.status,
+    /**
+     * Le compte qui demande à reprendre ce siège, pour que le président se
+     * prononce : son nom s'il l'a renseigné, et les quatre derniers chiffres
+     * du numéro avec lequel il s'est inscrit — assez pour reconnaître, pas
+     * assez pour exposer.
+     */
+    claim: m.claimedByUserId
+      ? {
+          name: [claimFirstName, claimLastName].filter(Boolean).join(' ') || null,
+          phoneEnd: claimPhone?.slice(-4) ?? null,
+          claimedAt: m.claimedAt,
+        }
+      : null,
     /** Un membre à double part apparaît deux fois dans la rotation. */
     positions: parts.filter(p => p.membershipId === m.id).map(p => p.rotationPosition),
     shares: parts.filter(p => p.membershipId === m.id).length,

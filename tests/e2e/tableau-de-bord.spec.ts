@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, seConnecter, verifierIdentite } from './helpers/session'
+import { canalDeclare, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
 import { tontineLanceeAvecCotisant } from './helpers/tontine'
 
@@ -8,7 +8,7 @@ import { tontineLanceeAvecCotisant } from './helpers/tontine'
 async function tontineLancee(page: import('@playwright/test').Page) {
   await seConnecter(page)
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: 'Tontine des tantines', locality: 'Abobo', access: 'private' },

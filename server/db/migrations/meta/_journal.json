@@ -8,6 +8,13 @@
       "when": 1789519733224,
       "tag": "0000_schema_postgres",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789849883669,
+      "tag": "0001_connexion_par_email",
+      "breakpoints": true
     }
   ]
 }

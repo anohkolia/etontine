@@ -1,6 +1,5 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { remplirCode } from './helpers/otp'
 
 /**
  * Les huit composants du socle, rendus par PrimeVue en mode unstyled et
@@ -109,7 +108,9 @@ test('InputOtp : six cases carrées, saisie numérique', async ({ page }) => {
   expect(box?.width).toBeGreaterThanOrEqual(44)
   expect(box?.height).toBeGreaterThanOrEqual(44)
 
-  await remplirCode(page, 'section-inputotp', '123456')
+  // Case par case : `InputOtp` déplace le focus lui-même à chaque touche, et
+  // une frappe rapide peut arriver avant que le focus ait suivi.
+  for (const [i, chiffre] of [...'123456'].entries()) await cases.nth(i).fill(chiffre)
   await expect(page.getByTestId('otp-echo')).toHaveText('Code saisi : 123456')
 })
 

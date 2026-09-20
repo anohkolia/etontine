@@ -27,6 +27,7 @@ export default defineEventHandler(async (event) => {
     user: {
       id: user.id,
       phone: user.phone,
+      email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       avatarUrl: user.avatarUrl,
@@ -39,7 +40,6 @@ export default defineEventHandler(async (event) => {
       kycStatus: user.kycStatus,
       kycRejectionReason: user.kycRejectionReason,
       kycSubmittedAt: user.kycSubmittedAt,
-      hasPin: Boolean(user.pinHash),
     },
     memberships: adhesions,
   }

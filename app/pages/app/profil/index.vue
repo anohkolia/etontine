@@ -98,79 +98,22 @@ async function basculerConsentement(clef: 'data' | 'notifications', valeur: bool
 }
 
 /**
- * Retire le verrouillage.
+ * Changement de numéro, contre le code d'accès.
  *
- * `DELETE /auth/pin` existait sans appelant : on posait un code et on ne
- * pouvait plus jamais l'ôter. Un verrou qu'on ne peut pas rendre finit par
- * enfermer quelqu'un dehors — un téléphone partagé, une personne qui oublie,
- * et l'application devient inutilisable.
- *
- * Le code courant reste exigé : sans lui, n'importe qui ayant le téléphone
- * en main lèverait le verrou censé le protéger.
- */
-const retraitEnCours = ref(false)
-
-async function retirerPin() {
-  messagePin.value = null
-  retraitEnCours.value = true
-  try {
-    await $fetch('/api/v1/auth/pin', {
-      method: 'DELETE',
-      body: { currentPin: pinActuel.value },
-    })
-    pin.value = ''
-    pinActuel.value = ''
-    await session.charger(true)
-    messagePin.value = t('profil.index.code_de_verrouillage_retire')
-  }
-  catch (e) {
-    messagePin.value = message(e)
-  }
-  finally {
-    retraitEnCours.value = false
-  }
-}
-
-/**
- * Code oublié : le retrait sans le code n'est accepté par le serveur que dans
- * les dix minutes qui suivent une connexion par SMS. L'écran de verrouillage y
- * envoie ; ici, on termine le geste.
- */
-async function retirerPinOublie() {
-  messagePin.value = null
-  retraitEnCours.value = true
-  try {
-    await $fetch('/api/v1/auth/pin', { method: 'DELETE', body: {} })
-    pin.value = ''
-    pinActuel.value = ''
-    await session.charger(true)
-    messagePin.value = t('profil.index.code_de_verrouillage_retire_2')
-  }
-  catch (e) {
-    messagePin.value = message(e)
-  }
-  finally {
-    retraitEnCours.value = false
-  }
-}
-
-/**
- * Changement de numéro. Deux temps, comme la connexion : le nouveau numéro,
- * puis le code reçu dessus. C'est le nouveau qu'on prouve — l'ancien peut
- * être perdu avec la SIM.
+ * Le numéro est l'identifiant de connexion et l'adresse du pot : la session
+ * seule ne suffit pas. Après le changement, les versements vers ce membre
+ * sont gelés quarante-huit heures et son bureau est prévenu.
  */
 const { format: formatTel, extraire, estComplet } = usePhoneMask()
 const changementOuvert = ref(false)
-const etapeNumero = ref<'numero' | 'code'>('numero')
 const nouveauNumero = ref('')
 const codeNumero = ref('')
-const codeDevNumero = ref<string | null>(null)
 const numeroEnCours = ref(false)
 const messageNumero = ref<string | null>(null)
 const erreurNumero = ref(false)
 
 const nouveauNumeroAffiche = computed(() => formatTel(nouveauNumero.value))
-const nouveauNumeroValide = computed(() => estComplet(nouveauNumero.value))
+const nouveauNumeroValide = computed(() => estComplet(nouveauNumero.value) && /^\d{4}$/.test(codeNumero.value))
 
 function onSaisieNouveauNumero(evenement: Event) {
   const champ = evenement.target as HTMLInputElement
@@ -178,39 +121,17 @@ function onSaisieNouveauNumero(evenement: Event) {
   champ.value = formatTel(nouveauNumero.value)
 }
 
-async function demanderCodeNumero() {
-  messageNumero.value = null
-  erreurNumero.value = false
-  numeroEnCours.value = true
-  try {
-    const reponse = await $fetch<{ devCode?: string }>('/api/v1/me/phone/request', {
-      method: 'POST',
-      body: { phone: nouveauNumero.value },
-    })
-    codeDevNumero.value = reponse.devCode ?? null
-    etapeNumero.value = 'code'
-  }
-  catch (e) {
-    messageNumero.value = message(e)
-    erreurNumero.value = true
-  }
-  finally {
-    numeroEnCours.value = false
-  }
-}
-
 async function validerNumero() {
   messageNumero.value = null
   erreurNumero.value = false
   numeroEnCours.value = true
   try {
-    await $fetch('/api/v1/me/phone/verify', {
+    await $fetch('/api/v1/me/phone', {
       method: 'POST',
       body: { phone: nouveauNumero.value, code: codeNumero.value },
     })
     await session.charger(true)
     changementOuvert.value = false
-    etapeNumero.value = 'numero'
     nouveauNumero.value = ''
     codeNumero.value = ''
     messageProfil.value = t('profil.index.numero_change_les_versements')
@@ -225,19 +146,54 @@ async function validerNumero() {
   }
 }
 
-async function definirPin() {
+/**
+ * Changement d'adresse : le code, puis un lien sur la nouvelle adresse. Elle
+ * ne remplace l'ancienne qu'une fois le lien ouvert.
+ */
+const emailOuvert = ref(false)
+const nouvelEmail = ref('')
+const codeEmail = ref('')
+const emailEnCours = ref(false)
+const messageEmail = ref<string | null>(null)
+const erreurEmail = ref(false)
+const lienDevEmail = ref<string | null>(null)
+
+const emailValide = computed(() => nouvelEmail.value.includes('@') && /^\d{4}$/.test(codeEmail.value))
+
+async function changerEmail() {
+  messageEmail.value = null
+  erreurEmail.value = false
+  lienDevEmail.value = null
+  emailEnCours.value = true
+  try {
+    const reponse = await $fetch<{ devToken?: string }>('/api/v1/me/email', {
+      method: 'POST',
+      body: { email: nouvelEmail.value, code: codeEmail.value },
+    })
+    lienDevEmail.value = reponse.devToken ? `/confirmer?token=${reponse.devToken}` : null
+    codeEmail.value = ''
+    messageEmail.value = t('profil.index.lien_envoye')
+  }
+  catch (e) {
+    messageEmail.value = message(e)
+    erreurEmail.value = true
+    codeEmail.value = ''
+  }
+  finally {
+    emailEnCours.value = false
+  }
+}
+
+/** Changement du code d'accès : le code courant est exigé, toujours. */
+async function changerPin() {
   messagePin.value = null
   try {
     await $fetch('/api/v1/auth/pin', {
       method: 'POST',
-      body: { pin: pin.value, ...(session.user?.hasPin ? { currentPin: pinActuel.value } : {}) },
+      body: { code: pin.value, currentCode: pinActuel.value },
     })
     pin.value = ''
     pinActuel.value = ''
-    await session.charger(true)
-    // Celui qui vient de poser le code n'a pas à le ressaisir dans la seconde :
-    // l'onglet est déverrouillé, le verrou jouera à la prochaine ouverture.
-    useVerrou().deverrouiller()
     messagePin.value = t('profil.index.code_de_verrouillage_enregistre')
   }
   catch (e) {
@@ -353,7 +309,7 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
           </button>
         </p>
 
-        <!-- Changement de numéro : un code sur le nouveau, puis un gel de
+        <!-- Changement de numéro : le code d'accès, puis un gel de
              quarante-huit heures sur les versements vers ce membre. Le numéro
              est l'identifiant du compte et l'adresse du pot — pas un champ
              de formulaire ordinaire. -->
@@ -361,53 +317,48 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
           v-if="changementOuvert"
           class="flex flex-col gap-3 rounded-control bg-surface-muted p-3"
           data-testid="formulaire-numero"
-          @submit.prevent="etapeNumero === 'numero' ? demanderCodeNumero() : validerNumero()"
+          @submit.prevent="validerNumero"
         >
-          <template v-if="etapeNumero === 'numero'">
-            <label
-              class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
-              for="nouveau-numero"
-            >
-              {{ $t('profil.index.nouveau_numero') }}
-              <span class="flex items-stretch gap-2">
-                <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface px-3 text-base font-semibold text-ink">
-                  +225
-                </span>
-                <InputText
-                  id="nouveau-numero"
-                  :value="nouveauNumeroAffiche"
-                  inputmode="tel"
-                  autocomplete="tel"
-                  placeholder="07 07 12 34 56"
-                  class="tabular-nums"
-                  data-testid="champ-nouveau-numero"
-                  @input="onSaisieNouveauNumero"
-                />
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="nouveau-numero"
+          >
+            {{ $t('profil.index.nouveau_numero') }}
+            <span class="flex items-stretch gap-2">
+              <span class="flex min-h-touch shrink-0 items-center rounded-control border border-line bg-surface px-3 text-base font-semibold text-ink">
+                +225
               </span>
-            </label>
-            <p class="text-sm text-ink-subtle">
-              {{ $t('profil.index.un_code_sera_envoye') }}
-            </p>
-          </template>
-
-          <template v-else>
-            <p class="text-sm text-ink-muted">
-              {{ $t('profil.index.code_envoye_au') }} <span class="font-medium text-ink">{{ nouveauNumeroAffiche }}</span>.
-            </p>
-            <InputOtp
+              <InputText
+                id="nouveau-numero"
+                :value="nouveauNumeroAffiche"
+                inputmode="tel"
+                autocomplete="tel"
+                placeholder="07 07 12 34 56"
+                class="tabular-nums"
+                data-testid="champ-nouveau-numero"
+                @input="onSaisieNouveauNumero"
+              />
+            </span>
+          </label>
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="code-numero"
+          >
+            {{ $t('profil.index.ton_code_pour_confirmer') }}
+            <InputText
+              id="code-numero"
               v-model="codeNumero"
-              :length="6"
-              integer-only
+              type="password"
+              inputmode="numeric"
+              autocomplete="current-password"
+              maxlength="4"
+              class="tracking-[0.5em]"
               data-testid="champ-code-numero"
             />
-            <p
-              v-if="codeDevNumero"
-              class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
-              data-testid="code-dev-numero"
-            >
-              {{ $t('profil.index.developpement_code') }} <strong>{{ codeDevNumero }}</strong>
-            </p>
-          </template>
+          </label>
+          <p class="text-sm text-ink-subtle">
+            {{ $t('profil.index.le_numero_est_ton_identifiant') }}
+          </p>
 
           <p
             v-if="messageNumero"
@@ -421,10 +372,98 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
 
           <Button
             type="submit"
-            :label="numeroEnCours ? $t('commun.envoi_en_cours') : etapeNumero === 'numero' ? $t('commun.recevoir_le_code') : $t('profil.index.valider_le_nouveau_numero')"
-            :disabled="numeroEnCours || (etapeNumero === 'numero' ? !nouveauNumeroValide : codeNumero.length !== 6)"
+            :label="numeroEnCours ? $t('commun.verification_en_cours') : $t('profil.index.valider_le_nouveau_numero')"
+            :disabled="numeroEnCours || !nouveauNumeroValide"
             class="bg-brand text-brand-ink hover:bg-brand-strong"
             data-testid="bouton-valider-numero"
+          />
+        </form>
+
+        <!-- Adresse e-mail : c'est elle qui rouvre le compte quand le code est
+             oublié. Un lien sur la nouvelle adresse, l'ancienne prévenue. -->
+        <p class="text-sm text-ink-muted">
+          {{ $t('profil.index.ton_adresse') }} <span
+            class="font-medium text-ink"
+            data-testid="email-actuel"
+          >{{ session.user?.email ?? '—' }}</span>
+          <button
+            type="button"
+            class="ml-2 min-h-touch text-sm text-brand underline underline-offset-4"
+            data-testid="bouton-changer-email"
+            @click="emailOuvert = !emailOuvert"
+          >
+            {{ emailOuvert ? $t('commun.annuler') : $t('profil.index.changer') }}
+          </button>
+        </p>
+
+        <form
+          v-if="emailOuvert"
+          class="flex flex-col gap-3 rounded-control bg-surface-muted p-3"
+          data-testid="formulaire-email"
+          @submit.prevent="changerEmail"
+        >
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="nouvel-email"
+          >
+            {{ $t('profil.index.nouvelle_adresse') }}
+            <InputText
+              id="nouvel-email"
+              v-model="nouvelEmail"
+              type="email"
+              inputmode="email"
+              autocomplete="email"
+              data-testid="champ-nouvel-email"
+            />
+          </label>
+          <label
+            class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
+            for="code-email"
+          >
+            {{ $t('profil.index.ton_code_pour_confirmer') }}
+            <InputText
+              id="code-email"
+              v-model="codeEmail"
+              type="password"
+              inputmode="numeric"
+              autocomplete="current-password"
+              maxlength="4"
+              class="tracking-[0.5em]"
+              data-testid="champ-code-email"
+            />
+          </label>
+          <p class="text-sm text-ink-subtle">
+            {{ $t('profil.index.un_lien_partira') }}
+          </p>
+
+          <p
+            v-if="messageEmail"
+            :role="erreurEmail ? 'alert' : 'status'"
+            class="text-sm"
+            :class="erreurEmail ? 'text-disputed-ink' : 'text-confirmed-ink'"
+            data-testid="message-email"
+          >
+            {{ messageEmail }}
+          </p>
+          <p
+            v-if="lienDevEmail"
+            class="rounded-control bg-late-surface p-2 text-sm text-late-ink"
+            data-testid="lien-dev-email"
+          >
+            {{ $t('profil.index.developpement_lien') }}
+            <NuxtLink
+              :to="lienDevEmail"
+              class="font-semibold break-all underline underline-offset-4"
+              data-testid="lien-dev-email-confirmer"
+            >{{ lienDevEmail }}</NuxtLink>
+          </p>
+
+          <Button
+            type="submit"
+            :label="emailEnCours ? $t('commun.envoi_en_cours') : $t('profil.index.envoyer_le_lien')"
+            :disabled="emailEnCours || !emailValide"
+            class="bg-brand text-brand-ink hover:bg-brand-strong"
+            data-testid="bouton-valider-email"
           />
         </form>
 
@@ -545,7 +584,7 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
         </label>
       </section>
 
-      <!-- Verrouillage -->
+      <!-- Code d'accès -->
       <section class="card-surface flex flex-col gap-3 p-4">
         <h2 class="font-semibold text-ink">
           {{ $t('profil.index.verrouillage') }}
@@ -556,10 +595,9 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
 
         <form
           class="flex flex-col gap-3"
-          @submit.prevent="definirPin"
+          @submit.prevent="changerPin"
         >
           <label
-            v-if="session.user?.hasPin"
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="pin-actuel"
           >
@@ -570,6 +608,7 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
               type="password"
               inputmode="numeric"
               autocomplete="current-password"
+              maxlength="4"
               data-testid="champ-pin-actuel"
             />
           </label>
@@ -578,13 +617,14 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
             class="flex flex-col gap-1.5 text-sm font-medium text-ink-muted"
             for="pin-nouveau"
           >
-            {{ session.user?.hasPin ? $t('profil.index.nouveau_code') : $t('profil.index.code') }}
+            {{ $t('profil.index.nouveau_code') }}
             <InputText
               id="pin-nouveau"
               v-model="pin"
               type="password"
               inputmode="numeric"
               autocomplete="new-password"
+              maxlength="4"
               data-testid="champ-pin"
             />
           </label>
@@ -600,35 +640,15 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
 
           <Button
             type="submit"
-            :label="session.user?.hasPin ? $t('profil.index.changer_le_code') : $t('profil.index.definir_le_code')"
-            :disabled="pin.length < 4"
+            :label="$t('profil.index.changer_le_code')"
+            :disabled="pin.length !== 4 || pinActuel.length !== 4"
             class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
             data-testid="bouton-pin"
           />
 
-          <!-- Le retrait exige le code courant, comme le changement : c'est le
-               même geste de preuve, pour la même raison. -->
-          <Button
-            v-if="session.user?.hasPin"
-            type="button"
-            :label="retraitEnCours ? $t('profil.index.retrait') : $t('profil.index.retirer_le_code')"
-            :disabled="retraitEnCours || pinActuel.length < 4"
-            class="text-ink-muted hover:text-ink"
-            data-testid="bouton-retirer-pin"
-            @click="retirerPin"
-          />
-
-          <!-- La porte de sortie de « code oublié » : après une connexion SMS
-               récente, le serveur accepte le retrait sans l'ancien code. -->
-          <button
-            v-if="session.user?.hasPin"
-            type="button"
-            class="min-h-touch text-left text-sm text-ink-muted underline underline-offset-4"
-            data-testid="bouton-pin-oublie"
-            @click="retirerPinOublie"
-          >
-            {{ $t('profil.index.code_oublie_le_retirer') }}
-          </button>
+          <p class="text-sm text-ink-subtle">
+            {{ $t('profil.index.code_oublie') }}
+          </p>
         </form>
       </section>
 

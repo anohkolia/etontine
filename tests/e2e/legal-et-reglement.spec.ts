@@ -28,15 +28,16 @@ test.describe('pages légales', () => {
     await expect(page.getByTestId('editeur-nom')).toBeVisible()
   })
 
-  test('sont reliées depuis la landing, la connexion et le consentement', async ({ page }) => {
+  test('sont reliées depuis la landing, l’inscription et le consentement', async ({ page }) => {
     await page.goto('/')
     await waitForHydration(page)
     await expect(page.getByTestId('lien-cgu')).toHaveAttribute('href', '/legal/cgu')
     await expect(page.getByTestId('lien-confidentialite')).toHaveAttribute('href', '/legal/confidentialite')
 
-    await page.goto('/login')
+    // C'est à l'inscription que le compte se crée, donc là que l'on accepte.
+    await page.goto('/inscription')
     await waitForHydration(page)
-    await expect(page.getByTestId('lien-cgu-login')).toHaveAttribute('href', '/legal/cgu')
+    await expect(page.getByTestId('lien-cgu-inscription')).toHaveAttribute('href', '/legal/cgu')
 
     await seConnecter(page)
     await page.goto('/app/profil')

@@ -29,6 +29,8 @@ interface Membre {
   shares: number
   /** Ce qu'il doit encore sur les tours non clos — calculé côté serveur. */
   resteDu: number
+  /** Un compte demande à reprendre ce siège de membre géré — le président tranche. */
+  claim: { name: string | null, phoneEnd: string | null, claimedAt: string | null } | null
 }
 
 /** Une part, à sa place dans l'ordre de passage. */
@@ -261,6 +263,28 @@ async function decider(membreId: string, status: 'active' | 'left') {
   }
 }
 
+/**
+ * Rattachement d'un membre géré : quelqu'un s'est inscrit avec le numéro que
+ * le bureau avait saisi, et demande son siège. Le numéro n'est plus prouvé
+ * par SMS — c'est le président qui reconnaît, ou non, la personne.
+ */
+const rattachementEnCours = ref<string | null>(null)
+
+async function trancherRattachement(membreId: string, claim: 'confirm' | 'reject') {
+  erreur.value = null
+  rattachementEnCours.value = membreId
+  try {
+    await $fetch(`/api/v1/tontines/${tontineId}/members/${membreId}`, { method: 'PATCH', body: { claim } })
+    await charger()
+  }
+  catch (e) {
+    erreur.value = message(e)
+  }
+  finally {
+    rattachementEnCours.value = null
+  }
+}
+
 const invitation = ref<{ url: string, token: string } | null>(null)
 const { phrase } = useEngagement()
 
@@ -472,6 +496,45 @@ useHead({ title: t('tontine.membres.membres_etontine') })
                 class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
                 :data-testid="`bouton-sortie-${membre.id}`"
                 @click="sortieOuverte = sortieOuverte === membre.id ? null : membre.id"
+              />
+            </div>
+          </li>
+
+          <!-- Demande de rattachement : un compte réclame ce siège géré. Le
+               président confirme s'il reconnaît la personne — le nom qu'elle a
+               renseigné et la fin de son numéro, jamais le numéro entier. -->
+          <li
+            v-if="estPresident && membre.claim"
+            class="-mt-1 flex flex-col gap-3 rounded-b-card border border-t-0 border-declared-ink/20 bg-declared-surface px-3 pt-3 pb-3"
+            :data-testid="`rattachement-${membre.id}`"
+          >
+            <p class="text-sm font-semibold text-declared-ink">
+              {{ $t('membres.demande_de_rattachement') }}
+            </p>
+            <p class="text-sm text-declared-ink">
+              {{ $t('membres.quelqu_un_demande') }}
+              <strong>{{ membre.claim.name ?? $t('membres.compte_sans_nom') }}</strong>
+              <template v-if="membre.claim.phoneEnd">
+                ({{ $t('membres.numero_finissant_par', { fin: membre.claim.phoneEnd }) }})
+              </template>
+            </p>
+            <p class="text-xs text-declared-ink">
+              {{ $t('membres.c_est_bien_lui') }}
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                :label="rattachementEnCours === membre.id ? $t('commun.envoi_en_cours') : $t('membres.confirmer')"
+                :disabled="rattachementEnCours !== null"
+                class="bg-brand text-sm text-brand-ink hover:bg-brand-strong"
+                :data-testid="`bouton-confirmer-rattachement-${membre.id}`"
+                @click="trancherRattachement(membre.id, 'confirm')"
+              />
+              <Button
+                :label="$t('membres.refuser')"
+                :disabled="rattachementEnCours !== null"
+                class="border border-line-strong bg-surface text-sm text-ink hover:bg-surface-muted"
+                :data-testid="`bouton-refuser-rattachement-${membre.id}`"
+                @click="trancherRattachement(membre.id, 'reject')"
               />
             </div>
           </li>

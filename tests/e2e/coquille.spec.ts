@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { seConnecter } from './helpers/session'
-import { inscriptionOtp } from './helpers/tontine'
+import { CODE_TEST, seConnecter } from './helpers/session'
+import { inscription } from './helpers/tontine'
 
 /**
  * La coquille de l'application : ce qui entoure les écrans métier et qui,
@@ -10,20 +10,10 @@ import { inscriptionOtp } from './helpers/tontine'
  * plus voir une fois connecté.
  */
 
-test('le code de verrouillage est demandé à l’ouverture, et une connexion SMS le lève', async ({ page, context }) => {
-  // Le scénario attend la fenêtre de renvoi d'un code SMS : il est plus long.
-  test.setTimeout(120_000)
-  const numero = await inscriptionOtp(page)
-  const premierCode = Date.now()
+test('le code d’accès est demandé à l’ouverture d’un nouvel onglet, et « code oublié » mène à l’e-mail', async ({ page, context }) => {
+  await inscription(page)
 
-  // Pose un code depuis le profil.
-  await page.goto('/app/profil')
-  await waitForHydration(page)
-  await page.getByTestId('champ-pin').fill('2468')
-  await page.getByTestId('bouton-pin').click()
-  await expect(page.getByTestId('message-pin')).toContainText('enregistré')
-
-  // Dans le même onglet, rien n'est redemandé : on vient de le poser.
+  // Dans l'onglet de connexion, rien n'est redemandé : le code vient d'être saisi.
   await page.goto('/app')
   await waitForHydration(page)
   await expect(page).toHaveURL(/\/app$/)
@@ -35,34 +25,24 @@ test('le code de verrouillage est demandé à l’ouverture, et une connexion SM
   await waitForHydration(autre)
   expect(autre.url()).toContain('redirect=')
 
-  // Un mauvais code dit combien d'essais restent ; le bon ouvre là où on allait.
-  await autre.getByTestId('champ-code-verrou').fill('0000')
+  // Un mauvais code est refusé ; le bon ouvre là où on allait.
+  await autre.getByTestId('champ-code-verrou').fill('9999')
   await autre.getByTestId('bouton-deverrouiller').click()
-  await expect(autre.getByTestId('erreur-verrou')).toContainText('essais')
+  await expect(autre.getByTestId('erreur-verrou')).toContainText('incorrect')
 
-  await autre.getByTestId('champ-code-verrou').fill('2468')
+  await autre.getByTestId('champ-code-verrou').fill(CODE_TEST)
   await autre.getByTestId('bouton-deverrouiller').click()
   await autre.waitForURL(/\/app\/notifications/)
 
-  // Code oublié : la reconnexion par SMS déverrouille, et permet le retrait
-  // sans l'ancien code dans les dix minutes.
+  // Code oublié : on est déconnecté et envoyé vers la réinitialisation par
+  // e-mail — le seul chemin, puisque le même code ouvre la session.
   const troisieme = await context.newPage()
   await troisieme.goto('/app')
   await troisieme.waitForURL(/\/app\/verrou/)
   await waitForHydration(troisieme)
   await troisieme.getByTestId('bouton-code-oublie').click()
-  await troisieme.getByTestId('bouton-reconnexion-sms').click()
-  await troisieme.waitForURL(/\/login/)
-
-  // Un second code sur le même numéro n'est servi qu'après trente secondes :
-  // la garde reste en place, le test s'y plie.
-  await troisieme.waitForTimeout(Math.max(0, 31_000 - (Date.now() - premierCode)))
-  await inscriptionOtp(troisieme, numero)
-  await troisieme.goto('/app/profil')
-  await waitForHydration(troisieme)
-  await expect(troisieme).toHaveURL(/\/app\/profil/)
-  await troisieme.getByTestId('bouton-pin-oublie').click()
-  await expect(troisieme.getByTestId('message-pin')).toContainText('retiré')
+  await troisieme.getByTestId('bouton-reinitialiser').click()
+  await troisieme.waitForURL(/\/code-oublie/)
 
   await autre.close()
   await troisieme.close()

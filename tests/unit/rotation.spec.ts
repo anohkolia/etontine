@@ -5,7 +5,7 @@ import {
 } from '../../server/services/membres.ts'
 import { melangerAvecGraine, verifierTirage } from '../../server/services/rotation.ts'
 import { dateDuTour, demarrerTontine } from '../../server/services/tours.ts'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { contributions, ledgerEntries, memberships, rounds, tontines } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
@@ -33,7 +33,6 @@ beforeEach(async () => {
   const canal = await creerCanal(db, PRESIDENT, {
     provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya Koné',
   })
-  await marquerVerifie(db, canal)
   await definirCanaux(db, T, [canal], PRESIDENT)
   await publier(db, T)
 })

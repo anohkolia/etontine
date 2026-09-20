@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import { collectionChannels, tontineChannels, tontines } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
@@ -14,11 +14,12 @@ export const GEL_HEURES = 48
 /**
  * Rattache un canal de collecte à une tontine.
  *
- * **Un canal non vérifié ne peut pas être rattaché** (acceptation T09). La
- * vérification est un OTP envoyé sur le numéro de collecte lui-même : elle
- * prouve que l'organisateur contrôle bien ce numéro. Sans elle, n'importe qui
- * pourrait faire collecter les cotisations du groupe sur le sien — c'est
- * l'arnaque la plus simple et la plus rentable contre une tontine.
+ * Le numéro de collecte n'est plus prouvé par SMS. Ce qui protège les membres
+ * contre l'arnaque la plus simple — faire collecter les cotisations du groupe
+ * sur un autre numéro — tient à trois choses : le code d'accès est redemandé
+ * pour déclarer un numéro, le nom du titulaire est affiché au membre au
+ * moment de payer (T09), et tout changement sur une tontine lancée est
+ * bruyant et gelé quarante-huit heures (règle 22).
  */
 export async function rattacherCanal(db: Db, tontineId: string, channelId: string, acteurId: string) {
   const [canal] = await db
@@ -28,14 +29,6 @@ export async function rattacherCanal(db: Db, tontineId: string, channelId: strin
     .limit(1)
 
   if (!canal) throw apiError('NOT_FOUND', 'Canal de collecte introuvable.')
-
-  if (!canal.verifiedAt) {
-    throw apiError(
-      'FORBIDDEN',
-      'Ce numéro de collecte n’est pas encore vérifié. Vérifie-le par SMS avant de le rattacher.',
-      { field: 'channelId' },
-    )
-  }
 
   const [tontine] = await db.select().from(tontines).where(eq(tontines.id, tontineId)).limit(1)
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
@@ -86,7 +79,7 @@ export async function rattacherCanal(db: Db, tontineId: string, channelId: strin
   return { channelId, frozenUntil }
 }
 
-/** Les canaux vérifiés et utilisables d'une tontine. */
+/** Les canaux de collecte d'une tontine. */
 export async function canauxDeTontine(db: Db, tontineId: string) {
   return await db
     .select({
@@ -99,13 +92,10 @@ export async function canauxDeTontine(db: Db, tontineId: string) {
     })
     .from(tontineChannels)
     .innerJoin(collectionChannels, eq(collectionChannels.id, tontineChannels.channelId))
-    .where(and(
-      eq(tontineChannels.tontineId, tontineId),
-      isNotNull(collectionChannels.verifiedAt),
-    ))
+    .where(eq(tontineChannels.tontineId, tontineId))
 }
 
-/** Crée un canal, non vérifié : inutilisable tant qu'il ne l'est pas. */
+/** Crée un canal de collecte. */
 export async function creerCanal(db: Db, userId: string, input: {
   provider: 'wave' | 'orange' | 'mtn' | 'moov'
   msisdn: string
@@ -122,14 +112,7 @@ export async function creerCanal(db: Db, userId: string, input: {
     // pour vérifier qu'il envoie bien à la bonne personne (T14).
     holderName: input.holderName,
     paymentLinkUrl: input.paymentLinkUrl ?? null,
-    verifiedAt: null,
   })
 
   return id
-}
-
-export async function marquerVerifie(db: Db, channelId: string) {
-  await db.update(collectionChannels)
-    .set({ verifiedAt: new Date() })
-    .where(eq(collectionChannels.id, channelId))
 }

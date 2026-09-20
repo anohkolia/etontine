@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalVerifie, renseignerNom, seConnecter, verifierIdentite } from './helpers/session'
+import { canalDeclare, renseignerNom, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
-import { tontineLanceeAvecCotisant } from './helpers/tontine'
+import { confirmerRattachement, tontineLanceeAvecCotisant } from './helpers/tontine'
 
 /**
  * Détail et réglages d'une tontine.
@@ -27,7 +27,7 @@ import { tontineLanceeAvecCotisant } from './helpers/tontine'
 async function tontineLancee(page: import('@playwright/test').Page) {
   await seConnecter(page)
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: 'Tontine des tantines', locality: 'Abobo', access: 'private', emoji: '🧺' },
@@ -54,14 +54,14 @@ async function tontineLancee(page: import('@playwright/test').Page) {
   return { id, telMembre }
 }
 
-/** Ouvre une session pour un numéro **donné**, et renseigne le palier 1. */
+/**
+ * Ouvre une session pour un numéro **donné**, et renseigne le palier 1.
+ *
+ * Par l'écran, pas par l'API : c'est la connexion qui déverrouille l'onglet,
+ * et l'on veut ensuite naviguer dans l'application.
+ */
 async function sessionPour(page: import('@playwright/test').Page, telephone: string) {
-  const demande = await page.request.post('/api/v1/auth/otp/request', { data: { phone: telephone } })
-  const { devCode } = await demande.json() as { devCode?: string }
-  const verif = await page.request.post('/api/v1/auth/otp/verify', {
-    data: { phone: telephone, code: devCode },
-  })
-  if (!verif.ok()) throw new Error(`connexion refusée : ${await verif.text()}`)
+  await seConnecter(page, telephone)
   await renseignerNom(page, 'Koffi', 'N’Guessan')
 }
 
@@ -135,7 +135,7 @@ test('la carte du tableau de bord mène au détail, pas au registre', async ({ p
 
 test('le président change de numéro de collecte, prévenu du gel de 48 h', async ({ page }) => {
   const { id } = await tontineLancee(page)
-  const second = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const second = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   await page.goto(`/app/tontine/${id}/reglages`)
   await waitForHydration(page)
@@ -187,13 +187,15 @@ test('un membre simple ne voit ni le lien ni le formulaire de réglages', async 
 
   // Seconde session, vraiment séparée. Le membre ouvre son compte avec le
   // numéro que le président avait enregistré : son adhésion gérée est
-  // rattachée, sans duplication d'historique (T12).
+  // rattachée, sans duplication d'historique (T12) — une fois le président
+  // d'accord, puisque le numéro n'est plus prouvé par SMS.
   const contexte = await browser.newContext()
   const membre = await contexte.newPage()
   await membre.goto('/')
   await sessionPour(membre, telMembre)
   const adhesion = await membre.request.post(`/api/v1/invites/${token}/accept`)
   expect(adhesion.ok()).toBe(true)
+  await confirmerRattachement(page, id, 'Koffi N’Guessan')
 
   await membre.goto(`/app/tontine/${id}`)
   await waitForHydration(membre)

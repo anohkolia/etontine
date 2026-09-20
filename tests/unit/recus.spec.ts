@@ -6,7 +6,7 @@ import { useMoney } from '../../app/composables/useMoney.ts'
 import { declarerPaiement } from '../../server/services/declarations.ts'
 import { confirmerDeclaration } from '../../server/services/confirmations.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
 import { contributions, memberships } from '../../server/db/schema.ts'
@@ -35,7 +35,6 @@ beforeEach(async () => {
   await ajouterMembreGere(db, T, { name: 'Fatou Diarra', phone: '+2250707000003', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707000001', holderName: 'Aya' })
-  await marquerVerifie(db, canal)
   await definirCanaux(db, T, [canal], PRESIDENT)
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)

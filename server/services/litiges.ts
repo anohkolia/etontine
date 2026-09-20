@@ -169,7 +169,9 @@ export async function litigesDe(db: Db, tontineId: string) {
       .map(u => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Membre'] as const),
   )
 
-  return fils.map(async f => ({
+  // `Promise.all`, et non un simple `map` : un tableau de promesses sérialisé
+  // en JSON devient un tableau d'objets vides, et l'écran ne montre rien.
+  return await Promise.all(fils.map(async f => ({
     ...f,
     messages: (await db
       .select()
@@ -177,5 +179,5 @@ export async function litigesDe(db: Db, tontineId: string) {
       .where(eq(disputeMessages.disputeId, f.dispute.id))
       .orderBy(asc(disputeMessages.createdAt)))
       .map(m => ({ ...m, auteur: noms.get(m.authorId) ?? 'Membre' })),
-  }))
+  })))
 }

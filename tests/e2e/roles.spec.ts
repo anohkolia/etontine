@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { numeroDeTest } from './helpers/telephone'
-import { adhesionDe, inscriptionOtp, rattacherMembre, tontinePubliee } from './helpers/tontine'
+import { adhesionDe, inscription, rattacherMembre, tontinePubliee } from './helpers/tontine'
 
 /**
  * Le bureau se nomme depuis l'écran des membres.
@@ -12,13 +12,13 @@ import { adhesionDe, inscriptionOtp, rattacherMembre, tontinePubliee } from './h
  */
 
 test('nommer un trésorier lui ouvre la file de confirmation', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
 
   // Avant : Koffi est simple membre, sans onglet « Confirmer ».
   await koffi.page.goto(`/app/tontine/${id}`)
@@ -52,13 +52,13 @@ test('nommer un trésorier lui ouvre la file de confirmation', async ({ page, br
 })
 
 test('nommer un censeur lui ouvre les impayés, sans la file de confirmation', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroFatou = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroFatou },
   ])
-  const fatou = await rattacherMembre(browser, lien, numeroFatou, 'Fatou', 'Diarra')
+  const fatou = await rattacherMembre(browser, { president: page, id, lien }, numeroFatou, 'Fatou', 'Diarra')
 
   const membreId = await adhesionDe(page, id, 'Fatou Diarra')
   await page.goto(`/app/tontine/${id}/membres`)
@@ -78,13 +78,13 @@ test('nommer un censeur lui ouvre les impayés, sans la file de confirmation', a
 })
 
 test('passer la présidence : l’ancien président devient membre', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroKoffi = numeroDeTest()
   const { id, lien } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroKoffi },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
   ])
-  const koffi = await rattacherMembre(browser, lien, numeroKoffi, 'Koffi', 'N’Guessan')
+  const koffi = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
 
   const membreId = await adhesionDe(page, id, 'Koffi N’Guessan')
   await page.goto(`/app/tontine/${id}/membres`)
@@ -113,7 +113,7 @@ test('passer la présidence : l’ancien président devient membre', async ({ pa
 })
 
 test('déclarer défaillant : refusé tant que le membre n’a pas pris la main', async ({ page }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const { id } = await tontinePubliee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroDeTest() },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },

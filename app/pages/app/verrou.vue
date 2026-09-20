@@ -6,9 +6,10 @@
  * compteur de notifications. Tant que le code n'est pas saisi, l'écran ne dit
  * rien de la tontine — c'est tout l'objet du verrou.
  *
- * La sortie de secours est la reconnexion par SMS : quelqu'un qui a oublié son
- * code prouve qu'il tient la SIM, et pourra retirer le code depuis son profil.
- * Sans elle, un code oublié enfermait dehors pour de bon.
+ * Le code demandé est le code d'accès du compte, et les essais comptent
+ * comme à la connexion : cinq échecs bloquent, dix verrouillent le compte.
+ * La sortie de secours est « code oublié », par e-mail — elle passe par la
+ * déconnexion, puisque le nouveau code ouvre une nouvelle session.
  */
 definePageMeta({ layout: false, middleware: 'auth' })
 const { t } = useI18n()
@@ -30,15 +31,14 @@ const destination = computed(() => {
 
 onMounted(() => {
   verrou.rafraichir()
-  // Déjà déverrouillé — ou pas de code du tout : rien à demander.
-  if (verrou.deverrouille.value || !session.user?.hasPin) navigateTo(destination.value, { replace: true })
+  if (verrou.deverrouille.value) navigateTo(destination.value, { replace: true })
 })
 
 async function deverrouiller() {
   erreur.value = null
   enCours.value = true
   try {
-    await $fetch<{ ok: true }>('/api/v1/auth/pin/verify', { method: 'POST', body: { pin: code.value } })
+    await $fetch<{ ok: true }>('/api/v1/auth/pin/verify', { method: 'POST', body: { code: code.value } })
     verrou.deverrouiller()
     await navigateTo(destination.value, { replace: true })
   }
@@ -52,8 +52,10 @@ async function deverrouiller() {
   }
 }
 
-async function seReconnecter() {
-  await session.deconnecter()
+async function reinitialiser() {
+  await $fetch('/api/v1/auth/logout', { method: 'POST' })
+  session.expirer()
+  await navigateTo('/code-oublie')
 }
 
 useHead({ title: t('verrou.verrouille_etontine') })
@@ -89,14 +91,14 @@ useHead({ title: t('verrou.verrouille_etontine') })
         <label
           class="sr-only"
           for="code-verrou"
-        >{{ $t('verrou.code_de_verrouillage') }}</label>
+        >{{ $t('verrou.code_d_acces') }}</label>
         <InputText
           id="code-verrou"
           v-model="code"
           type="password"
           inputmode="numeric"
           autocomplete="current-password"
-          maxlength="6"
+          maxlength="4"
           class="text-center text-2xl tracking-[0.5em]"
           :aria-describedby="erreur ? 'erreur-verrou' : undefined"
           data-testid="champ-code-verrou"
@@ -122,7 +124,7 @@ useHead({ title: t('verrou.verrouille_etontine') })
         <Button
           type="submit"
           :label="enCours ? $t('commun.verification_en_cours') : $t('verrou.ouvrir')"
-          :disabled="code.length < 4 || enCours"
+          :disabled="code.length !== 4 || enCours"
           class="w-full bg-brand text-brand-ink hover:bg-brand-strong"
           data-testid="bouton-deverrouiller"
         />
@@ -142,14 +144,14 @@ useHead({ title: t('verrou.verrouille_etontine') })
             data-testid="aide-code-oublie"
           >
             <p class="text-ink-muted">
-              {{ $t('verrou.reconnecte_toi_avec_un') }}
+              {{ $t('verrou.reinitialise_par_email') }}
             </p>
             <Button
               type="button"
-              :label="$t('verrou.se_reconnecter_par_sms')"
+              :label="$t('verrou.reinitialiser_mon_code')"
               class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
-              data-testid="bouton-reconnexion-sms"
-              @click="seReconnecter"
+              data-testid="bouton-reinitialiser"
+              @click="reinitialiser"
             />
           </div>
         </div>
@@ -162,7 +164,7 @@ useHead({ title: t('verrou.verrouille_etontine') })
   États d'écran (règle 14) :
   · chargement — dans le libellé du bouton (« Vérification… »)
   · vide       — sans objet : un formulaire n'est jamais vide
-  · erreur     — message en ligne avec `role="alert"`, essais restants inclus
+  · erreur     — message en ligne avec `role="alert"`
   · hors-ligne — <OfflineBanner> en tête : le code se vérifie côté serveur
   · contenu    — le formulaire
 -->

@@ -1,17 +1,17 @@
 /**
  * Le verrou d'écran.
  *
- * Le code de verrouillage se posait depuis le profil et **rien ne le demandait
- * jamais** : c'était un réglage sans effet. Il protège l'écran, pas le compte —
- * la session tient au cookie. Ce qu'il empêche, c'est qu'un téléphone prêté
- * cinq minutes suffise à lire le registre.
+ * Le code d'accès — celui qui ouvre la session — est redemandé à l'écran :
+ * la session tient au cookie, mais un téléphone prêté cinq minutes ne doit
+ * pas suffire à lire le registre.
  *
  * Deux moments verrouillent : l'ouverture de l'application, et le retour
  * après cinq minutes en arrière-plan. L'état vit dans `sessionStorage` — un
  * onglet fermé est un onglet verrouillé — et jamais dans le magasin persisté :
  * il n'a rien à faire dans `localStorage`, où il survivrait à la fermeture.
  *
- * Une connexion par code SMS déverrouille : elle prouve plus qu'un code d'écran.
+ * Une connexion, une confirmation d'e-mail ou une réinitialisation
+ * déverrouillent : le code vient d'être saisi ou choisi.
  */
 const CLE = 'etontine-verrou'
 export const RELOCK_APRES_MS = 5 * 60 * 1000

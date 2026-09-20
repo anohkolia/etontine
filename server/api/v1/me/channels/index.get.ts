@@ -13,7 +13,6 @@ export default defineEventHandler(async (event) => {
       msisdn: collectionChannels.msisdn,
       holderName: collectionChannels.holderName,
       paymentLinkUrl: collectionChannels.paymentLinkUrl,
-      verifiedAt: collectionChannels.verifiedAt,
     })
     .from(collectionChannels)
     .where(eq(collectionChannels.userId, user.id))

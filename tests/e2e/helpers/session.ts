@@ -1,25 +1,67 @@
 import type { Page } from '@playwright/test'
 import { waitForHydration } from './hydration'
 import { numeroDeTest } from './telephone'
-import { remplirCode } from './otp'
+
+/** Le code d'accès de tous les comptes de test. Hors de la liste des codes interdits. */
+export const CODE_TEST = '2604'
+
+/** L'adresse e-mail dérivée d'un numéro : unique par compte, et lisible dans les journaux. */
+export function emailDeTest(numero: string): string {
+  return `${numero.replace(/\D/g, '')}@test.etontine.ci`
+}
 
 /**
- * Ouvre une session par OTP et attend d'être dans l'application.
+ * Inscrit un compte par l'API et le confirme, sans ouvrir de session.
  *
- * Le numéro se choisit quand il doit correspondre à quelqu'un — le membre géré
+ * Le lien de confirmation est renvoyé par l'API hors production (`devToken`) :
+ * c'est ce qui remplace la boîte mail. Un numéro déjà confirmé ne reçoit pas
+ * de jeton — le compte existe, on ne fait rien.
+ */
+export async function inscrireParApi(page: Page, numero: string, code = CODE_TEST, base = ''): Promise<void> {
+  const inscription = await page.request.post(`${base}/api/v1/auth/register`, {
+    data: { phone: numero, email: emailDeTest(numero), code },
+  })
+  if (!inscription.ok()) throw new Error(`inscription refusée : ${inscription.status()} ${await inscription.text()}`)
+
+  const { devToken } = await inscription.json() as { devToken?: string }
+  if (!devToken) return
+
+  const confirmation = await page.request.post(`${base}/api/v1/auth/confirm`, { data: { token: devToken } })
+  if (!confirmation.ok()) throw new Error(`confirmation refusée : ${confirmation.status()} ${await confirmation.text()}`)
+
+  // La confirmation ouvre une session : on la ferme, la connexion par l'écran
+  // en rouvrira une — c'est elle qui déverrouille l'onglet.
+  await page.request.post(`${base}/api/v1/auth/logout`)
+}
+
+/**
+ * Une session sur l'application des membres, depuis un test qui vit sur une
+ * autre origine — le back-office. `base` est l'adresse de l'application des
+ * membres. Par l'écran, comme `seConnecter` : c'est la connexion qui
+ * déverrouille l'onglet, et ces tests y naviguent ensuite.
+ */
+export async function sessionSurAppMembre(page: Page, numero: string, base = '', code = CODE_TEST): Promise<void> {
+  await seConnecter(page, numero, code, base)
+}
+
+/**
+ * Ouvre une session par l'écran de connexion et attend d'être dans l'application.
+ *
+ * Le compte est inscrit et confirmé au passage s'il ne l'est pas encore. Le
+ * numéro se choisit quand il doit correspondre à quelqu'un — le membre géré
  * que le président a inscrit, et qui vient rejoindre avec son propre compte.
  */
-export async function seConnecter(page: Page, numero = numeroDeTest()): Promise<void> {
-  await page.goto('/login')
+export async function seConnecter(page: Page, numero = numeroDeTest(), code = CODE_TEST, base = ''): Promise<string> {
+  await inscrireParApi(page, numero, code, base)
+
+  await page.goto(`${base}/login`)
   await waitForHydration(page)
   await page.getByTestId('champ-telephone').fill(numero)
-  await page.getByTestId('bouton-recevoir-code').click()
-
-  // En développement, le code est affiché plutôt qu'envoyé par SMS.
-  const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code', code!)
-  await page.getByTestId('bouton-valider-code').click()
+  await page.getByTestId('champ-code').fill(code)
+  await page.getByTestId('bouton-connexion').click()
   await page.waitForURL(/\/app/)
+
+  return numero
 }
 
 /** Renseigne le nom : palier KYC 1, exigé pour rejoindre une tontine. */
@@ -60,21 +102,12 @@ export async function verifierIdentite(page: Page): Promise<void> {
   if (!reponse.ok()) throw new Error(`KYC refusé : ${reponse.status()} ${await reponse.text()}`)
 }
 
-/** Crée un canal de collecte vérifié et renvoie son identifiant. */
-export async function canalVerifie(page: Page, numero: string): Promise<string> {
+/** Déclare un canal de collecte — contre le code d'accès — et renvoie son identifiant. */
+export async function canalDeclare(page: Page, numero: string, code = CODE_TEST): Promise<string> {
   const creation = await page.request.post('/api/v1/me/channels', {
-    data: { provider: 'wave', msisdn: numero, holderName: 'Aya Koné' },
+    data: { provider: 'wave', msisdn: numero, holderName: 'Aya Koné', code },
   })
+  if (!creation.ok()) throw new Error(`canal refusé : ${creation.status()} ${await creation.text()}`)
   const { id } = await creation.json() as { id: string }
-
-  // La vérification passe par un OTP envoyé sur le numéro de collecte lui-même.
-  const envoi = await page.request.post(`/api/v1/me/channels/${id}/verify`, { data: {} })
-  const { devCode } = await envoi.json() as { devCode?: string }
-
-  const validation = await page.request.post(`/api/v1/me/channels/${id}/verify`, {
-    data: { code: devCode },
-  })
-  if (!validation.ok()) throw new Error(`vérification du canal refusée : ${await validation.text()}`)
-
   return id
 }

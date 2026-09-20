@@ -1,8 +1,6 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test'
-import { waitForHydration } from './hydration'
 import { numeroDeTest } from './telephone'
-import { remplirCode } from './otp'
-import { canalVerifie, verifierIdentite } from './session'
+import { canalDeclare, seConnecter, verifierIdentite } from './session'
 
 /**
  * Briques communes aux parcours : un compte, une tontine publiée, un membre
@@ -13,19 +11,9 @@ import { canalVerifie, verifierIdentite } from './session'
  * le test vérifie.
  */
 
-/** Inscription par code à usage unique, sur le numéro donné. */
-export async function inscriptionOtp(page: Page, numero = numeroDeTest()): Promise<string> {
-  await page.goto('/login')
-  await waitForHydration(page)
-  await page.getByTestId('champ-telephone').fill(numero)
-  await page.getByTestId('bouton-recevoir-code').click()
-
-  const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code', code!)
-  await page.getByTestId('bouton-valider-code').click()
-  await page.waitForURL(url => !url.pathname.startsWith('/login'))
-
-  return numero
+/** Inscription — par e-mail, confirmée — puis connexion, sur le numéro donné. */
+export async function inscription(page: Page, numero = numeroDeTest()): Promise<string> {
+  return await seConnecter(page, numero)
 }
 
 export interface MembreGere {
@@ -44,7 +32,7 @@ export async function tontinePubliee(
   options: { nom?: string, montant?: number, startDate?: string } = {},
 ): Promise<{ id: string, lien: string }> {
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: options.nom ?? 'Tontine des tantines', locality: 'Abobo', access: 'private' },
@@ -79,24 +67,49 @@ export async function tontinePubliee(
 }
 
 /**
- * Un membre géré prend son compte et se rattache à son adhésion par le lien.
- * Renvoie sa page, dans un contexte à part — c'est un autre téléphone.
+ * Le président confirme la demande de rattachement d'un membre géré.
+ *
+ * Le numéro n'est plus prouvé par SMS : un compte qui rejoint par le lien
+ * avec le numéro d'un membre géré ne fait que *demander* son siège, et c'est
+ * le président qui tranche — ici, par l'API, comme le ferait l'écran des
+ * membres.
+ */
+export async function confirmerRattachement(president: Page, tontineId: string, nom: string): Promise<void> {
+  const reponse = await president.request.get(`/api/v1/tontines/${tontineId}/members`)
+  if (!reponse.ok()) throw new Error(`liste des membres refusée : ${reponse.status()} ${await reponse.text()}`)
+  const { members } = await reponse.json() as { members: Array<{ id: string, name: string | null, claim: unknown }> }
+  const membre = members.find(m => m.name === nom && m.claim)
+  if (!membre) throw new Error(`aucune demande de rattachement pour ${nom}`)
+
+  const confirmation = await president.request.fetch(`/api/v1/tontines/${tontineId}/members/${membre.id}`, {
+    method: 'PATCH',
+    data: { claim: 'confirm' },
+  })
+  if (!confirmation.ok()) throw new Error(`confirmation du rattachement refusée : ${await confirmation.text()}`)
+}
+
+/**
+ * Un membre géré prend son compte et se rattache à son adhésion par le lien,
+ * et le président confirme. Renvoie sa page, dans un contexte à part — c'est
+ * un autre téléphone.
  */
 export async function rattacherMembre(
   browser: Browser,
-  lien: string,
+  tontine: { president: Page, id: string, lien: string },
   numero: string,
   prenom: string,
   nom: string,
 ): Promise<{ page: Page, contexte: BrowserContext }> {
   const contexte = await browser.newContext()
   const page = await contexte.newPage()
-  await inscriptionOtp(page, numero)
+  await inscription(page, numero)
   await page.request.fetch('/api/v1/me', { method: 'PATCH', data: { firstName: prenom, lastName: nom } })
 
-  const token = lien.split('/join/')[1]!
+  const token = tontine.lien.split('/join/')[1]!
   const acceptation = await page.request.post(`/api/v1/invites/${token}/accept`)
   if (!acceptation.ok()) throw new Error(`rattachement refusé : ${await acceptation.text()}`)
+
+  await confirmerRattachement(tontine.president, tontine.id, `${prenom} ${nom}`)
 
   return { page, contexte }
 }
@@ -122,7 +135,7 @@ export async function adhesionDe(page: Page, tontineId: string, nom: string): Pr
 export async function tontineLanceeAvecCotisant(browser: Browser, page: Page): Promise<{ id: string }> {
   const contextePresident = await browser.newContext()
   const president = await contextePresident.newPage()
-  await inscriptionOtp(president)
+  await inscription(president)
 
   const numeroKoffi = numeroDeTest()
   // Trois cotisants à une part : trois tours, un pot de 75 000 FCFA.
@@ -133,12 +146,15 @@ export async function tontineLanceeAvecCotisant(browser: Browser, page: Page): P
   ])
   const demarrage = await president.request.post(`/api/v1/tontines/${id}/start`)
   if (!demarrage.ok()) throw new Error(`démarrage refusé : ${await demarrage.text()}`)
-  await contextePresident.close()
 
-  await inscriptionOtp(page, numeroKoffi)
+  await inscription(page, numeroKoffi)
   await page.request.fetch('/api/v1/me', { method: 'PATCH', data: { firstName: 'Koffi', lastName: 'N’Guessan' } })
   const acceptation = await page.request.post(`/api/v1/invites/${lien.split('/join/')[1]}/accept`)
   if (!acceptation.ok()) throw new Error(`rattachement refusé : ${await acceptation.text()}`)
+
+  // Le président confirme que c'est bien Koffi, puis raccroche.
+  await confirmerRattachement(president, id, 'Koffi N’Guessan')
+  await contextePresident.close()
 
   return { id }
 }

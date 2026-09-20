@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  accepterInvitation, apercuInvitation, approuverAdhesion, creerInvitation, refuserAdhesion,
+  accepterInvitation, apercuInvitation, approuverAdhesion, confirmerRattachement, creerInvitation,
+  refuserAdhesion, refuserRattachement,
 } from '../../server/services/invitations.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
 import { creerBrouillon, majTontine } from '../../server/services/tontines.ts'
 import { useEngagement } from '../../app/composables/useEngagement.ts'
 import { useMoney } from '../../app/composables/useMoney.ts'
-import { ledgerEntries, memberships, shares, tontines } from '../../server/db/schema.ts'
+import { ledgerEntries, memberships, notifications, shares, tontines } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -89,7 +90,7 @@ describe('adhésion', () => {
     expect(resultat.rattache).toBe(false)
   })
 
-  it('rattache un membre géré sans dupliquer son historique', async () => {
+  it('demande le rattachement d’un membre géré, sans rien dupliquer ni rattacher encore', async () => {
     // Le bureau l'a saisi à la main ; il a déjà des cotisations à son compte.
     const membershipId = await ajouterMembreGere(db, T, {
       name: 'Yao Brou', phone: NUMERO_GERE, shares: 2,
@@ -100,15 +101,81 @@ describe('adhésion', () => {
 
     const resultat = await accepterInvitation(db, token, ARRIVANT)
 
-    // Acceptation T12 : rattaché, pas dupliqué.
+    // Acceptation T12 : rattaché, pas dupliqué — mais le numéro n'est plus
+    // prouvé par SMS, donc c'est une demande, en attente du président.
     expect(resultat.rattache).toBe(true)
+    expect(resultat.status).toBe('pending_approval')
     expect(resultat.membershipId).toBe(membershipId)
 
     const adhesions = await db.select().from(memberships).where(eq(memberships.tontineId, T))
     expect(adhesions.filter(m => m.managedPhone === NUMERO_GERE)).toHaveLength(1)
+    const [siege] = adhesions.filter(m => m.id === membershipId)
+    expect(siege!.userId).toBeNull()
+    expect(siege!.claimedByUserId).toBe(ARRIVANT)
 
     // Ses deux parts sont conservées : les dédoubler fausserait le pot du groupe.
     expect(await db.select().from(shares).where(eq(shares.membershipId, membershipId))).toHaveLength(2)
+
+    // Le président est prévenu, c'est lui qui tranche.
+    const prevenus = await db.select().from(notifications)
+    expect(prevenus.map(n => n.userId)).toEqual([PRESIDENT])
+    expect(prevenus[0]!.type).toBe('rattachement_demande')
+  })
+
+  it('le président confirme : le compte prend le siège, avec son historique', async () => {
+    const membershipId = await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 2 })
+    await createTestUser(db, ARRIVANT, NUMERO_GERE)
+    const { token } = await creerInvitation(db, T, PRESIDENT)
+    await accepterInvitation(db, token, ARRIVANT)
+
+    await confirmerRattachement(db, membershipId, PRESIDENT)
+
+    const [siege] = await db.select().from(memberships).where(eq(memberships.id, membershipId))
+    expect(siege!.userId).toBe(ARRIVANT)
+    expect(siege!.claimedByUserId).toBeNull()
+    expect(siege!.status).toBe('active')
+    expect(await db.select().from(shares).where(eq(shares.membershipId, membershipId))).toHaveLength(2)
+
+    const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'member_joined'))
+    expect(ecritures).toHaveLength(1)
+    expect((ecritures[0]!.payload as { rattachement: boolean }).rattachement).toBe(true)
+
+    // Le demandeur l'apprend.
+    const avis = (await db.select().from(notifications)).filter(n => n.userId === ARRIVANT)
+    expect(avis.map(n => n.type)).toEqual(['rattachement_confirme'])
+  })
+
+  it('le président refuse : le siège reste géré, le demandeur l’apprend', async () => {
+    const membershipId = await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 1 })
+    await createTestUser(db, ARRIVANT, NUMERO_GERE)
+    const { token } = await creerInvitation(db, T, PRESIDENT)
+    await accepterInvitation(db, token, ARRIVANT)
+
+    await refuserRattachement(db, membershipId, PRESIDENT)
+
+    const [siege] = await db.select().from(memberships).where(eq(memberships.id, membershipId))
+    expect(siege!.userId).toBeNull()
+    expect(siege!.claimedByUserId).toBeNull()
+    expect(await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'member_joined'))).toHaveLength(0)
+
+    const avis = (await db.select().from(notifications)).filter(n => n.userId === ARRIVANT)
+    expect(avis.map(n => n.type)).toEqual(['rattachement_refuse'])
+
+    // Sans demande, il n'y a rien à confirmer.
+    await expect(confirmerRattachement(db, membershipId, PRESIDENT)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 409 }),
+    )
+  })
+
+  it('une seconde demande du même compte ne prévient pas le président deux fois', async () => {
+    await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 1 })
+    await createTestUser(db, ARRIVANT, NUMERO_GERE)
+    const { token } = await creerInvitation(db, T, PRESIDENT)
+
+    await accepterInvitation(db, token, ARRIVANT)
+    await accepterInvitation(db, token, ARRIVANT)
+
+    expect(await db.select().from(notifications)).toHaveLength(1)
   })
 
   it('rapproche sur le numéro, pas sur le nom', async () => {
@@ -134,16 +201,15 @@ describe('adhésion', () => {
     expect(await db.select().from(memberships).where(eq(memberships.tontineId, T))).toHaveLength(2)
   })
 
-  it('inscrit le rattachement au registre', async () => {
+  it('n’écrit rien au registre tant que le président n’a pas confirmé', async () => {
     await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 1 })
     await createTestUser(db, ARRIVANT, NUMERO_GERE)
 
     const { token } = await creerInvitation(db, T, PRESIDENT)
     await accepterInvitation(db, token, ARRIVANT)
 
-    const ecritures = await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'member_joined'))
-    expect(ecritures).toHaveLength(1)
-    expect((ecritures[0]!.payload as { rattachement: boolean }).rattachement).toBe(true)
+    // Une demande n'est pas une adhésion : le registre ne bouge qu'à la confirmation.
+    expect(await db.select().from(ledgerEntries).where(eq(ledgerEntries.type, 'member_joined'))).toHaveLength(0)
   })
 })
 
@@ -253,9 +319,12 @@ describe('accord du président sur une adhésion — le lien menait dans le vide
     const { token } = await creerInvitation(db, T, PRESIDENT)
 
     // Son siège existe déjà et ses cotisations sont à son nom : il ne prend la
-    // place de personne, il reprend la sienne.
+    // place de personne, il reprend la sienne — sous réserve du président.
     const resultat = await accepterInvitation(db, token, ARRIVANT)
     expect(resultat.rattache).toBe(true)
     expect(resultat.membershipId).toBe(membershipId)
+    await confirmerRattachement(db, membershipId, PRESIDENT)
+    const [siege] = await db.select().from(memberships).where(eq(memberships.id, membershipId))
+    expect(siege!.userId).toBe(ARRIVANT)
   })
 })

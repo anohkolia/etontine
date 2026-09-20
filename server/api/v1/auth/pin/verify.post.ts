@@ -1,22 +1,26 @@
 import { readBody } from 'h3'
 import { z } from 'zod'
+import { codeSaisi } from '../../../../../shared/schemas/index.ts'
+import { useDb } from '../../../../db/index.ts'
 import { requireUser } from '../../../../utils/auth.ts'
 import { validationError } from '../../../../utils/errors.ts'
-import { verifierCodeVerrou } from '../../../../services/verrou.ts'
+import { verifierCodeAcces } from '../../../../services/connexion.ts'
 
 /**
- * Vérifie le code de verrouillage de l'écran.
+ * Vérifie le code d'accès pour l'écran de verrouillage.
  *
- * Le code se posait et se retirait, mais **rien ne le demandait jamais** : la
- * fonctionnalité était un réglage sans effet. Cinq échecs bloquent quinze
- * minutes ; la sortie de secours est la reconnexion par SMS.
+ * Les compteurs sont ceux de la connexion : cinq échecs bloquent, dix
+ * verrouillent le compte. Quelqu'un qui devine le code sur un téléphone
+ * prêté n'a pas plus d'essais que depuis Internet. La sortie de secours est
+ * « code oublié », par e-mail.
  */
-const input = z.object({ pin: z.string().regex(/^\d{4,6}$/, 'Le code contient 4 à 6 chiffres') })
+const input = z.object({ code: codeSaisi })
 
 export default defineEventHandler(async (event) => {
   const user = requireUser(event)
   const parsed = input.safeParse(await readBody(event))
   if (!parsed.success) throw validationError(parsed.error)
 
-  return verifierCodeVerrou(user, parsed.data.pin)
+  await verifierCodeAcces(useDb(), user, parsed.data.code)
+  return { ok: true }
 })

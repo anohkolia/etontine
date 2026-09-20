@@ -5,7 +5,7 @@ import { avancesDe, enregistrerAvance, solderAvance } from '../../server/service
 import { ajouterMessage, ouvrirContestation, resoudreContestation } from '../../server/services/litiges.ts'
 import { appendLedger } from '../../server/services/ledger.ts'
 import { ajouterMembreGere } from '../../server/services/membres.ts'
-import { creerCanal, marquerVerifie } from '../../server/services/canaux.ts'
+import { creerCanal } from '../../server/services/canaux.ts'
 import { creerBrouillon, definirCanaux, majTontine, publier } from '../../server/services/tontines.ts'
 import { demarrerTontine } from '../../server/services/tours.ts'
 import { advances, contributions, ledgerEntries, memberships, notifications, penalties, rounds } from '../../server/db/schema.ts'
@@ -30,7 +30,6 @@ beforeEach(async () => {
   await ajouterMembreGere(db, T, { name: 'Fatou', phone: '+2250707003333', shares: 1 })
 
   const canal = await creerCanal(db, PRESIDENT, { provider: 'wave', msisdn: '+2250707001111', holderName: 'Aya' })
-  await marquerVerifie(db, canal)
   await definirCanaux(db, T, [canal], PRESIDENT)
   await publier(db, T)
   await demarrerTontine(db, T, PRESIDENT)

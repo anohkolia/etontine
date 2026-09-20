@@ -5,7 +5,7 @@ import { useDb } from '../../../server/db/index.ts'
 import { users } from '../../../server/db/schema.ts'
 import { waitForHydration } from '../helpers/hydration'
 import { numeroDeTest } from '../helpers/telephone'
-import { remplirCode } from '../helpers/otp'
+import { sessionSurAppMembre } from '../helpers/session'
 
 /**
  * Back-office — demandes d'abonnement.
@@ -39,15 +39,7 @@ const SANS_SESSION = { storageState: { cookies: [], origins: [] } }
 async function deposerUneDemande(page: Page): Promise<string> {
   const numero = numeroDeTest()
 
-  await page.goto(`${APP_MEMBRE}/login`)
-  await waitForHydration(page)
-  await page.getByTestId('champ-telephone').fill(numero)
-  await page.getByTestId('bouton-recevoir-code').click()
-
-  const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code', code!)
-  await page.getByTestId('bouton-valider-code').click()
-  await page.waitForURL(url => !url.pathname.startsWith('/login'))
+  await sessionSurAppMembre(page, numero, APP_MEMBRE)
 
   const reponse = await page.request.post(`${APP_MEMBRE}/api/v1/me/subscription/request`, {
     headers: { 'Idempotency-Key': crypto.randomUUID() },

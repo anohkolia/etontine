@@ -63,6 +63,19 @@ export function useFormulaire<S extends z.ZodTypeAny>(
     return schema.parse(form.values) as z.output<S>
   }
 
+  /**
+   * Valide un seul champ — à la perte de focus, sans toucher aux autres.
+   *
+   * L'erreur est posée à la main : Vee-Validate ne l'applique qu'aux champs
+   * déclarés par `defineField`, et un champ masqué (le numéro) ou tenu par un
+   * `ref` ne l'est pas. Le résultat, lui, est calculé pour tous les chemins.
+   */
+  async function validerChamp(nom: Path<z.input<S>>): Promise<boolean> {
+    const resultat = await form.validateField(nom)
+    form.setFieldError(nom, resultat.errors[0])
+    return resultat.valid
+  }
+
   return {
     values: form.values,
     errors: form.errors,
@@ -70,6 +83,7 @@ export function useFormulaire<S extends z.ZodTypeAny>(
     champ,
     erreur,
     valider,
+    validerChamp,
     setFieldValue: form.setFieldValue,
     setValues: form.setValues,
     resetForm: form.resetForm,

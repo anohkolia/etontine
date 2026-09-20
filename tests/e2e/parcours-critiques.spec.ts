@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
 import { numeroDeTest } from './helpers/telephone'
-import { remplirCode } from './helpers/otp'
-import { canalVerifie, verifierIdentite } from './helpers/session'
+import { CODE_TEST, canalDeclare, emailDeTest, seConnecter, verifierIdentite } from './helpers/session'
+import { confirmerRattachement } from './helpers/tontine'
 
 /**
  * Les quatre parcours critiques (T26), joués **entièrement par l'interface**
@@ -17,33 +17,41 @@ import { canalVerifie, verifierIdentite } from './helpers/session'
  * détails ; celle-ci couvre ce qui fait que l'application sert à quelque chose.
  */
 
-/** Parcours 1, réutilisé par les autres : inscription par code à usage unique. */
-async function inscriptionOtp(page: Page, numero = numeroDeTest()): Promise<string> {
-  await page.goto('/login')
+/**
+ * Parcours 1, **par l'interface** : inscription, lien de confirmation, session.
+ *
+ * Les autres parcours réutilisent `seConnecter` (inscription par l'API,
+ * connexion par l'écran) : ce qu'ils éprouvent n'est pas l'inscription.
+ */
+async function inscriptionParLInterface(page: Page, numero = numeroDeTest()): Promise<string> {
+  await page.goto('/inscription')
   await waitForHydration(page)
 
   await page.getByTestId('champ-telephone').fill(numero)
   await expect(page.getByTestId('champ-telephone')).toHaveValue(/^\d{2} \d{2} \d{2} \d{2} \d{2}$/)
-  await page.getByTestId('bouton-recevoir-code').click()
+  await page.getByTestId('champ-email').fill(emailDeTest(numero))
+  await page.getByTestId('champ-code').fill(CODE_TEST)
+  await page.getByTestId('champ-confirmation').fill(CODE_TEST)
+  await page.getByTestId('bouton-inscription').click()
 
-  const cases = page.locator('[data-testid="champ-code"] input')
-  await expect(cases).toHaveCount(6)
-  await expect(cases.first()).toHaveAttribute('autocomplete', 'one-time-code')
-
-  const code = (await page.getByTestId('code-dev').textContent())?.match(/\d{6}/)?.[0]
-  await remplirCode(page, 'champ-code', code!)
-  await page.getByTestId('bouton-valider-code').click()
+  // « Vérifie ta boîte mail » — et, hors production, le lien est affiché.
+  await expect(page.getByTestId('inscription-envoyee')).toBeVisible()
+  await page.getByTestId('lien-dev-confirmer').click()
   // La destination dépend du `?redirect=` : l'application, le profil, ou la
-  // page d'où l'on venait. On attend simplement d'avoir quitté la connexion.
-  await page.waitForURL(url => !url.pathname.startsWith('/login'))
+  // page d'où l'on venait. On attend simplement d'être dans l'application.
+  await page.waitForURL(/\/app/)
 
   return numero
+}
+
+async function inscription(page: Page, numero = numeroDeTest()): Promise<string> {
+  return await seConnecter(page, numero)
 }
 
 /** Une tontine lancée dont l'utilisateur courant est président — il ne cotise pas ; le premier membre ajouté prend la main au tour 1. */
 async function tontineLancee(page: Page, membres: Array<{ nom: string, numero: string, parts?: number }>) {
   await verifierIdentite(page)
-  const canal = await canalVerifie(page, `+225${numeroDeTest()}`)
+  const canal = await canalDeclare(page, `+225${numeroDeTest()}`)
 
   const creation = await page.request.post('/api/v1/tontines', {
     data: { name: 'Tontine des tantines', locality: 'Abobo', access: 'private' },
@@ -71,11 +79,11 @@ async function tontineLancee(page: Page, membres: Array<{ nom: string, numero: s
 }
 
 /* ------------------------------------------------------------------ *
- * Parcours 1 — Inscription par code à usage unique
+ * Parcours 1 — Inscription par e-mail
  * ------------------------------------------------------------------ */
 
-test('parcours 1 — inscription par code à usage unique', async ({ page }) => {
-  await inscriptionOtp(page)
+test('parcours 1 — inscription confirmée par e-mail', async ({ page }) => {
+  await inscriptionParLInterface(page)
 
   // La session est bien ouverte, dans un cookie httpOnly (règle 19).
   const session = (await page.context().cookies()).find(c => c.name === 'tontine_session')
@@ -98,7 +106,7 @@ test('parcours 1 — inscription par code à usage unique', async ({ page }) => 
  * ------------------------------------------------------------------ */
 
 test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser }) => {
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroInvite = numeroDeTest()
   const id = await tontineLancee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroInvite },
@@ -128,7 +136,7 @@ test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser
   await invite.waitForURL(/\/login/)
   expect(invite.url()).toContain(`redirect=/join/`)
 
-  await inscriptionOtp(invite, numeroInvite)
+  await inscription(invite, numeroInvite)
   await invite.request.fetch('/api/v1/me', {
     method: 'PATCH',
     data: { firstName: 'Koffi', lastName: 'N’Guessan' },
@@ -139,7 +147,20 @@ test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser
   await waitForHydration(invite)
   await expect(invite.getByTestId('bouton-rejoindre')).toContainText('Rejoindre')
   await invite.getByTestId('bouton-rejoindre').click()
-  await expect(invite.getByTestId('message-adhesion')).toBeVisible()
+  // Le numéro n'est plus prouvé par SMS : le siège attend le président.
+  await expect(invite.getByTestId('message-adhesion')).toContainText('président doit confirmer')
+
+  // Le président reconnaît Koffi depuis l'écran des membres, par l'interface.
+  const enAttente = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as {
+    members: Array<{ id: string, name: string | null, userId: string | null, claim: unknown }>
+  }
+  const siege = enAttente.members.find(m => m.name === 'Koffi N’Guessan')!
+  expect(siege.userId).toBeNull()
+  expect(siege.claim).not.toBeNull()
+  await page.goto(`/app/tontine/${id}/membres`)
+  await waitForHydration(page)
+  await page.getByTestId(`bouton-confirmer-rattachement-${siege.id}`).click()
+  await expect(page.getByTestId(`rattachement-${siege.id}`)).toHaveCount(0)
 
   // Rattaché à son adhésion existante, sans doublon.
   const membres = await (await page.request.get(`/api/v1/tontines/${id}/members`)).json() as {
@@ -153,7 +174,7 @@ test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser
   // demande est envoyée » puis retrouvait un écran vide, sans trace d'elle.
   const contexteArrivant = await browser.newContext()
   const arrivant = await contexteArrivant.newPage()
-  await inscriptionOtp(arrivant, numeroDeTest())
+  await inscription(arrivant, numeroDeTest())
   await arrivant.request.fetch('/api/v1/me', {
     method: 'PATCH',
     data: { firstName: 'Mariam', lastName: 'Touré' },
@@ -179,7 +200,7 @@ test('parcours 2 — rejoindre une tontine par son lien', async ({ page, browser
 
 test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser }) => {
   // Le président monte la tontine et en rattache le trésorier.
-  await inscriptionOtp(page)
+  await inscription(page)
   const numeroTresorier = numeroDeTest()
   const id = await tontineLancee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroTresorier },
@@ -201,7 +222,7 @@ test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser
 
   const contexte = await browser.newContext()
   const tresorier = await contexte.newPage()
-  await inscriptionOtp(tresorier, numeroTresorier)
+  await inscription(tresorier, numeroTresorier)
   await tresorier.request.fetch('/api/v1/me', {
     method: 'PATCH',
     data: { firstName: 'Koffi', lastName: 'N’Guessan' },
@@ -210,6 +231,7 @@ test('parcours 3 — cotiser : déclarer puis confirmer', async ({ page, browser
   const lien = await page.request.post(`/api/v1/tontines/${id}/invites`)
   const { url } = await lien.json() as { url: string }
   await tresorier.request.post(`/api/v1/invites/${url.split('/join/')[1]}/accept`)
+  await confirmerRattachement(page, id, 'Koffi N’Guessan')
 
   // Le trésorier déclare sa propre cotisation, par l'interface.
   await tresorier.goto(`/app/tontine/${id}/cotiser`)
@@ -290,7 +312,7 @@ test('parcours 4 — verser le pot : déclarer puis accuser réception', async (
   const numeroPresident = numeroDeTest()
   const numeroTresorier = numeroDeTest()
 
-  await inscriptionOtp(page, numeroPresident)
+  await inscription(page, numeroPresident)
   const id = await tontineLancee(page, [
     { nom: 'Koffi N’Guessan', numero: numeroTresorier },
     { nom: 'Fatou Diarra', numero: numeroDeTest() },
@@ -314,12 +336,13 @@ test('parcours 4 — verser le pot : déclarer puis accuser réception', async (
 
   const contexte = await browser.newContext()
   const tresorier = await contexte.newPage()
-  await inscriptionOtp(tresorier, numeroTresorier)
+  await inscription(tresorier, numeroTresorier)
   await tresorier.request.fetch('/api/v1/me', {
     method: 'PATCH',
     data: { firstName: 'Koffi', lastName: 'N’Guessan' },
   })
   await tresorier.request.post(`/api/v1/invites/${url.split('/join/')[1]}/accept`)
+  await confirmerRattachement(page, id, 'Koffi N’Guessan')
 
   // Le trésorier déclare sa cotisation par l'interface.
   await tresorier.goto(`/app/tontine/${id}/cotiser`)
