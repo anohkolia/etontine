@@ -27,6 +27,7 @@
     "lighthouse": "lhci autorun",
     "dev:admin": "nuxt dev admin --port 3001 --dotenv ../.env",
     "build:admin": "nuxt build admin --dotenv ../.env",
+    "build:admin:vercel": "nuxt build admin && node scripts/sortie-vercel.ts admin",
     "db:admin": "node server/db/cli.ts admin",
     "db:admin:supabase": "node --env-file=.env.supabase server/db/cli.ts admin",
     "db:local": "node server/db/local.ts"
