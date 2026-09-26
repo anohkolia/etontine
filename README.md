@@ -75,7 +75,7 @@ Ce qui doit être renseigné ou choisi, et que le code ne peut pas deviner :
 |Quoi|Où|
 |-|-|
 |L'identité de l'éditeur (raison sociale, RCCM, adresse, contact, hébergeur)|`shared/constants/editeur.ts` — les valeurs entre crochets s'affichent telles quelles sur `/legal/*` tant qu'elles ne sont pas complétées|
-|L'envoi des e-mails (confirmation d'inscription, code oublié)|`NUXT\_EMAIL\_PROVIDER=resend` avec `NUXT\_EMAIL\_RESEND\_API\_KEY` et `NUXT\_EMAIL\_FROM` ; le mode `log` est refusé en production. Brancher un autre fournisseur se fait dans `server/services/email.ts`|
+|L'envoi des e-mails (confirmation d'inscription, code oublié)|`NUXT\_EMAIL\_PROVIDER=brevo` avec `NUXT\_EMAIL\_BREVO\_API\_KEY` et `NUXT\_EMAIL\_FROM` — Brevo vérifie une adresse d'expédition seule, sans domaine ni DNS. `resend` est l'autre choix, meilleur une fois un domaine authentifié, mais inutilisable avant. Le mode `log` est refusé en production : un lien qui ne part pas doit faire échouer la demande. Brancher un autre fournisseur se fait dans `server/services/email.ts`|
 |Où régler l'abonnement|`NUXT\_PUBLIC\_ABONNEMENT\_REGLEMENT\_*` — le numéro de mobile money, son titulaire et le WhatsApp de contact ; sans eux, l'écran renvoie vers l'adresse de l'éditeur|
 |Les notifications push|`NUXT\_VAPID\_*` — facultatives, les notifications restent lisibles dans l'application|
 |Le secret de session et l'adresse publique|`NUXT\_SESSION\_SECRET`, `NUXT\_PUBLIC\_SITE\_URL`|

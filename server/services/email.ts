@@ -13,9 +13,14 @@ import { isDevOrTest } from '../utils/env.ts'
  * - `log` — le message est écrit dans les journaux. C'est le seul mode admis
  *   hors production, et il est **refusé** en production : un lien qui ne
  *   part pas doit faire échouer la demande, pas la laisser croire envoyée.
- * - `resend` — l'API HTTP de Resend, en un `fetch`, sans bibliothèque :
- *   `NUXT_EMAIL_RESEND_API_KEY` et `NUXT_EMAIL_FROM` (une adresse sur un
- *   domaine vérifié chez eux).
+ * - `brevo` — l'API HTTP de Brevo, en un `fetch`, sans bibliothèque :
+ *   `NUXT_EMAIL_BREVO_API_KEY` et `NUXT_EMAIL_FROM`. Brevo vérifie une adresse
+ *   d'expédition **seule**, par un code envoyé dessus : on peut donc envoyer
+ *   avant de posséder un domaine.
+ * - `resend` — l'API HTTP de Resend, même forme :
+ *   `NUXT_EMAIL_RESEND_API_KEY` et `NUXT_EMAIL_FROM`. Exige un domaine
+ *   authentifié en DNS ; tant qu'il ne l'est pas, Resend n'écrit qu'au
+ *   titulaire du compte.
  *
  * Brancher un autre fournisseur revient à écrire une fonction de plus ici.
  */
@@ -34,8 +39,9 @@ export interface FournisseurEmail {
 export class EmailNonConfigureError extends Error {
   constructor() {
     super(
-      'Aucun fournisseur d’e-mail n’est configuré : NUXT_EMAIL_PROVIDER doit valoir « resend » en production, '
-      + 'avec NUXT_EMAIL_RESEND_API_KEY et NUXT_EMAIL_FROM.',
+      'Aucun fournisseur d’e-mail n’est configuré : NUXT_EMAIL_PROVIDER doit valoir « brevo » ou '
+      + '« resend » en production, avec NUXT_EMAIL_BREVO_API_KEY (ou NUXT_EMAIL_RESEND_API_KEY) '
+      + 'et NUXT_EMAIL_FROM.',
     )
   }
 }
@@ -46,6 +52,67 @@ export const fournisseurJournal: FournisseurEmail = {
   async envoyer({ to, subject, text }) {
     console.info(`[email] vers ${to} — ${subject}\n${text}`)
   },
+}
+
+/**
+ * L'expéditeur, découpé en nom et adresse.
+ *
+ * `NUXT_EMAIL_FROM` s'écrit `eTontine <no-reply@tontine.ci>` : c'est la forme
+ * que Resend accepte telle quelle, et Brevo veut les deux morceaux séparément.
+ * On découpe ici plutôt que de réclamer une seconde variable — deux valeurs à
+ * tenir à jour finissent par se contredire, et l'adresse est la même dans les
+ * deux cas.
+ *
+ * Une adresse sans `@` lève : une configuration fausse doit se voir, pas
+ * partir dans le vide en silence.
+ */
+export function adresseExpediteur(from: string): { name?: string, email: string } {
+  const chevrons = from.match(/^\s*(.*?)\s*<\s*([^<>]+?)\s*>\s*$/)
+  const email = (chevrons?.[2] ?? from).trim()
+  // Les guillemets autour d'un nom sont admis dans un en-tête d'e-mail ; ils
+  // n'ont rien à faire dans un champ JSON.
+  const name = chevrons?.[1]?.replace(/^"|"$/g, '').trim()
+
+  if (!email.includes('@')) {
+    throw new Error(`[email] NUXT_EMAIL_FROM n’est pas une adresse d’expédition : ${from}`)
+  }
+
+  return name ? { name, email } : { email }
+}
+
+/**
+ * Brevo, par son API HTTP.
+ *
+ * `fetch` est pris sur `globalThis` à l'appel, pas capturé à l'import : c'est
+ * ce qui permet aux tests de le remplacer sans réseau.
+ */
+export function fournisseurBrevo(config: { apiKey: string, from: string }): FournisseurEmail {
+  return {
+    nom: 'brevo',
+    async envoyer({ to, subject, text }) {
+      const reponse = await globalThis.fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'content-type': 'application/json',
+          // Brevo attend sa clé dans son propre en-tête, pas dans `Authorization`.
+          'api-key': config.apiKey,
+        },
+        body: JSON.stringify({
+          sender: adresseExpediteur(config.from),
+          to: [{ email: to }],
+          subject,
+          // Texte brut seul : nos messages tiennent en trois lignes et un lien.
+          textContent: text,
+        }),
+      })
+      if (!reponse.ok) {
+        // Le corps de la réponse ne remonte pas : il peut reprendre le message,
+        // donc le lien, et finir dans un journal moins protégé que la base.
+        throw new Error(`[email] Brevo a répondu ${reponse.status}`)
+      }
+    },
+  }
 }
 
 /**
@@ -78,6 +145,13 @@ export function fournisseurResend(config: { apiKey: string, from: string }): Fou
 /** Le fournisseur en vigueur, d'après l'environnement. */
 export function fournisseurEmailConfigure(env: NodeJS.ProcessEnv = process.env): FournisseurEmail {
   const choix = env.NUXT_EMAIL_PROVIDER ?? (isDevOrTest() ? 'log' : '')
+
+  if (choix === 'brevo') {
+    const apiKey = env.NUXT_EMAIL_BREVO_API_KEY
+    const from = env.NUXT_EMAIL_FROM
+    if (!apiKey || !from) throw new EmailNonConfigureError()
+    return fournisseurBrevo({ apiKey, from })
+  }
 
   if (choix === 'resend') {
     const apiKey = env.NUXT_EMAIL_RESEND_API_KEY
