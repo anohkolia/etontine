@@ -215,6 +215,38 @@ describe('inscription et confirmation — transitions du compte', () => {
     await expect(inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, plusTard)).resolves.toMatchObject({ ok: true })
   })
 
+  it('un envoi raté n’enregistre pas son jeton, et ne consomme donc pas le quota', async () => {
+    utiliserFournisseurEmail({
+      nom: 'en-panne',
+      async envoyer() {
+        throw new Error('fournisseur injoignable')
+      },
+    })
+
+    await expect(inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, T0))
+      .rejects.toThrow(/injoignable/)
+    expect(await db.select().from(emailTokens)).toHaveLength(0)
+
+    // Trois pannes d'affilée n'enferment pas le membre dehors dix minutes sur
+    // une inscription qu'il n'a jamais pu finir : ce sont les e-mails partis
+    // qu'on plafonne, pas les tentatives du serveur.
+    await expect(inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, T0)).rejects.toThrow()
+    await expect(inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, T0)).rejects.toThrow()
+    expect(await db.select().from(emailTokens)).toHaveLength(0)
+
+    utiliserFournisseurEmail({
+      nom: 'test',
+      async envoyer(e) {
+        envoyes.push(e)
+      },
+    })
+
+    const resultat = await inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, T0)
+    expect(resultat.ok).toBe(true)
+    expect(envoyes).toHaveLength(1)
+    expect(await db.select().from(emailTokens)).toHaveLength(1)
+  })
+
   it('n’expose pas le jeton en production', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     const r = await inscrire(db, { phone: NUMERO, email: EMAIL, code: CODE }, T0)

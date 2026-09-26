@@ -47,3 +47,4 @@ tests/e2e/admin/.session-admin.json
 
 # Sortie de build Vercel (Build Output API v3)
 .vercel
+.env*

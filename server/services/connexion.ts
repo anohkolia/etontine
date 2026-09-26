@@ -119,6 +119,18 @@ export interface ResultatDemande {
  * La limitation porte sur le **compte** : trois envois par dix minutes, tous
  * motifs confondus. C'est ce qui empêche de faire de ce serveur une machine à
  * arroser une boîte mail.
+ *
+ * Un envoi qui échoue **efface son jeton**. Sans cela, la ligne restait et
+ * comptait dans ces trois envois : trois pannes du fournisseur d'affilée — le
+ * réseau, une clé expirée — et le membre se retrouvait bloqué dix minutes sur
+ * une inscription qu'il n'avait jamais pu finir, sans avoir rien reçu. Ce
+ * qu'on veut plafonner, ce sont les e-mails **partis**, pas les tentatives du
+ * serveur.
+ *
+ * Le jeton s'enregistre tout de même **avant** l'envoi : dans l'autre ordre, un
+ * envoi réussi suivi d'une écriture ratée livrerait un lien qui ne marche pas.
+ * Un lien qui n'arrive pas se redemande ; un lien mort dans une boîte mail ne
+ * se répare pas.
  */
 async function emettreJeton(
   db: Db,
@@ -143,8 +155,10 @@ async function emettreJeton(
   // 256 bits d'aléa cryptographique, pas avec un identifiant.
   const token = randomBytes(32).toString('base64url')
 
+  const id = randomUUID()
+
   await db.insert(emailTokens).values({
-    id: randomUUID(),
+    id,
     userId,
     purpose,
     tokenHash: empreinteJeton(token),
@@ -153,7 +167,21 @@ async function emettreJeton(
     expiresAt: new Date(maintenant.getTime() + validiteMs),
   })
 
-  await envoyerEmail({ to: email, ...message(token) })
+  try {
+    await envoyerEmail({ to: email, ...message(token) })
+  }
+  catch (envoi) {
+    // Le jeton n'a jamais quitté le serveur : il ne doit pas peser sur le
+    // quota du membre. L'effacement ne doit pas masquer la panne d'envoi, qui
+    // est la seule chose intéressante à remonter ici.
+    try {
+      await db.delete(emailTokens).where(eq(emailTokens.id, id))
+    }
+    catch {
+      // Base injoignable elle aussi : le jeton expirera de lui-même.
+    }
+    throw envoi
+  }
 
   return { ok: true, ...(isDevOrTest() ? { devToken: token } : {}) }
 }

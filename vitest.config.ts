@@ -12,6 +12,14 @@ export default defineVitestConfig({
     // Par défaut vitest lance (CPU − 1) forks, soit 11 ici, à ~700 Mo chacun :
     // la VM WSL (8 Go) part en OOM et la session est tuée. 4 suffisent.
     maxWorkers: 4,
+    /**
+     * Le `beforeEach` de la plupart des fichiers démarre PGlite — un Postgres
+     * en WebAssembly — et applique les migrations dessus : une seconde ou deux
+     * à vide, bien plus quand quatre workers s'y mettent ensemble. Les 10 s par
+     * défaut faisaient échouer trois ou quatre fichiers au hasard, sur des
+     * tests qui passent seuls. C'est lent, ce n'est pas cassé.
+     */
+    hookTimeout: 30_000,
   },
   resolve: {
     alias: {
