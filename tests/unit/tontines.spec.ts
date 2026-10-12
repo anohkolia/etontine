@@ -8,7 +8,7 @@ import {
 import { ajouterMembreGere, attribuerParts } from '../../server/services/membres.ts'
 import { blocagesDemarrage, demarrerTontine, toursDe } from '../../server/services/tours.ts'
 import { ledgerEntries, memberships, notifications, shares, tontines } from '../../server/db/schema.ts'
-import { tontineEmoji } from '../../shared/schemas/index.ts'
+import { tontineAccess, tontineDraftInput, tontineEmoji } from '../../shared/schemas/index.ts'
 import { TONTINE_EMOJIS } from '../../shared/constants/tontine.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
@@ -71,6 +71,19 @@ describe('brouillon de tontine', () => {
     const [t] = await db.select().from(tontines).where(eq(tontines.id, id))
     expect(t!.shareAmount).toBe(25_000)
     expect(t!.frequency).toBe('weekly')
+  })
+})
+
+describe('accès — on ne rejoint une tontine que par le lien de son organisateur', () => {
+  it('refuse l’accès « ouvert », retiré : visible de tous, n’importe qui demandait à entrer', () => {
+    expect(tontineAccess.safeParse('open').success).toBe(false)
+    expect(tontineDraftInput.safeParse({ name: 'Tontine des tantines', access: 'open' }).success).toBe(false)
+  })
+
+  it('accepte encore `private`, que les applications déjà installées envoient', () => {
+    expect(tontineDraftInput.parse({ name: 'Tontine des tantines', access: 'private' }).access).toBe('private')
+    // Et le champ peut manquer : c'est le seul accès qui reste.
+    expect(tontineDraftInput.parse({ name: 'Tontine des tantines' }).access).toBe('private')
   })
 })
 

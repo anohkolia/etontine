@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { and, count, eq, inArray } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import type { useDb } from '../db/index.ts'
 import {
-  memberships, rounds, shares, tontineChannels, tontines,
+  memberships, rounds, shares, tontineChannels, tontines, users,
 } from '../db/schema.ts'
+import type { User } from '../db/schema.ts'
 import { apiError } from '../utils/errors.ts'
 import { assertTransition } from '../utils/transitions.ts'
+import { verifierQuotaTontines } from './abonnement.ts'
 import { canauxDeTontine, rattacherCanal } from './canaux.ts'
 import { appendLedger } from './ledger.ts'
-import { notifierTontine } from './notifications.ts'
+import { notifier, notifierTontine } from './notifications.ts'
+import { promouvoirOrganisateur } from './organisateurs.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -29,7 +32,7 @@ export async function creerBrouillon(db: Db, userId: string, input: {
   avatarUrl?: string
   emoji?: string
   locality?: string
-  access: 'private' | 'open'
+  access: 'private'
 }) {
   const id = randomUUID()
 
@@ -64,6 +67,11 @@ export async function creerBrouillon(db: Db, userId: string, input: {
     status: 'active',
     joinedAt: new Date(),
   })
+
+  // Un compte venu d'une invitation organise désormais : le back-office doit
+  // le savoir, comme pour une inscription directe. Sans effet sur un compte
+  // qui organisait déjà.
+  await promouvoirOrganisateur(db, userId)
 
   return id
 }
@@ -174,7 +182,144 @@ export async function publier(db: Db, tontineId: string) {
     throw apiError('FORBIDDEN', blocages[0]!.message, { field: blocages[0]!.champ })
   }
 
-  await db.update(tontines).set({ status: 'open' }).where(eq(tontines.id, tontineId))
+  // Une demande de validation en attente est exaucée : elle n'a plus lieu d'être.
+  await db.update(tontines)
+    .set({ status: 'open', publishRequestedAt: null })
+    .where(eq(tontines.id, tontineId))
+}
+
+/** Le palier d'identité qui permet de valider une tontine et d'en inviter les membres. */
+export const PALIER_KYC_ORGANISATEUR = 2
+
+/**
+ * « Confirmer » sans identité vérifiée : la demande est retenue.
+ *
+ * Le président part vers la vérification ; sa tontine n'a pas à l'attendre une
+ * seconde fois. À l'approbation de son identité, le brouillon est validé
+ * d'office (`validerPublicationsDemandees`). Une demande déjà posée garde sa
+ * date : c'est l'ordre des demandes qui départage face au quota du palier.
+ */
+export async function demanderPublication(db: Db, tontineId: string): Promise<void> {
+  await db.update(tontines)
+    .set({ publishRequestedAt: new Date() })
+    .where(and(
+      eq(tontines.id, tontineId),
+      eq(tontines.status, 'draft'),
+      isNull(tontines.publishRequestedAt),
+    ))
+}
+
+export interface IssueDemandePublication {
+  tontineId: string
+  /** `true` si la tontine est validée ; sinon, elle reste en brouillon. */
+  validee: boolean
+}
+
+/**
+ * Un refus métier — un réglage manquant, le quota du palier — ou une panne ?
+ * Les deux ne se traitent pas pareil : un refus clôt la demande, une panne la
+ * laisse en place.
+ */
+function estRefusMetier(e: unknown): boolean {
+  const statut = (e as { statusCode?: number })?.statusCode
+  return statut !== undefined && statut < 500
+}
+
+/**
+ * Valide les brouillons que le président avait confirmés avant d'être vérifié.
+ *
+ * Appelé à l'approbation de son identité — par un administrateur, ou d'office
+ * hors production. Chaque brouillon passe **exactement** les contrôles de
+ * « Confirmer » : le quota du palier, puis ce qui manque encore à la tontine.
+ *
+ * Une demande refusée n'est pas gardée en suspens : elle est effacée, et le
+ * président l'apprend — il complétera, puis confirmera de nouveau. Une panne,
+ * elle, ne doit ni faire échouer l'approbation, déjà enregistrée, ni perdre la
+ * demande : on la laisse en place, et le bouton « Confirmer » avec. Rien ne
+ * sort donc d'ici en exception.
+ *
+ * Seul le président **actuel** voit ses demandes aboutir : une présidence
+ * passée entre-temps à quelqu'un d'autre n'emporte pas la validation avec elle.
+ */
+export async function validerPublicationsDemandees(
+  db: Db,
+  userId: string,
+  maintenant = new Date(),
+): Promise<IssueDemandePublication[]> {
+  const issues: IssueDemandePublication[] = []
+  try {
+    const [president] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+    if (!president || president.kycLevel < PALIER_KYC_ORGANISATEUR) return issues
+
+    const demandes = await db
+      .select({ id: tontines.id })
+      .from(tontines)
+      .innerJoin(memberships, and(
+        eq(memberships.tontineId, tontines.id),
+        eq(memberships.userId, userId),
+        eq(memberships.role, 'president'),
+        eq(memberships.status, 'active'),
+      ))
+      .where(and(eq(tontines.status, 'draft'), isNotNull(tontines.publishRequestedAt)))
+      .orderBy(asc(tontines.publishRequestedAt))
+
+    for (const { id } of demandes) {
+      try {
+        issues.push({ tontineId: id, validee: await traiterDemande(db, president, id, maintenant) })
+      }
+      catch (e) {
+        console.error(`[validation] tontine laissée en attente : ${(e as Error).message}`)
+      }
+    }
+  }
+  catch (e) {
+    console.error(`[validation] demandes non traitées : ${(e as Error).message}`)
+  }
+  return issues
+}
+
+/** Une demande : validée, ou refusée et effacée. Le président l'apprend dans les deux cas. */
+async function traiterDemande(db: Db, president: User, tontineId: string, maintenant: Date): Promise<boolean> {
+  try {
+    await verifierQuotaTontines(db, president, maintenant)
+    await publier(db, tontineId)
+  }
+  catch (e) {
+    if (!estRefusMetier(e)) throw e
+
+    await db.update(tontines).set({ publishRequestedAt: null }).where(eq(tontines.id, tontineId))
+
+    // Deux refus, deux chemins : le quota se lève depuis l'abonnement, un
+    // réglage manquant depuis la tontine, dont la page dit ce qui manque. Le
+    // nom n'entre pas dans le texte — un nom peut contenir un nombre, que la
+    // garde de la règle 21 prendrait pour un montant.
+    const quota = (e as { data?: { error?: { code?: string } } }).data?.error?.code === 'PLAN_LIMIT'
+    const avis = quota
+      ? {
+          body: 'Elle reste en brouillon : ton abonnement ne permet pas une tontine de plus en cours. Ouvre-le pour voir comment faire, puis confirme-la de nouveau.',
+          url: '/app/abonnement',
+        }
+      : {
+          body: 'Elle reste en brouillon : ouvre-la pour voir ce qui manque, puis confirme-la de nouveau.',
+          url: `/app/tontine/${tontineId}`,
+        }
+    await notifier(db, president.id, {
+      type: 'tontine_non_validee',
+      tontineId,
+      title: 'Ta tontine n’a pas pu être validée',
+      ...avis,
+    })
+    return false
+  }
+
+  await notifier(db, president.id, {
+    type: 'tontine_validee',
+    tontineId,
+    title: 'Ta tontine est validée',
+    body: 'Ton identité est vérifiée : la tontine que tu avais confirmée est ouverte. Tu peux inviter ses membres.',
+    url: `/app/tontine/${tontineId}/membres`,
+  })
+  return true
 }
 
 /** Le nombre total de parts d'une tontine — la base de tous les calculs de pot. */

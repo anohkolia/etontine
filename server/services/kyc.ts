@@ -6,6 +6,7 @@ import { natureDePiece } from '../utils/fichiers.ts'
 import { journaliser } from './journal-admin.ts'
 import type { Administrateur } from './journal-admin.ts'
 import { notifier } from './notifications.ts'
+import { validerPublicationsDemandees } from './tontines.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -100,7 +101,8 @@ export async function urlPiece(db: Db, userId: string, type: 'document' | 'selfi
  * C'est ce qui permet de publier une tontine, donc de devenir le numéro vers
  * lequel des dizaines de personnes enverront de l'argent. La décision est
  * volontairement manuelle : aucune règle automatique ne remplace le fait de
- * regarder une pièce et un visage.
+ * regarder une pièce et un visage. Ce qui suit l'est, en revanche : les
+ * tontines que la personne avait confirmées en attendant sont validées.
  */
 export async function approuverDossier(db: Db, userId: string, admin: Administrateur) {
   const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
@@ -134,12 +136,18 @@ export async function approuverDossier(db: Db, userId: string, admin: Administra
     nouveauPalier: Math.max(u.kycLevel, PALIER_ACCORDE),
   })
 
+  // Vers l'accueil, pas vers le profil : c'est là que l'organisateur retrouve
+  // ses tontines, et ce qu'il peut désormais en faire.
   await notifier(db, userId, {
     type: 'kyc_approuve',
     title: 'Ton identité est vérifiée',
-    body: 'Tu peux maintenant publier une tontine.',
-    url: '/app/profil',
+    body: 'Tu peux maintenant valider tes tontines et inviter leurs membres.',
+    url: '/app',
   })
+
+  // Les brouillons qu'il avait confirmés en attendant sont validés d'office :
+  // il n'a pas à revenir appuyer une seconde fois sur « Confirmer ».
+  await validerPublicationsDemandees(db, userId)
 
   return { userId, kycStatus: 'approved' as const, kycLevel: PALIER_ACCORDE }
 }

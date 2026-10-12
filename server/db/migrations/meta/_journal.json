@@ -15,6 +15,20 @@
       "when": 1789849883669,
       "tag": "0001_connexion_par_email",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791753491191,
+      "tag": "0002_organisateurs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791764370106,
+      "tag": "0003_validation_tontines",
+      "breakpoints": true
     }
   ]
 }

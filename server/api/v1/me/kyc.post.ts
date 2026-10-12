@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { useDb } from '../../../db/index.ts'
 import { users } from '../../../db/schema.ts'
+import { validerPublicationsDemandees } from '../../../services/tontines.ts'
 import { requireUser } from '../../../utils/auth.ts'
 import { apiError, validationError } from '../../../utils/errors.ts'
 import { isProduction } from '../../../utils/env.ts'
@@ -19,7 +20,8 @@ import { decomposerUrlPiece } from '../../../utils/fichiers.ts'
  *   autoriser quelqu'un à collecter l'argent d'un groupe ;
  * - **hors production**, le palier est accordé immédiatement. Sans cela, chaque
  *   test du parcours de création exigerait qu'un administrateur intervienne, ce
- *   qui rendrait la suite de bout en bout inutilisable.
+ *   qui rendrait la suite de bout en bout inutilisable. Ce qui suit une
+ *   approbation suit aussi celle-ci : les tontines confirmées sont validées.
  *
  * Le parcours d'examen reste couvert : les tests du back-office placent
  * eux-mêmes un dossier en attente pour l'éprouver.
@@ -63,13 +65,18 @@ export default defineEventHandler(async (event) => {
 
   const approbationImmediate = !isProduction()
 
-  await useDb().update(users).set({
+  const db = useDb()
+  await db.update(users).set({
     kycDocumentUrl: parsed.data.documentUrl,
     kycSelfieUrl: parsed.data.selfieUrl,
     kycSubmittedAt: new Date(),
     kycStatus: approbationImmediate ? 'approved' : 'pending_review',
     ...(approbationImmediate && user.kycLevel < 2 ? { kycLevel: 2 } : {}),
   }).where(eq(users.id, user.id))
+
+  // Approuvé d'office : les tontines confirmées en attendant sont validées
+  // maintenant, comme à l'approbation par un administrateur.
+  if (approbationImmediate) await validerPublicationsDemandees(db, user.id)
 
   return {
     status: approbationImmediate ? 'approved' as const : 'pending_review' as const,

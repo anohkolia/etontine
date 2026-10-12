@@ -105,11 +105,27 @@ export const users = pgTable('users', {
    */
   planTier: text('plan_tier', { enum: planTier.options }).notNull().default('free'),
   planUntil: horodatage('plan_until'),
+  /**
+   * Depuis quand ce compte **organise** — nul pour qui n'a fait que rejoindre.
+   *
+   * Ce n'est pas un rôle : les droits restent par tontine, portés par
+   * `memberships.role`. C'est un fait que le back-office suit. Il est posé à
+   * l'inscription directe — on ne rejoint une tontine que par le lien de son
+   * organisateur, donc qui s'inscrit sans lien vient en organiser une — ou à
+   * la création d'une première tontine par un compte venu d'une invitation.
+   */
+  organizerSince: horodatage('organizer_since'),
+  /**
+   * L'administrateur qui a pris connaissance de l'arrivée de cet organisateur,
+   * et quand. Tant que c'est nul, l'arrivée reste signalée au back-office.
+   */
+  organizerSeenAt: horodatage('organizer_seen_at'),
+  organizerSeenBy: text('organizer_seen_by'),
   /** Consentements granulaires — deux cases distinctes (T08). */
   consentDataAt: horodatage('consent_data_at'),
   consentNotificationsAt: horodatage('consent_notifications_at'),
   createdAt: createdAt(),
-})
+}, t => [index('users_organizer_idx').on(t.organizerSince)])
 
 /**
  * Sessions par cookie `httpOnly` (règle 19). Absente de docs/data-model.md,
@@ -190,6 +206,13 @@ export const tontines = pgTable('tontines', {
   counterValidationThreshold: integer('counter_validation_threshold').notNull().default(100_000),
   status: text('status', { enum: tontineStatus.options }).notNull().default('draft'),
   createdBy: text('created_by').notNull().references(() => users.id),
+  /**
+   * Le président a appuyé sur « Confirmer » avant que son identité soit
+   * vérifiée. La demande est retenue : le brouillon sera validé d'office à
+   * l'approbation de son identité, sans qu'il ait à revenir le confirmer.
+   * Effacée une fois la demande traitée — validée ou refusée.
+   */
+  publishRequestedAt: horodatage('publish_requested_at'),
   /** Figée au démarrage : après `start`, l'ordre ne change plus sans contre-validation. */
   rotationFrozenAt: horodatage('rotation_frozen_at'),
   createdAt: createdAt(),

@@ -8,14 +8,62 @@ import { placeDisponible, verifierQuotaMembres } from './abonnement.ts'
 import { appendLedger } from './ledger.ts'
 import { attribuerParts } from './membres.ts'
 import { notifier } from './notifications.ts'
+import { PALIER_KYC_ORGANISATEUR } from './tontines.ts'
 
 type Db = ReturnType<typeof useDb>
 
 /** Durée de vie d'un lien d'invitation. */
 const VALIDITE_JOURS = 30
 
-/** Crée un lien d'invitation. Le jeton est imprévisible, jamais dérivé de l'id. */
+/**
+ * L'organisateur d'une tontine — son président — a-t-il fait vérifier son
+ * identité ?
+ *
+ * Tant que non, ses liens d'invitation ne servent à rien. Rejoindre une
+ * tontine, c'est s'engager à envoyer de l'argent au numéro de son
+ * organisateur : on n'y appelle personne avant que quelqu'un ait regardé sa
+ * pièce et son visage. C'est la même exigence que pour la valider.
+ */
+export async function organisateurVerifie(db: Db, tontineId: string): Promise<boolean> {
+  const [president] = await db
+    .select({ kycLevel: users.kycLevel })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(
+      eq(memberships.tontineId, tontineId),
+      eq(memberships.role, 'president'),
+      eq(memberships.status, 'active'),
+    ))
+    .limit(1)
+
+  return (president?.kycLevel ?? 0) >= PALIER_KYC_ORGANISATEUR
+}
+
+/**
+ * Refuse de créer un lien tant que l'organisateur n'est pas vérifié.
+ *
+ * `KYC_REQUIRED` : c'est le président qui crée ses liens, c'est donc à lui
+ * qu'on le dit — et l'écran l'envoie vers la vérification.
+ */
+export async function exigerOrganisateurVerifie(db: Db, tontineId: string): Promise<void> {
+  if (!(await organisateurVerifie(db, tontineId))) {
+    throw apiError(
+      'KYC_REQUIRED',
+      'Vérifie ton identité pour pouvoir inviter des membres.',
+      { requiredLevel: PALIER_KYC_ORGANISATEUR },
+    )
+  }
+}
+
+/**
+ * Crée un lien d'invitation. Le jeton est imprévisible, jamais dérivé de l'id.
+ *
+ * Seulement si l'organisateur est vérifié : la règle est tenue **ici**, pas
+ * seulement par la route, pour qu'aucun autre chemin ne fabrique de lien.
+ */
 export async function creerInvitation(db: Db, tontineId: string, createdBy: string, maxUses = 20) {
+  await exigerOrganisateurVerifie(db, tontineId)
+
   const token = randomBytes(16).toString('base64url')
   const expiresAt = new Date(Date.now() + VALIDITE_JOURS * 86_400_000)
 
@@ -85,6 +133,19 @@ export async function apercuInvitation(db: Db, token: string): Promise<ApercuInv
     .limit(1)
 
   if (!tontine) throw apiError('NOT_FOUND', 'Tontine introuvable.')
+
+  // Le même lien, vu de l'autre bout : tant que l'organisateur n'est pas
+  // vérifié, il ne s'ouvre pas — qu'il date d'avant la règle, ou que la
+  // présidence soit passée à quelqu'un qui ne l'est pas encore. L'arrivant
+  // l'apprend tel quel, sans rien voir de la tontine : il n'y a pas encore
+  // de place à prendre.
+  if (!(await organisateurVerifie(db, tontine.id))) {
+    throw apiError(
+      'FORBIDDEN',
+      'Ce lien n’est pas encore actif : l’organisateur de cette tontine doit d’abord faire vérifier son identité.',
+      { field: 'organizer' },
+    )
+  }
 
   const [president] = await db
     .select({ firstName: users.firstName, lastName: users.lastName })

@@ -139,6 +139,9 @@ async function semer() {
       firstName: m.firstName,
       lastName: m.lastName,
       kycLevel: m.role === 'president' ? 2 : 1,
+      // La présidente organise, et le back-office la connaît déjà — comme les
+      // organisateurs repris par la migration 0002. Les autres ont rejoint.
+      ...(m.role === 'president' ? { organizerSince: maintenant, organizerSeenAt: maintenant } : {}),
       createdAt: maintenant,
     })
   }

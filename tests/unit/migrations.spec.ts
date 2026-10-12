@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { drizzle } from 'drizzle-orm/pglite'
@@ -164,6 +165,81 @@ describe('contraintes tenues par la base, pas par le code', () => {
     )
     for (const nom of ['expected_amount', 'confirmed_amount']) {
       expect(rows.find(c => c.column_name === nom)?.data_type).toBe('integer')
+    }
+  })
+})
+
+/**
+ * Un dossier de migrations arrêté juste avant `tag` : le schéma tel que la
+ * production l'avait, pour y poser des données et regarder la montée les
+ * reprendre. Drizzle n'applique ensuite que ce qui manque.
+ */
+function migrationsAvant(tag: string): string {
+  const dossier = mkdtempSync(join(tmpdir(), `migrations-avant-${tag}-`))
+  mkdirSync(join(dossier, 'meta'))
+  const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8')) as {
+    entries: Array<{ tag: string }>
+  }
+  journal.entries = journal.entries.slice(0, journal.entries.findIndex(e => e.tag === tag))
+  writeFileSync(join(dossier, 'meta', '_journal.json'), JSON.stringify(journal))
+  for (const { tag: t } of journal.entries) copyFileSync(join(MIGRATIONS_DIR, `${t}.sql`), join(dossier, `${t}.sql`))
+  return dossier
+}
+
+describe('0002 — reprise des organisateurs existants', () => {
+  it('marque qui a déjà créé une tontine, depuis la première, et le tient pour connu du back-office', async () => {
+    const avant = migrationsAvant('0002_organisateurs')
+    try {
+      await migrate(db as never, { migrationsFolder: avant })
+      await pg.exec(`
+        INSERT INTO users (id, phone) VALUES ('u1', '+2250707000001'), ('u2', '+2250707000002');
+        INSERT INTO tontines (id, name, share_amount, frequency, start_date, created_by, created_at) VALUES
+          ('t1', 'Seconde', 25000, 'monthly', '2026-03-01', 'u1', '2026-02-10T00:00:00Z'),
+          ('t2', 'Première', 25000, 'monthly', '2026-03-01', 'u1', '2026-02-05T00:00:00Z');
+      `)
+
+      await monter()
+
+      const { rows } = await pg.query<{ id: string, organizer_since: Date | null, organizer_seen_at: Date | null }>(
+        'SELECT id, organizer_since, organizer_seen_at FROM users ORDER BY id',
+      )
+      // Depuis sa **première** tontine, et réputé connu : l'alerte est pour
+      // les arrivées à venir, pas pour l'existant.
+      expect(rows[0]!.organizer_since).toEqual(new Date('2026-02-05T00:00:00Z'))
+      expect(rows[0]!.organizer_seen_at).not.toBeNull()
+      // N'a rien créé : rien n'est supposé de lui.
+      expect(rows[1]).toMatchObject({ organizer_since: null, organizer_seen_at: null })
+    }
+    finally {
+      rmSync(avant, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('0003 — l’accès « ouvert » est retiré', () => {
+  it('fait passer sur invitation les tontines qui le portaient, sans toucher aux autres', async () => {
+    const avant = migrationsAvant('0003_validation_tontines')
+    try {
+      await migrate(db as never, { migrationsFolder: avant })
+      await pg.exec(`
+        INSERT INTO users (id, phone) VALUES ('u1', '+2250707000001');
+        INSERT INTO tontines (id, name, share_amount, frequency, start_date, created_by, access) VALUES
+          ('ouverte', 'Ouverte', 25000, 'monthly', '2026-03-01', 'u1', 'open'),
+          ('privee', 'Privée', 25000, 'monthly', '2026-03-01', 'u1', 'private');
+      `)
+
+      await monter()
+
+      const { rows } = await pg.query<{ id: string, access: string, publish_requested_at: Date | null }>(
+        'SELECT id, access, publish_requested_at FROM tontines ORDER BY id',
+      )
+      expect(rows).toEqual([
+        { id: 'ouverte', access: 'private', publish_requested_at: null },
+        { id: 'privee', access: 'private', publish_requested_at: null },
+      ])
+    }
+    finally {
+      rmSync(avant, { recursive: true, force: true })
     }
   })
 })

@@ -22,12 +22,14 @@ const LIBELLE: Record<string, string> = {
   kyc_approuve: 'Dossier approuvé',
   kyc_rejete: 'Dossier rejeté',
   kyc_piece_consultee: 'Pièce consultée',
+  organisateur_pris_en_compte: 'Organisateur pris en compte',
 }
 
 const ICONE: Record<string, string> = {
   kyc_approuve: 'lucide:circle-check',
   kyc_rejete: 'lucide:octagon-alert',
   kyc_piece_consultee: 'lucide:eye',
+  organisateur_pris_en_compte: 'lucide:user-check',
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')

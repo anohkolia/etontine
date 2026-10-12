@@ -54,6 +54,8 @@ interface Detail {
   channels: Canal[]
   currentRound: { id: string, index: number, dueDate: string, status: string } | null
   publicationBlockers: Array<{ champ: string, message: string }>
+  /** « Confirmer » a été pressé avant la vérification d'identité : la demande attend. */
+  publishRequestedAt: string | null
 }
 
 /**
@@ -108,6 +110,24 @@ async function charger() {
     etat.value = 'erreur'
   }
 }
+
+/**
+ * « Confirmer » un brouillon : validé d'office si l'identité du président est
+ * vérifiée, sinon direction la vérification — qui ramène ici.
+ */
+const { confirmer, enCours: confirmationEnCours, erreur: erreurConfirmation } = useConfirmationTontine()
+
+/**
+ * Confirmée, mais en attente de l'identité : on le dit. Sans ce mot, le
+ * président revoyait son brouillon tel quel et pouvait croire que son geste
+ * s'était perdu. Une fois l'identité vérifiée, la mention n'a plus lieu
+ * d'être — la tontine est validée, ou son bouton « Confirmer » l'attend.
+ */
+const validationDemandee = computed(() =>
+  estPresident.value
+  && Boolean(tontine.value?.publishRequestedAt)
+  && (session.user?.kycLevel ?? 0) < 2,
+)
 
 /**
  * Archiver une tontine terminée la sort du tableau de bord — pas du registre.
@@ -200,17 +220,60 @@ useHead({ title: t('tontine.index.ma_tontine_etontine') })
           </li>
         </ul>
 
-        <!-- `?id=` désigne **ce** brouillon : sans lui, le wizard reprenait
-             celui que le navigateur avait gardé — vidé après chaque
-             publication — et ouvrait une seconde tontine. -->
-        <NuxtLink
-          v-if="estPresident"
-          :to="`/app/tontine/create?id=${tontineId}`"
-          class="min-h-touch inline-flex items-center justify-center rounded-control bg-brand px-5 font-semibold text-brand-ink"
-          data-testid="lien-reprendre-brouillon"
+        <p
+          v-if="validationDemandee"
+          role="status"
+          class="flex items-start gap-2 rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+          data-testid="validation-demandee"
         >
-          {{ $t('tontine.index.reprendre_la_configuration') }}
-        </NuxtLink>
+          <Icon
+            name="lucide:hourglass"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ $t('tontine.index.validation_demandee_ta') }}
+        </p>
+
+        <p
+          v-if="erreurConfirmation?.tontineId === tontineId"
+          role="alert"
+          class="flex items-start gap-2 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+          data-testid="erreur-confirmation"
+        >
+          <Icon
+            name="lucide:octagon-alert"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ erreurConfirmation.message }}
+        </p>
+
+        <!-- « Confirmer » d'abord : c'est le geste qui fait d'un brouillon une
+             tontine. Le serveur vérifie l'identité avant tout le reste. -->
+        <div
+          v-if="estPresident"
+          class="flex flex-col gap-2 sm:flex-row-reverse"
+        >
+          <Button
+            :label="confirmationEnCours === tontineId ? $t('commun.confirmation_en_cours') : $t('commun.confirmer')"
+            :disabled="confirmationEnCours === tontineId"
+            class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
+            data-testid="bouton-confirmer-tontine"
+            @click="confirmer(tontineId)"
+          />
+          <!-- `?id=` désigne **ce** brouillon : sans lui, le wizard reprenait
+               celui que le navigateur avait gardé — vidé après chaque
+               publication — et ouvrait une seconde tontine. -->
+          <NuxtLink
+            :to="`/app/tontine/create?id=${tontineId}`"
+            class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-5 font-semibold text-ink hover:bg-surface-muted sm:flex-1"
+            data-testid="lien-reprendre-brouillon"
+          >
+            {{ $t('tontine.index.reprendre_la_configuration') }}
+          </NuxtLink>
+        </div>
       </section>
 
       <!-- Le tour en cours : la jauge, le bénéficiaire, l'échéance. -->

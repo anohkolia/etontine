@@ -6,10 +6,11 @@ import { numeroDeTest } from './helpers/telephone'
 /**
  * Vérification d'identité : la sortie depuis le wizard, et le dépôt des pièces.
  *
- * L'enjeu du premier test est un cul-de-sac réel : l'organisateur remplit six
- * écrans, appuie sur « Publier », et se voit refuser pour un palier manquant.
- * Sans chemin depuis ce bandeau, il lui reste à deviner qu'il faut passer par
- * son profil.
+ * L'enjeu du premier test est un cul-de-sac réel : l'organisateur remplit cinq
+ * écrans, appuie sur « Confirmer », et son identité n'est pas vérifiée. Il
+ * doit atterrir sur la vérification, apprendre pourquoi, et pouvoir revenir à
+ * sa tontine — restée en brouillon, sa confirmation en attente : rien n'est
+ * perdu.
  */
 
 /**
@@ -32,9 +33,6 @@ async function allerAuRecapitulatif(page: import('@playwright/test').Page) {
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
 
-  // Étape 0 — accès
-  await page.getByTestId('bouton-continuer').click()
-
   // Étape 1 — informations
   await page.getByTestId('champ-nom-tontine').fill('Tontine des tantines')
   await page.getByTestId('bouton-continuer').click()
@@ -54,24 +52,28 @@ async function allerAuRecapitulatif(page: import('@playwright/test').Page) {
   await expect(page.getByTestId('etape-recapitulatif')).toBeVisible()
 }
 
-test('le refus pour palier manquant offre le chemin vers la vérification', async ({ page }) => {
+test('« Confirmer » sans identité vérifiée mène à la vérification, qui dit pourquoi', async ({ page }) => {
   await seConnecter(page)
-  // Palier 1 seulement : de quoi ouvrir le wizard, pas de quoi publier.
+  // Palier 1 seulement : de quoi ouvrir le wizard, pas de quoi valider.
   await renseignerNom(page)
 
   await allerAuRecapitulatif(page)
-  await page.getByTestId('bouton-publier').click()
+  await page.getByTestId('bouton-confirmer').click()
 
-  const bandeau = page.getByTestId('erreur-wizard')
-  await expect(bandeau).toContainText('pièce d’identité')
-
-  const lien = page.getByTestId('lien-verifier-identite')
-  await expect(lien).toBeVisible()
-  await lien.click()
-
-  // Et le retour est prévu : la vérification ramène là où l'on s'est arrêté.
   await page.waitForURL(url => url.pathname === '/app/profil/identite')
-  expect(new URL(page.url()).searchParams.get('redirect')).toBe('/app/tontine/create')
+  await expect(page.getByTestId('motif-message'))
+    .toHaveText('Vérifie ton identité pour pouvoir valider ta tontine.')
+
+  // Et le retour est prévu : la vérification ramène sur la tontine, restée en
+  // brouillon, sa confirmation en attente de l'identité.
+  const retour = new URL(page.url()).searchParams.get('redirect')
+  expect(retour).toMatch(/^\/app\/tontine\/[0-9a-f-]{36}$/)
+
+  await page.goto(retour!)
+  await waitForHydration(page)
+  await expect(page.getByTestId('bloc-brouillon')).toBeVisible()
+  await expect(page.getByTestId('validation-demandee')).toBeVisible()
+  await expect(page.getByTestId('bouton-confirmer-tontine')).toBeVisible()
 })
 
 test('une erreur ordinaire n’affiche pas le bouton de vérification', async ({ page }) => {
@@ -80,7 +82,6 @@ test('une erreur ordinaire n’affiche pas le bouton de vérification', async ({
 
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
-  await page.getByTestId('bouton-continuer').click()
 
   // Un nom déjà refusé côté serveur : l'erreur n'a rien à voir avec le palier,
   // et proposer d'aller vérifier son identité enverrait sur une fausse piste.

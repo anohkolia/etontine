@@ -23,7 +23,6 @@ test('le wizard demande la date du premier tour et refuse le passé', async ({ p
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
 
-  await page.getByTestId('bouton-continuer').click()
   await page.getByTestId('champ-nom-tontine').fill('Tontine des tantines')
   await page.getByTestId('bouton-continuer').click()
 

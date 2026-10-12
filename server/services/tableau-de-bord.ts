@@ -36,6 +36,12 @@ export interface TontineDuTableau {
   potCollected: number
   potExpected: number
   beneficiaryName: string | null
+  /**
+   * Le président a confirmé ce brouillon avant d'être vérifié : la carte dit
+   * qu'il sera validé à l'approbation de son identité, au lieu de lui laisser
+   * croire que son geste s'est perdu.
+   */
+  publishRequestedAt: Date | null
 }
 
 /** Une adhésion demandée, en attente de l'accord du président. */
@@ -230,6 +236,7 @@ export async function tableauDeBord(db: Db, userId: string): Promise<TableauDeBo
       potCollected,
       potExpected: tourCourant?.expectedAmount ?? 0,
       beneficiaryName,
+      publishRequestedAt: a.tontine.publishRequestedAt,
     })
   }
 

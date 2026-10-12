@@ -1,12 +1,14 @@
 import { getRouterParam } from 'h3'
 import { useDb } from '../../../../db/index.ts'
 import { verifierQuotaMembres } from '../../../../services/abonnement.ts'
-import { creerInvitation } from '../../../../services/invitations.ts'
+import { creerInvitation, exigerOrganisateurVerifie } from '../../../../services/invitations.ts'
 import { requireMembership } from '../../../../utils/auth.ts'
 import { apiError } from '../../../../utils/errors.ts'
 
 /**
- * Crée un lien d'invitation. Réservé au président.
+ * Crée un lien d'invitation. Réservé au président, **et à un président dont
+ * l'identité est vérifiée** : c'est le premier refus, avant même le quota —
+ * le lever est l'affaire de la vérification, pas de l'abonnement.
  *
  * **Le lien cesse d'être partageable dès que la limite est atteinte.** Le
  * président l'apprend ici, chez lui, avec le chemin pour la lever — plutôt
@@ -21,6 +23,7 @@ export default defineEventHandler(async (event) => {
   const { user } = await requireMembership(event, tontineId, ['president'])
 
   const db = useDb()
+  await exigerOrganisateurVerifie(db, tontineId)
   await verifierQuotaMembres(db, tontineId)
 
   const invitation = await creerInvitation(db, tontineId, user.id)

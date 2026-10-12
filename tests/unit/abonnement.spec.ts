@@ -65,8 +65,9 @@ beforeEach(async () => {
   await createTestUser(db, ARRIVANT, '+2250707000002')
   await createTestUser(db, ADMIN.id, ADMIN.phone)
 
+  // Vérifiée : ses tontines sont publiées, et ses liens d'invitation s'ouvrent.
   await db.update(users)
-    .set({ firstName: 'Aya', lastName: 'Koné' })
+    .set({ firstName: 'Aya', lastName: 'Koné', kycLevel: 2 })
     .where(eq(users.id, PRESIDENT))
 })
 
