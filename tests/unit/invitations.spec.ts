@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
   accepterInvitation, apercuInvitation, approuverAdhesion, confirmerRattachement, creerInvitation,
-  refuserAdhesion, refuserRattachement,
+  organisateurVerifie, refuserAdhesion, refuserRattachement,
 } from '../../server/services/invitations.ts'
-import { ajouterMembreGere } from '../../server/services/membres.ts'
+import { ajouterMembreGere, transfererPresidence } from '../../server/services/membres.ts'
 import { creerBrouillon, majTontine } from '../../server/services/tontines.ts'
 import { useEngagement } from '../../app/composables/useEngagement.ts'
 import { useMoney } from '../../app/composables/useMoney.ts'
-import { ledgerEntries, memberships, notifications, shares, tontines } from '../../server/db/schema.ts'
+import { invites, ledgerEntries, memberships, notifications, shares, tontines, users } from '../../server/db/schema.ts'
 import { createTestDb, createTestUser } from '../helpers/db.ts'
 import type { TestDb } from '../helpers/db.ts'
 
@@ -26,9 +26,11 @@ beforeEach(async () => {
   cleanup = ctx.cleanup
 
   await createTestUser(db, PRESIDENT, '+2250707000001')
-  await db.update((await import('../../server/db/schema.ts')).users)
-    .set({ firstName: 'Aya', lastName: 'Koné' })
-    .where(eq((await import('../../server/db/schema.ts')).users.id, PRESIDENT))
+  // Une organisatrice vérifiée : sans cela, aucun lien ne s'ouvre — c'est
+  // l'objet du dernier bloc de ce fichier.
+  await db.update(users)
+    .set({ firstName: 'Aya', lastName: 'Koné', kycLevel: 2 })
+    .where(eq(users.id, PRESIDENT))
 
   T = (await creerBrouillon(db, PRESIDENT, { name: 'Tontine des tantines', access: 'private' }))
   await majTontine(db, T, { shareAmount: 25_000, frequency: 'monthly', locality: 'Abobo' })
@@ -326,5 +328,94 @@ describe('accord du président sur une adhésion — le lien menait dans le vide
     await confirmerRattachement(db, membershipId, PRESIDENT)
     const [siege] = await db.select().from(memberships).where(eq(memberships.id, membershipId))
     expect(siege!.userId).toBe(ARRIVANT)
+  })
+})
+
+describe('lien d’invitation — l’organisateur doit être vérifié', () => {
+  async function nonVerifiee(userId = PRESIDENT) {
+    await db.update(users).set({ kycLevel: 1 }).where(eq(users.id, userId))
+  }
+
+  /** Un lien posé tel quel en base : celui d'avant la règle, que rien ne peut plus créer. */
+  async function lienAncien(): Promise<string> {
+    const token = 'lien-d-avant-la-regle-0001'
+    await db.insert(invites).values({
+      id: 'c0000000-0000-4000-8000-000000000001',
+      token,
+      tontineId: T,
+      createdBy: PRESIDENT,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      maxUses: 20,
+      usedCount: 0,
+    })
+    return token
+  }
+
+  it('refuse de créer un lien tant que l’identité n’est pas vérifiée — et le dit à l’organisatrice', async () => {
+    await nonVerifiee()
+
+    // `KYC_REQUIRED` : c'est elle qui crée ses liens, l'écran l'envoie vers
+    // la vérification.
+    await expect(creerInvitation(db, T, PRESIDENT)).rejects.toThrow(expect.objectContaining({
+      statusCode: 403,
+      data: { error: expect.objectContaining({ code: 'KYC_REQUIRED', requiredLevel: 2 }) },
+    }))
+    expect(await db.select().from(invites)).toHaveLength(0)
+  })
+
+  it('n’ouvre pas un lien existant : ni aperçu, ni adhésion', async () => {
+    await nonVerifiee()
+    const token = await lienAncien()
+    await createTestUser(db, ARRIVANT, '+2250707000002')
+
+    // Pas `KYC_REQUIRED` : ce n'est pas l'identité de l'arrivant qui manque,
+    // et l'écran ne doit pas l'envoyer vérifier la sienne.
+    const refus = expect.objectContaining({
+      statusCode: 403,
+      data: { error: expect.objectContaining({ code: 'FORBIDDEN', field: 'organizer' }) },
+    })
+    await expect(apercuInvitation(db, token)).rejects.toThrow(refus)
+    await expect(accepterInvitation(db, token, ARRIVANT)).rejects.toThrow(refus)
+
+    // Rien n'a bougé : ni adhésion, ni usage du lien.
+    expect((await db.select().from(memberships).where(eq(memberships.tontineId, T))).map(m => m.role)).toEqual(['president'])
+    const [lien] = await db.select().from(invites)
+    expect(lien!.usedCount).toBe(0)
+  })
+
+  it('ne laisse pas non plus un membre géré reprendre son siège par ce lien', async () => {
+    await ajouterMembreGere(db, T, { name: 'Yao Brou', phone: NUMERO_GERE, shares: 1 })
+    await nonVerifiee()
+    const token = await lienAncien()
+    await createTestUser(db, ARRIVANT, NUMERO_GERE)
+
+    await expect(accepterInvitation(db, token, ARRIVANT)).rejects.toThrow(
+      expect.objectContaining({ statusCode: 403 }),
+    )
+    expect(await db.select().from(notifications)).toHaveLength(0)
+  })
+
+  it('rouvre le même lien dès que l’identité est vérifiée', async () => {
+    await nonVerifiee()
+    const token = await lienAncien()
+    await expect(apercuInvitation(db, token)).rejects.toThrow(expect.objectContaining({ statusCode: 403 }))
+
+    await db.update(users).set({ kycLevel: 2 }).where(eq(users.id, PRESIDENT))
+
+    expect((await apercuInvitation(db, token)).name).toBe('Tontine des tantines')
+  })
+
+  it('suit la présidence : passée à un membre non vérifié, elle suspend les liens', async () => {
+    const { token } = await creerInvitation(db, T, PRESIDENT)
+    await createTestUser(db, ARRIVANT, '+2250707000002')
+    const { membershipId } = await accepterInvitation(db, token, ARRIVANT)
+    await approuverAdhesion(db, membershipId, PRESIDENT)
+    expect(await organisateurVerifie(db, T)).toBe(true)
+
+    await transfererPresidence(db, T, membershipId, PRESIDENT)
+
+    // L'organisateur, c'est désormais lui — et personne n'a vu sa pièce.
+    expect(await organisateurVerifie(db, T)).toBe(false)
+    await expect(apercuInvitation(db, token)).rejects.toThrow(expect.objectContaining({ statusCode: 403 }))
   })
 })

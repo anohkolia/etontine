@@ -56,6 +56,10 @@ const questions = [
     r: t('public.aide.non_elle_est_gardee'),
   },
   {
+    q: t('public.aide.comment_installer_etontine_sur'),
+    r: t('public.aide.ouvre_ton_profil_et'),
+  },
+  {
     q: t('public.aide.comment_savoir_que_j'),
     r: t('public.aide.l_ecran_ou_envoyer'),
   },

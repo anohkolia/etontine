@@ -6,13 +6,38 @@
  * jamais si le numéro ou l'adresse sont déjà pris — la réponse du serveur est
  * la même dans tous les cas, et l'écran s'y tient : quelqu'un qui a déjà un
  * compte le lira dans sa boîte mail, pas ici.
+ *
+ * On ne rejoint une tontine que par le lien de son organisateur. Arrivé par
+ * ce lien, on s'inscrit comme membre, et la confirmation ramène sur
+ * l'invitation. Sans lien, on s'inscrit pour organiser — et l'écran rappelle
+ * à qui voulait rejoindre que c'est le lien qu'il lui faut.
  */
-import { registerInput } from '#shared/schemas'
+import { jetonInvitation, registerInput } from '#shared/schemas'
 
 definePageMeta({ layout: false })
 const { t } = useI18n()
+const route = useRoute()
 
 const { format, extraire, estComplet } = usePhoneMask()
+
+/**
+ * Le jeton de l'invitation par laquelle on arrive : en clair
+ * (`?invitation=`), depuis le bouton de l'invitation, ou dans l'intention que
+ * la connexion a gardée (`?redirect=/join/<jeton>`).
+ */
+const invitation = computed<string | null>(() => {
+  const directe = route.query.invitation
+  if (typeof directe === 'string' && jetonInvitation.safeParse(directe).success) return directe
+
+  const retour = route.query.redirect
+  const jeton = typeof retour === 'string' ? retour.match(/^\/join\/([^/?#]+)$/)?.[1] : undefined
+  return jeton && jetonInvitation.safeParse(jeton).success ? jeton : null
+})
+
+/** La connexion garde la même intention : revenir sur l'invitation. */
+const lienConnexion = computed(() =>
+  invitation.value ? { path: '/login', query: { redirect: `/join/${invitation.value}` } } : '/login',
+)
 
 const inscription = useFormulaire(registerInput, { phone: '', email: '', code: '' })
 const [email, emailAttrs] = inscription.champ('email')
@@ -68,8 +93,13 @@ async function envoyer(renvoi = false) {
   if (!valeurs) return
   enCours.value = true
   try {
-    const reponse = await $fetch<{ devToken?: string }>('/api/v1/auth/register', { method: 'POST', body: valeurs })
-    lienDeDeveloppement.value = reponse.devToken ? `/confirmer?token=${reponse.devToken}` : null
+    const reponse = await $fetch<{ devToken?: string }>('/api/v1/auth/register', {
+      method: 'POST',
+      body: invitation.value ? { ...valeurs, invitation: invitation.value } : valeurs,
+    })
+    // Le même retour que le lien parti par e-mail : sur l'invitation.
+    const retour = invitation.value ? `&redirect=${encodeURIComponent(`/join/${invitation.value}`)}` : ''
+    lienDeDeveloppement.value = reponse.devToken ? `/confirmer?token=${reponse.devToken}${retour}` : null
     etape.value = 'envoye'
     renvoye.value = renvoi
   }
@@ -81,11 +111,11 @@ async function envoyer(renvoi = false) {
   }
 }
 
-/** Un compte déjà ouvert n'a rien à faire ici. */
+/** Un compte déjà ouvert n'a rien à faire ici : il retourne à l'application, ou à l'invitation qu'il suivait. */
 onMounted(async () => {
   const session = useSessionStore()
   await session.charger()
-  if (session.connecte) await navigateTo('/app', { replace: true })
+  if (session.connecte) await navigateTo(invitation.value ? `/join/${invitation.value}` : '/app', { replace: true })
 })
 
 useHead({ title: t('public.inscription.inscription_etontine') })
@@ -185,7 +215,7 @@ useHead({ title: t('public.inscription.inscription_etontine') })
 
         <div class="mt-auto pt-4">
           <NuxtLink
-            to="/login"
+            :to="lienConnexion"
             class="min-h-touch inline-flex w-full items-center justify-center rounded-control border border-line-strong bg-surface text-sm font-semibold text-ink hover:bg-surface-muted"
           >
             {{ $t('public.inscription.se_connecter') }}
@@ -203,6 +233,36 @@ useHead({ title: t('public.inscription.inscription_etontine') })
             {{ $t('public.inscription.intro') }}
           </p>
         </header>
+
+        <!-- Arrivé par une invitation : on le lui dit, et l'on promet le retour. -->
+        <p
+          v-if="invitation"
+          class="flex items-start gap-2 rounded-control bg-brand-surface p-3 text-sm text-brand-strong"
+          data-testid="inscription-par-invitation"
+        >
+          <Icon
+            name="lucide:link"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ $t('public.inscription.par_invitation') }}
+        </p>
+        <!-- Sans lien, on s'inscrit pour organiser. Qui voulait rejoindre doit
+             le savoir avant de créer un compte qui ne le mènerait nulle part. -->
+        <p
+          v-else
+          class="flex items-start gap-2 rounded-control bg-surface-muted p-3 text-sm text-ink-muted"
+          data-testid="inscription-organisateur"
+        >
+          <Icon
+            name="lucide:info"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ $t('public.inscription.rejoindre_par_le_lien') }}
+        </p>
 
         <form
           class="flex flex-1 flex-col gap-4"
@@ -357,7 +417,7 @@ useHead({ title: t('public.inscription.inscription_etontine') })
             <p class="text-center text-sm text-ink-muted">
               {{ $t('public.inscription.deja_un_compte') }}
               <NuxtLink
-                to="/login"
+                :to="lienConnexion"
                 class="font-semibold text-brand underline underline-offset-4"
                 data-testid="lien-connexion"
               >{{ $t('public.inscription.se_connecter') }}</NuxtLink>

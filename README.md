@@ -35,6 +35,22 @@ pnpm db:admin
 pnpm dev:admin        # http://localhost:3001
 ```
 
+On ne rejoint une tontine que par le lien d'invitation de son organisateur :
+qui s'inscrit **sans** lien vient donc en organiser une. Le back-office liste
+ces organisateurs (onglet « Organisateurs ») et signale chaque arrivée par un
+badge jusqu'à ce qu'un administrateur la prenne en compte — geste journalisé.
+Les administrateurs en reçoivent aussi l'alerte par e-mail, à l'adresse
+confirmée de leur compte : `NUXT_ADMIN_PHONES` doit donc être renseignée sur
+l'application des membres aussi, et `NUXT_ADMIN_SITE_URL` donne le lien du
+back-office cité dans l'e-mail. Un compte venu d'une invitation devient
+organisateur — et l'alerte part — à sa première tontine.
+
+Un organisateur crée ses brouillons librement, mais ne les valide — et n'en
+invite les membres — qu'une fois son identité vérifiée : ses liens d'invitation
+ne s'ouvrent pas avant. « Confirmer » un brouillon sans identité vérifiée mène à
+la vérification et retient la demande : la tontine est validée d'office quand
+l'identité est approuvée.
+
 En développement, le lien de confirmation (inscription, code oublié) s'affiche
 directement à l'écran au lieu de partir par e-mail. Les comptes de `pnpm db:seed`
 ont tous le code d'accès `2604`.
@@ -78,6 +94,7 @@ Ce qui doit être renseigné ou choisi, et que le code ne peut pas deviner :
 |L'envoi des e-mails (confirmation d'inscription, code oublié)|`NUXT\_EMAIL\_PROVIDER=brevo` avec `NUXT\_EMAIL\_BREVO\_API\_KEY` et `NUXT\_EMAIL\_FROM` — Brevo vérifie une adresse d'expédition seule, sans domaine ni DNS. `resend` est l'autre choix, meilleur une fois un domaine authentifié, mais inutilisable avant. Le mode `log` est refusé en production : un lien qui ne part pas doit faire échouer la demande. Brancher un autre fournisseur se fait dans `server/services/email.ts`|
 |Où régler l'abonnement|`NUXT\_PUBLIC\_ABONNEMENT\_REGLEMENT\_*` — le numéro de mobile money, son titulaire et le WhatsApp de contact ; sans eux, l'écran renvoie vers l'adresse de l'éditeur|
 |Les notifications push|`NUXT\_VAPID\_*` — facultatives, les notifications restent lisibles dans l'application|
+|L'alerte « nouvel organisateur »|`NUXT\_ADMIN\_PHONES` sur l'application des membres **aussi** (c'est elle qui écrit aux administrateurs), et `NUXT\_ADMIN\_SITE\_URL` pour le lien du back-office dans l'e-mail|
 |Le secret de session et l'adresse publique|`NUXT\_SESSION\_SECRET`, `NUXT\_PUBLIC\_SITE\_URL`|
 
 Les chaînes de l'interface vivent dans `i18n/locales/fr.json` ; les mots des
@@ -108,6 +125,18 @@ impose le triplet mot + icône + couleur, et `<StatusBadge>` rend les trois.
 * **Icônes hors ligne** : `@nuxt/icon` en `provider: 'none'`, les icônes sont
 embarquées dans le lot client. Une icône appelée depuis une table de données
 doit être ajoutée à `icon.clientBundle.icons` — un test le vérifie.
+* **Installer l'application (PWA)** : le manifeste est lié depuis toutes les
+pages du build. Les icônes de chaque plateforme — celles du manifeste,
+`apple-touch-icon` pour l'iPhone et l'iPad, une 1024 px « maskable » pour le Dock
+de Safari sur Mac, le favicon — sont tracées par `node scripts/icones.ts`.
+`<FenetreInstallation>` propose d'installer selon l'appareil : un bouton là où
+le navigateur invite (Chrome, Edge, Samsung Internet), la marche à suivre
+ailleurs (iPhone, iPad, Safari sur Mac, Firefox sur Android), le lien à rouvrir
+depuis le navigateur intégré de WhatsApp ou de Facebook. Elle s'ouvre d'office
+sur le tableau de bord, au plus une fois par mois, et à la demande depuis le
+profil. En développement, ni manifeste ni service worker ne sont servis :
+`pnpm build` vérifie le lien du manifeste, les icônes, et que `/app` et `/aide`
+s'ouvrent hors ligne.
 * **Tailwind balaie aussi `shared/`** (`@source` dans `main.css`) : la racine
 Vite de Nuxt 4 est `app/`, et les classes des tables de statuts y échapperaient.
 * **Aucun frais n'est affiché** : le membre les supporte à l'envoi comme au

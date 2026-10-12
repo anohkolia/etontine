@@ -42,6 +42,11 @@ onMounted(() => {
 // Le verrou d'écran se referme après cinq minutes en arrière-plan : un
 // téléphone posé sur la table reste un téléphone qu'on peut prendre.
 useVerrou().surveiller()
+
+// La proposition d'installer, d'office sur le tableau de bord et à la demande
+// depuis le profil. Sa fenêtre n'est chargée qu'au moment de s'ouvrir.
+const installation = useInstallation()
+installation.surveiller()
 </script>
 
 <template>
@@ -52,6 +57,7 @@ useVerrou().surveiller()
          L'écran qui tient la promesse la réclame par `useNatureHorsLigne()`. -->
     <OfflineBanner />
     <PwaBandeau />
+    <LazyFenetreInstallation v-if="installation.ouverte.value" />
 
     <header
       class="gradient-trust sticky top-0 z-20 rounded-b-tile px-4 pt-4 pb-5 text-night-ink shadow-float"

@@ -189,6 +189,18 @@ function siteUrl(): string {
 }
 
 /**
+ * L'adresse du back-office, s'il en a une de configurée.
+ *
+ * Pas de valeur par défaut : le back-office tourne sur une autre origine que
+ * l'application des membres, et deviner son adresse enverrait l'administrateur
+ * sur une page qui n'existe pas. Sans elle, l'alerte dit où regarder.
+ */
+function adminUrl(): string | null {
+  const brute = process.env.NUXT_ADMIN_SITE_URL?.trim()
+  return brute ? brute.replace(/\/$/, '') : null
+}
+
+/**
  * Les messages, en un seul endroit.
  *
  * Courts, en texte brut, et **sans montant ni nom de tontine** : une boîte
@@ -196,10 +208,33 @@ function siteUrl(): string {
  * que les clients mail le rendent cliquable.
  */
 export const messages = {
-  confirmation(token: string): Omit<Email, 'to'> {
+  /**
+   * `suite` : la page où reprendre une fois le compte confirmé — l'invitation
+   * par laquelle on est arrivé. Sans elle, un membre invité atterrissait sur
+   * son profil, et le lien de la tontine qu'il venait rejoindre était perdu.
+   */
+  confirmation(token: string, suite?: string): Omit<Email, 'to'> {
+    const retour = suite ? `&redirect=${encodeURIComponent(suite)}` : ''
     return {
       subject: 'Confirme ton inscription à eTontine',
-      text: `Bienvenue sur eTontine.\n\nPour confirmer ton compte, ouvre ce lien (valable 24 heures) :\n\n${siteUrl()}/confirmer?token=${token}\n\nSi tu n’es pas à l’origine de cette inscription, ignore ce message : rien ne sera créé.`,
+      text: `Bienvenue sur eTontine.\n\nPour confirmer ton compte, ouvre ce lien (valable 24 heures) :\n\n${siteUrl()}/confirmer?token=${token}${retour}\n\nSi tu n’es pas à l’origine de cette inscription, ignore ce message : rien ne sera créé.`,
+    }
+  },
+  /**
+   * L'alerte du back-office : un organisateur vient d'arriver.
+   *
+   * Les quatre derniers chiffres seulement, comme pour un changement de
+   * numéro : de quoi distinguer deux alertes, rien de plus. Le reste se lit
+   * dans le back-office, derrière sa connexion — une boîte mail se partage.
+   */
+  nouvelOrganisateur(finNumero: string): Omit<Email, 'to'> {
+    const adresse = adminUrl()
+    const ou = adresse
+      ? `Il apparaît dans le back-office, onglet « Organisateurs » :\n\n${adresse}/organisateurs`
+      : 'Il apparaît dans le back-office, onglet « Organisateurs ».'
+    return {
+      subject: 'Nouvel organisateur sur eTontine',
+      text: `Un nouvel organisateur vient d’arriver sur eTontine, avec un numéro se terminant par ${finNumero}.\n\n${ou}\n\nCette alerte reste signalée tant qu’un administrateur ne l’a pas prise en compte.`,
     }
   },
   changementEmail(token: string): Omit<Email, 'to'> {

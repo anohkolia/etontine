@@ -12,12 +12,7 @@
     },
     "create": {
       "etape_p0_sur_p1": "Étape {p0} sur {p1} — {p2}",
-      "tontine_privee": "Tontine privée",
       "sur_invitation_personne_ne": "Sur invitation. Personne ne la trouve sans ton lien.",
-      "tontine_ouverte": "Tontine ouverte",
-      "visible_publiquement_n_importe": "Visible publiquement, n’importe qui peut demander à rejoindre.",
-      "bientot_la_page_ou": "Bientôt : la page où l’on découvre les tontines ouvertes n’existe pas encore. En attendant, on rejoint la tienne par ton lien.",
-      "demande_une_piece_d": "Demande une pièce d’identité vérifiée. Tu peux la fournir dans ton profil.",
       "nom_de_la_tontine": "Nom de la tontine",
       "tontine_du_marche_de": "Tontine du marché de Cocody",
       "image_facultatif": "Image (facultatif)",
@@ -56,10 +51,9 @@
       "par_part": "par part",
       "ordre_de_passage_p0": "Ordre de passage : {p0}",
       "premier_tour_le_p0": "Premier tour le {p0}",
-      "apres_publication_tu_pourras": "Après publication, tu pourras ajouter les membres et leur envoyer le lien d’invitation.",
+      "apres_publication_tu_pourras": "Une fois la tontine confirmée, tu pourras ajouter les membres et leur envoyer le lien d’invitation.",
       "verifier_mon_identite": "Vérifier mon identité",
       "retour": "Retour",
-      "acces": "Accès",
       "informations": "Informations",
       "argent": "Argent",
       "ordre_de_passage": "Ordre de passage",
@@ -69,9 +63,7 @@
       "creer_une_tontine_etontine": "Créer une tontine — eTontine",
       "tirage_au_sort_2": "tirage au sort",
       "enregistrement": "Enregistrement…",
-      "continuer": "Continuer",
-      "publication": "Publication…",
-      "publier_la_tontine": "Publier la tontine"
+      "continuer": "Continuer"
     },
     "confirmations": {
       "rien_a_confirmer": "Rien à confirmer",
@@ -217,7 +209,8 @@
       "marquer_soldee": "Marquer soldée"
     },
     "index": {
-      "cette_tontine_n_est": "Cette tontine n’est pas encore publiée. Tes membres ne la voient pas.",
+      "cette_tontine_n_est": "Cette tontine est encore un brouillon : elle ne s’ouvre à ses membres qu’une fois confirmée.",
+      "validation_demandee_ta": "Validation demandée : ta tontine sera validée dès que ton identité sera vérifiée.",
       "reprendre_la_configuration": "Reprendre la configuration",
       "tour_p0": "Tour {p0}",
       "echeance_p0": "Échéance {p0}",
@@ -280,6 +273,8 @@
       "numero": "Numéro",
       "deux_parts_deux_positions": "Deux parts = deux positions dans la rotation, deux cotisations par tour, et deux fois où il prend la main.",
       "inviter": "Inviter",
+      "verifie_ton_identite_pour": "Vérifie ton identité pour pouvoir inviter des membres : ils vont t’envoyer leur argent, ils doivent savoir qui tu es.",
+      "verifier_mon_identite": "Vérifier mon identité",
       "creer_un_lien_d": "Créer un lien d’invitation",
       "ordre_de_passage": "Ordre de passage",
       "l_ordre_convenu_entre": "L’ordre convenu entre vous se pose ici. Le tirage au sort n’est qu’une autre façon de trancher, pas la seule.",
@@ -510,6 +505,7 @@
       "quelle_difference_entre_declare": "Quelle différence entre « déclaré » et « confirmé » ?",
       "j_ai_deux_parts": "J’ai deux parts. Pourquoi deux cotisations ?",
       "je_n_ai_pas": "Je n’ai pas de réseau. Ma déclaration est-elle perdue ?",
+      "comment_installer_etontine_sur": "Comment installer eTontine sur mon téléphone ?",
       "comment_savoir_que_j": "Comment savoir que j’envoie au bon numéro ?",
       "le_registre_peut_il": "Le registre peut-il être modifié après coup ?",
       "une_erreur_a_ete": "Une erreur a été enregistrée. Que faire ?",
@@ -517,6 +513,7 @@
       "declare_veut_dire_que": "Déclaré veut dire que tu as annoncé ton envoi. Confirmé veut dire que le trésorier l’a retrouvé sur son compte. Tant que ce n’est pas confirmé, ta cotisation n’est pas comptée dans le pot.",
       "une_part_c_est": "Une part, c’est une place dans la rotation. Avec deux parts, tu prends la main deux fois sur le cycle, et tu cotises donc deux fois par tour.",
       "non_elle_est_gardee": "Non. Elle est gardée sur ton téléphone et partira toute seule dès que le réseau revient. Tu n’as rien à refaire, et elle ne partira pas en double.",
+      "ouvre_ton_profil_et": "Ouvre ton profil et touche « Installer l’application » : eTontine te montre la marche à suivre pour ton appareil. Sur iPhone, c’est le bouton Partager de Safari, puis « Sur l’écran d’accueil ». Sur Android, le menu de ton navigateur propose « Installer l’application ». Elle s’ouvre ensuite d’un geste, comme une application.",
       "l_ecran_ou_envoyer": "L’écran « où envoyer » affiche toujours le nom du titulaire du compte. Vérifie que ce nom s’affiche bien dans ton application de paiement avant de valider. Si le numéro a changé récemment, un avertissement apparaît : appelle le bureau avant d’envoyer.",
       "non_chaque_ecriture_est": "Non. Chaque écriture est liée à la précédente par une empreinte : modifier ou supprimer une ligne casse la chaîne, et le contrôle du registre le signale. N’importe quel membre peut lancer ce contrôle.",
       "rien_ne_s_efface": "Rien ne s’efface au registre. Ouvre une contestation depuis l’écriture concernée : le bureau doit y répondre, et la correction s’ajoute à côté. La trace de l’erreur reste visible de tous."
@@ -566,6 +563,8 @@
     },
     "join": {
       "ce_lien_n_est": "Ce lien n’est plus valable",
+      "ce_lien_n_est_2": "Ce lien n’est pas encore actif",
+      "l_organisateur_de_cette": "L’organisateur de cette tontine doit d’abord faire vérifier son identité. Réessaie un peu plus tard.",
       "il_a_peut_etre": "Il a peut-être expiré, ou déjà servi au maximum de fois prévu. Demande un nouveau lien à l’organisateur.",
       "tu_es_invite_a": "Tu es invité à rejoindre",
       "le_president": "Le président",
@@ -587,6 +586,8 @@
       "un_instant": "Un instant…",
       "rejoindre_cette_tontine": "Rejoindre cette tontine",
       "me_connecter_pour_rejoindre": "Me connecter pour rejoindre",
+      "pas_encore_de_compte": "Pas encore de compte ?",
+      "creer_mon_compte": "Créer mon compte",
       "ton_siege_attend_le_president": "Ton siège existe déjà : le président doit confirmer que c’est bien toi. Tu seras prévenu dès qu’il l’aura fait."
     },
     "login": {
@@ -747,6 +748,8 @@
       "inscription_etontine": "Inscription — eTontine",
       "titre": "Crée ton compte",
       "intro": "Ton numéro, une adresse e-mail pour confirmer, et un code à quatre chiffres pour ouvrir.",
+      "par_invitation": "Tu crées ton compte pour rejoindre une tontine. Une fois ton adresse confirmée, tu reviendras sur l’invitation.",
+      "rejoindre_par_le_lien": "Tu veux rejoindre une tontine ? Ouvre le lien d’invitation que son organisateur t’a envoyé : on n’y entre que par lui. Sans lien, ce compte sert à organiser la tienne.",
       "numero_de_telephone": "Numéro de téléphone",
       "un_numero_ivoirien_01": "Un numéro ivoirien : 01, 05 ou 07. C’est avec lui que tu te connecteras.",
       "adresse_e_mail": "Adresse e-mail",
@@ -883,10 +886,7 @@
     },
     "PwaBandeau": {
       "une_nouvelle_version_est": "Une nouvelle version est prête.",
-      "recharger": "Recharger",
-      "mets_etontine_sur_ton": "Mets eTontine sur ton écran d’accueil : elle s’ouvre même sans réseau.",
-      "installer": "Installer",
-      "plus_tard": "Plus tard"
+      "recharger": "Recharger"
     },
     "PageLegale": {
       "derniere_revision_p0": "Dernière révision : {p0}.",
@@ -894,6 +894,41 @@
       "mentions_legales": "Mentions légales",
       "conditions_d_utilisation": "Conditions d’utilisation",
       "confidentialite": "Confidentialité"
+    },
+    "FenetreInstallation": {
+      "installer_etontine": "Installer eTontine",
+      "etontine_est_installee": "eTontine est installée",
+      "fermer": "Fermer",
+      "etontine_est_deja_installee": "eTontine est déjà installée sur cet appareil : ouvre-la depuis ton écran d’accueil.",
+      "mets_etontine_sur_ton": "Mets eTontine sur ton écran d’accueil : elle s’ouvre d’un geste, comme une application, et ne prend presque pas de place.",
+      "installe_etontine_sur_ton": "Installe eTontine sur ton ordinateur : elle s’ouvre dans sa propre fenêtre, depuis ton bureau ou ton Dock.",
+      "sur_cet_iphone_seul": "Sur cet iPhone, seul Safari sait installer une application web. Ouvre eTontine dans Safari, puis installe-la de là.",
+      "tu_as_ouvert_etontine": "Tu as ouvert eTontine depuis une autre application — WhatsApp, Facebook… Son navigateur ne sait pas installer : ouvre eTontine dans ton navigateur habituel, puis installe-la de là.",
+      "ce_navigateur_ne_sait": "Ce navigateur ne sait pas installer d’application. Ouvre eTontine dans Chrome, Edge ou Safari : ils le proposent.",
+      "touche_le_bouton_partager": "Touche le bouton Partager — le carré avec une flèche vers le haut. Sur les iPhone récents, il est dans le menu « ··· », à côté de l’adresse.",
+      "choisis_sur_l_ecran": "Choisis « Sur l’écran d’accueil ». Fais défiler la liste s’il n’apparaît pas tout de suite.",
+      "touche_ajouter_etontine_rejoint": "Touche « Ajouter » : eTontine rejoint tes applications.",
+      "copie_le_lien_ci": "Copie le lien ci-dessous.",
+      "ouvre_safari_et_colle": "Ouvre Safari et colle-le dans la barre d’adresse.",
+      "la_touche_partager_puis": "Là, touche Partager, puis « Sur l’écran d’accueil ».",
+      "dans_la_barre_des": "Dans la barre des menus, ouvre « Fichier ».",
+      "choisis_ajouter_au_dock": "Choisis « Ajouter au Dock ».",
+      "clique_sur_ajouter_etontine": "Clique sur « Ajouter » : eTontine s’ouvre depuis le Dock, dans sa propre fenêtre.",
+      "ouvre_le_menu_de": "Ouvre le menu de ton navigateur : ⋮ ou ☰, en haut ou en bas de l’écran.",
+      "touche_installer_l_application": "Touche « Installer l’application » ou « Ajouter à l’écran d’accueil ».",
+      "confirme_etontine_rejoint_tes": "Confirme : eTontine rejoint tes applications.",
+      "clique_sur_l_icone": "Clique sur l’icône d’installation, à droite de la barre d’adresse — ou ouvre le menu ⋮ du navigateur.",
+      "choisis_installer_etontine_dans": "Choisis « Installer eTontine ». Dans Edge : « Applications », puis « Installer ce site en tant qu’application ».",
+      "confirme_etontine_s_ouvre": "Confirme : eTontine s’ouvre dans sa propre fenêtre.",
+      "touche_le_menu_de": "Touche le menu de l’application : ⋮ ou ···, souvent en haut à droite.",
+      "choisis_ouvrir_dans_le": "Choisis « Ouvrir dans le navigateur » — ou copie le lien ci-dessous et colle-le dans Chrome ou Safari.",
+      "la_etontine_te_proposera": "Là, eTontine te proposera de s’installer.",
+      "plus_tard": "Plus tard",
+      "installer": "Installer",
+      "installation_en_cours": "Installation…",
+      "copier_le_lien": "Copier le lien",
+      "lien_copie": "Lien copié",
+      "j_ai_compris": "J’ai compris"
     }
   },
   "abonnement": {
@@ -970,6 +1005,7 @@
     "echeance_p0_2": "Échéance {p0}",
     "cotiser": "Cotiser",
     "confirmer": "Confirmer",
+    "validation_demandee_en": "Validation demandée : en attente de la vérification de ton identité.",
     "membres": "Membres",
     "terminees_p0": "Terminées ({p0})",
     "akwaba": "Akwaba",
@@ -998,7 +1034,10 @@
       "suppression": "Suppression…"
     },
     "identite": {
-      "une_piece_d_identite": "Une pièce d’identité et un selfie. C’est ce qui permet de publier une tontine : les membres doivent savoir à qui ils confient leur argent.",
+      "une_piece_d_identite": "Une pièce d’identité et un selfie. C’est ce qui permet de valider une tontine et d’en inviter les membres : ils doivent savoir à qui ils confient leur argent.",
+      "verifie_ton_identite_pour": "Vérifie ton identité pour pouvoir valider ta tontine.",
+      "elle_sera_validee_automatiquement": "Elle sera validée automatiquement dès que ton identité sera vérifiée : tu n’auras pas à la confirmer de nouveau.",
+      "verifie_ton_identite_pour_2": "Vérifie ton identité pour pouvoir inviter des membres.",
       "ton_dossier_est_en": "Ton dossier est en cours d’examen.",
       "tu_n_as_rien": "Tu n’as rien à refaire. Tu recevras une notification dès qu’il aura été regardé.",
       "ton_dossier_n_a": "Ton dossier n’a pas été accepté.",
@@ -1060,6 +1099,7 @@
       "mes_numeros_de_collecte": "Mes numéros de collecte",
       "mon_abonnement": "Mon abonnement",
       "mes_donnees_personnelles": "Mes données personnelles",
+      "installer_l_application": "Installer l’application",
       "me_deconnecter": "Me déconnecter",
       "identite_2": "Identité",
       "nouveau_numero": "Nouveau numéro",
@@ -1153,7 +1193,9 @@
     "cloture_en_cours": "Clôture…",
     "clore_la_contestation": "Clore la contestation",
     "serveur_injoignable_connexion": "Impossible de joindre le serveur. Vérifie ta connexion.",
-    "enregistrement_en_cours": "Enregistrement…"
+    "enregistrement_en_cours": "Enregistrement…",
+    "confirmer": "Confirmer",
+    "confirmation_en_cours": "Confirmation…"
   },
   "statut": {
     "contribution": {

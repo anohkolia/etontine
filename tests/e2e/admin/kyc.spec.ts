@@ -141,6 +141,76 @@ test('l’administrateur examine un dossier et l’approuve', async ({ page, bro
   await contexteMembre.close()
 })
 
+/**
+ * Un brouillon complet, créé par l'API de l'application des membres : de quoi
+ * être validé, si seulement l'identité de son président l'était.
+ */
+async function brouillonComplet(membre: Page): Promise<string> {
+  const creation = await membre.request.post(`${APP_MEMBRE}/api/v1/tontines`, {
+    data: { name: 'Tontine des tantines', locality: 'Abobo' },
+  })
+  if (!creation.ok()) throw new Error(`création refusée : ${await creation.text()}`)
+  const { id } = await creation.json() as { id: string }
+
+  const canal = await membre.request.post(`${APP_MEMBRE}/api/v1/me/channels`, {
+    data: { provider: 'wave', msisdn: `+225${numeroDeTest()}`, holderName: 'Mariam Touré', code: CODE_TEST },
+  })
+  if (!canal.ok()) throw new Error(`canal refusé : ${await canal.text()}`)
+  const { id: canalId } = await canal.json() as { id: string }
+
+  const reglages = await membre.request.fetch(`${APP_MEMBRE}/api/v1/tontines/${id}`, {
+    method: 'PATCH',
+    data: {
+      shareAmount: 25_000,
+      frequency: 'monthly',
+      startDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
+      collectionChannelIds: [canalId],
+    },
+  })
+  if (!reglages.ok()) throw new Error(`réglages refusés : ${await reglages.text()}`)
+  return id
+}
+
+async function statutDe(membre: Page, id: string): Promise<string> {
+  const reponse = await membre.request.get(`${APP_MEMBRE}/api/v1/tontines/${id}`)
+  return (await reponse.json() as { status: string }).status
+}
+
+test('approuver un dossier valide d’office la tontine que l’organisateur avait confirmée', async ({ page, browser }) => {
+  const contexteMembre = await browser.newContext(SANS_SESSION)
+  const membre = await contexteMembre.newPage()
+  const numero = await deposerUnDossierEnAttente(membre, { prenom: 'Mariam', nom: 'Touré' })
+
+  // Son dossier attend ; elle appuie sur « Confirmer » quand même. Refusé —
+  // son identité n'est pas vérifiée —, mais la demande est retenue.
+  const id = await brouillonComplet(membre)
+  const confirmation = await membre.request.post(`${APP_MEMBRE}/api/v1/tontines/${id}/publish`)
+  expect(confirmation.status()).toBe(403)
+  expect(await statutDe(membre, id)).toBe('draft')
+
+  await page.goto('/dossiers')
+  await waitForHydration(page)
+  await page.locator('[data-testid^="dossier-"]').filter({ hasText: numero }).click()
+  await page.getByTestId('bouton-approuver').click()
+  await expect(page.getByTestId('message-decision')).toContainText('approuvé')
+  // L'écran a fini de se recharger avant qu'on lise l'application des
+  // membres : les deux serveurs et ce test partagent un même PGlite, dont le
+  // multiplexeur peut mêler deux requêtes simultanées (server/db/index.ts).
+  // La validation, elle, est faite quand l'approbation répond — la relecture
+  // ne patiente que derrière ce banc d'essai.
+  await expect(page.getByTestId('deja-traite')).toBeVisible()
+
+  // Sans second geste de sa part : sa tontine est ouverte, et elle l'apprend.
+  await expect.poll(() => statutDe(membre, id)).toBe('open')
+  await expect.poll(async () => {
+    const reponse = await membre.request.get(`${APP_MEMBRE}/api/v1/me/notifications`)
+    const { items } = await reponse.json() as { items?: Array<{ type: string, url: string | null }> }
+    return items?.find(n => n.type === 'tontine_validee')?.url
+  }).toBe(`/app/tontine/${id}/membres`)
+
+  await contexteMembre.close()
+})
+
 test('un rejet exige un motif, et le motif reste visible', async ({ page, browser }) => {
   const contexteMembre = await browser.newContext(SANS_SESSION)
   const membre = await contexteMembre.newPage()

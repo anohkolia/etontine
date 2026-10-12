@@ -85,7 +85,6 @@ test('le parcours complet : du wizard sans canal jusqu’au canal choisi', async
   // n'a aucun canal, et doit pouvoir s'en sortir sans quitter l'application.
   await page.goto('/app/tontine/create')
   await waitForHydration(page)
-  await page.getByTestId('bouton-continuer').click()
   await page.getByTestId('champ-nom-tontine').fill('Tontine du marché')
   await page.getByTestId('bouton-continuer').click()
 

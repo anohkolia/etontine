@@ -6,12 +6,24 @@
  */
 const route = useRoute()
 const admin = useAdminSession()
+const alertes = useAlertesAdmin()
 
-const onglets = [
-  { to: '/dossiers', libelle: 'Dossiers', icone: 'lucide:folder-check' },
-  { to: '/abonnements', libelle: 'Abonnements', icone: 'lucide:receipt-text' },
-  { to: '/journal', libelle: 'Journal', icone: 'lucide:scroll-text' },
-]
+const onglets = computed(() => [
+  { to: '/organisateurs', libelle: 'Organisateurs', icone: 'lucide:user-plus', alertes: alertes.organisateurs.value },
+  { to: '/dossiers', libelle: 'Dossiers', icone: 'lucide:folder-check', alertes: 0 },
+  { to: '/abonnements', libelle: 'Abonnements', icone: 'lucide:receipt-text', alertes: 0 },
+  { to: '/journal', libelle: 'Journal', icone: 'lucide:scroll-text', alertes: 0 },
+])
+
+/**
+ * Le badge se relit à chaque navigation : un organisateur qui s'inscrit
+ * pendant qu'on examine un dossier doit se voir sans recharger la page.
+ */
+function relireAlertes() {
+  if (admin.connecte.value) alertes.rafraichir()
+}
+onMounted(relireAlertes)
+watch(() => route.path, relireAlertes)
 </script>
 
 <template>
@@ -49,6 +61,14 @@ const onglets = [
                 aria-hidden="true"
               />
               {{ onglet.libelle }}
+              <!-- Un nombre et un mot, pas une pastille de couleur seule (règle 10). -->
+              <span
+                v-if="onglet.alertes > 0"
+                class="tabular-nums rounded-full bg-late-surface px-2 py-0.5 text-xs font-bold text-late-ink"
+                :data-testid="`alertes-${onglet.libelle.toLowerCase()}`"
+              >
+                {{ onglet.alertes }}<span class="sr-only"> {{ onglet.alertes > 1 ? 'nouveaux' : 'nouveau' }}</span>
+              </span>
             </NuxtLink>
           </nav>
         </div>

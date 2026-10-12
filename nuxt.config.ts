@@ -1,6 +1,13 @@
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 
+/**
+ * Une révision par build, pour les pages que le service worker met en cache
+ * sans qu'elles soient des fichiers du build (voir `pwa.workbox`). Chaque
+ * déploiement les remet à jour, avec le JavaScript qu'elles appellent.
+ */
+const REVISION_DU_BUILD = Date.now().toString(36)
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   modules: [
@@ -37,6 +44,28 @@ export default defineNuxtConfig({
         // Le zoom n'est jamais bloqué : beaucoup de membres agrandissent le
         // texte, et une interface qui l'interdit leur est inutilisable.
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
+        // Le nom sous l'icône, sur iPhone et iPad. Sans lui, iOS propose le
+        // titre de la page ouverte — « Mes tontines — eTontine », tronqué.
+        { name: 'apple-mobile-web-app-title', content: 'eTontine' },
+      ],
+      // Les icônes que chaque plateforme va chercher hors du manifeste :
+      // l'iPhone et l'iPad l'ignorent et prennent `apple-touch-icon` — sans
+      // elle, l'écran d'accueil reçoit une capture réduite de la page —, les
+      // onglets prennent le favicon. Toutes sont tracées par
+      // `scripts/icones.ts`.
+      link: [
+        { rel: 'icon', href: '/favicon.ico', sizes: '48x48' },
+        { rel: 'icon', href: '/icones/icone.svg', type: 'image/svg+xml' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        // Le manifeste. Il a longtemps été construit sans qu'aucune page n'y
+        // renvoie : aucun navigateur ne proposait d'installer l'application.
+        // Posé ici, il est dans **toutes** les pages servies — la coquille de
+        // `/app` comprise, que le serveur ne rend pas et où un composant ne
+        // l'ajouterait qu'une fois le JavaScript chargé. En développement, le
+        // manifeste n'est pas servi : le lien n'y est pas posé non plus.
+        ...(process.env.NODE_ENV === 'production'
+          ? [{ rel: 'manifest' as const, href: '/manifest.webmanifest' }]
+          : []),
       ],
     },
   },
@@ -281,6 +310,10 @@ export default defineNuxtConfig({
   pwa: {
     registerType: 'autoUpdate',
     manifest: {
+      // L'identité de l'application installée. Elle valait déjà `start_url`
+      // par défaut : la poser telle quelle ne change rien aux installations
+      // existantes, et la fige si `start_url` bouge un jour.
+      id: '/app',
       name: 'eTontine',
       short_name: 'eTontine',
       description: 'La tontine de votre groupe, tenue au clair.',
@@ -296,10 +329,15 @@ export default defineNuxtConfig({
       // Le point d'entrée de l'application authentifiée, pas la landing :
       // quelqu'un qui installe l'application veut sa tontine, pas la vitrine.
       scope: '/',
+      categories: ['finance'],
+      // Tracées par `scripts/icones.ts`. La 1024 px « maskable » est pour Safari
+      // sur Mac : son Dock veut une icône pleine et opaque de cette taille, et
+      // retombe sinon sur la première lettre du titre.
       icons: [
-        { src: '/icones/icone-192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icones/icone-512.png', sizes: '512x512', type: 'image/png' },
+        { src: '/icones/icone-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icones/icone-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
         { src: '/icones/icone-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        { src: '/icones/icone-1024-maskable.png', sizes: '1024x1024', type: 'image/png', purpose: 'maskable' },
       ],
     },
     workbox: {
@@ -313,7 +351,22 @@ export default defineNuxtConfig({
       // c'est ce qui permet d'ouvrir l'application sans réseau et d'y saisir
       // une déclaration, qui partira au retour de la connexion.
       globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+      // … mais ni la coquille de `/app` ni l'aide ne sont des fichiers du
+      // build : le serveur les rend à la demande, et `globPatterns` ne les
+      // voyait pas. Faute de `/app` dans le cache, la retombée ci-dessous
+      // faisait échouer Workbox au démarrage du service worker — en silence,
+      // le reste étant déjà en cache — et l'application installée affichait la
+      // page d'erreur du navigateur dès que le réseau tombait.
+      // `scripts/verifier-bundle.ts` le vérifie désormais à chaque build.
+      additionalManifestEntries: [
+        { url: '/app', revision: REVISION_DU_BUILD },
+        { url: '/aide', revision: REVISION_DU_BUILD },
+      ],
       navigateFallback: '/app',
+      // Seules les adresses de l'application retombent sur sa coquille — c'est
+      // ce que le serveur y rend de toute façon. Les autres pages, rendues par
+      // le serveur — connexion, invitation, pages légales —, le restent.
+      navigateFallbackAllowlist: [/^\/app(?:[/?]|$)/],
       navigateFallbackDenylist: [/^\/api\//],
       runtimeCaching: [
         {
@@ -326,7 +379,10 @@ export default defineNuxtConfig({
       ],
     },
     client: {
-      installPrompt: true,
+      // L'invitation à installer est captée par `plugins/installation.client.ts`,
+      // pas par le module : le sien ne sert que Chrome et ses dérivés, et son
+      // « plus tard » était définitif — la proposition ne revenait jamais.
+      installPrompt: false,
     },
     devOptions: {
       // Le service worker en développement gêne les tests de bout en bout :

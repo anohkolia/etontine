@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration'
-import { canalDeclare, seConnecter, verifierIdentite } from './helpers/session'
+import { CODE_TEST, canalDeclare, emailDeTest, renseignerNom, seConnecter, verifierIdentite } from './helpers/session'
 import { numeroDeTest } from './helpers/telephone'
+import { adhesionDe, inscription, rattacherMembre, tontinePubliee } from './helpers/tontine'
 
 /** Monte une tontine publiée avec des membres, et renvoie son lien d'invitation. */
 async function tontineAvecLien(page: import('@playwright/test').Page) {
@@ -195,4 +196,138 @@ test('un membre géré qui confirme est rattaché, sans doublon, une fois le pr�
   expect(yao?.shares).toBe(2)
 
   await contexteYao.close()
+})
+
+/* ------------------------------------------------------------------ *
+ * S'inscrire par le lien : on ne rejoint une tontine que par lui
+ * ------------------------------------------------------------------ */
+
+test('sans compte, on s’inscrit depuis l’invitation, et la confirmation y ramène', async ({ page, browser }) => {
+  const { url } = await tontineAvecLien(page)
+  const chemin = new URL(url).pathname
+
+  const anonyme = await browser.newContext()
+  const visiteur = await anonyme.newPage()
+  await visiteur.goto(url)
+  await waitForHydration(visiteur)
+
+  await visiteur.getByTestId('lien-inscription-invitation').click()
+  await visiteur.waitForURL(u => u.pathname === '/inscription')
+  await waitForHydration(visiteur)
+  // L'écran sait d'où l'on vient, et le dit.
+  await expect(visiteur.getByTestId('inscription-par-invitation')).toBeVisible()
+
+  const numero = numeroDeTest()
+  await visiteur.getByTestId('champ-telephone').fill(numero)
+  await visiteur.getByTestId('champ-email').fill(emailDeTest(numero))
+  await visiteur.getByTestId('champ-code').fill(CODE_TEST)
+  await visiteur.getByTestId('champ-confirmation').fill(CODE_TEST)
+  await visiteur.getByTestId('bouton-inscription').click()
+
+  // Hors production, le lien parti par e-mail s'affiche : c'est lui qu'on suit.
+  await expect(visiteur.getByTestId('inscription-envoyee')).toBeVisible()
+  await visiteur.getByTestId('lien-dev-confirmer').click()
+
+  // Confirmé, et de retour sur l'invitation — connecté, cette fois. Avant, il
+  // atterrissait sur son profil, et le lien de la tontine était perdu.
+  await visiteur.waitForURL(u => u.pathname === chemin)
+  await waitForHydration(visiteur)
+  await expect(visiteur.getByTestId('bouton-rejoindre')).toContainText('Rejoindre')
+
+  await anonyme.close()
+})
+
+test('la connexion depuis une invitation garde le lien jusqu’à l’inscription', async ({ page, browser }) => {
+  const { url } = await tontineAvecLien(page)
+  const chemin = new URL(url).pathname
+
+  const anonyme = await browser.newContext()
+  const visiteur = await anonyme.newPage()
+  await visiteur.goto(url)
+  await waitForHydration(visiteur)
+  await visiteur.getByTestId('bouton-rejoindre').click()
+
+  await visiteur.waitForURL(u => u.pathname === '/login')
+  await waitForHydration(visiteur)
+  await visiteur.getByTestId('lien-inscription').click()
+
+  await visiteur.waitForURL(u => u.pathname === '/inscription')
+  await waitForHydration(visiteur)
+  expect(new URL(visiteur.url()).searchParams.get('redirect')).toBe(chemin)
+  await expect(visiteur.getByTestId('inscription-par-invitation')).toBeVisible()
+
+  await anonyme.close()
+})
+
+test('sans lien, l’inscription rappelle qu’on ne rejoint une tontine que par son lien', async ({ page }) => {
+  await page.goto('/inscription')
+  await waitForHydration(page)
+
+  await expect(page.getByTestId('inscription-organisateur')).toContainText('lien d’invitation')
+  await expect(page.getByTestId('inscription-par-invitation')).toHaveCount(0)
+})
+
+test('sans identité vérifiée, pas de lien d’invitation : l’écran le dit et mène à la vérification', async ({ page }) => {
+  await seConnecter(page)
+  await renseignerNom(page)
+  const creation = await page.request.post('/api/v1/tontines', { data: { name: 'Tontine des tantines' } })
+  const { id } = await creation.json() as { id: string }
+
+  // L'API refuse, quoi que montre l'écran — et dit à l'organisateur que
+  // c'est son identité qui manque.
+  const refus = await page.request.post(`/api/v1/tontines/${id}/invites`)
+  expect(refus.status()).toBe(403)
+  expect((await refus.json() as { error: { code: string } }).error.code).toBe('KYC_REQUIRED')
+
+  await page.goto(`/app/tontine/${id}/membres`)
+  await waitForHydration(page)
+
+  // Avant le clic, pas après : aucun bouton qui échouerait.
+  await expect(page.getByTestId('invitation-identite-requise')).toContainText('Vérifie ton identité pour pouvoir inviter des membres')
+  await expect(page.getByTestId('bouton-creer-lien')).toHaveCount(0)
+
+  await page.getByTestId('lien-verifier-identite-invitation').click()
+  await page.waitForURL(url => url.pathname === '/app/profil/identite')
+  await expect(page.getByTestId('motif-message')).toHaveText('Vérifie ton identité pour pouvoir inviter des membres.')
+  expect(new URL(page.url()).searchParams.get('redirect')).toBe(`/app/tontine/${id}/membres`)
+
+  // Vérifiée — hors production, d'office —, le lien se crée.
+  await verifierIdentite(page)
+  await page.goto(`/app/tontine/${id}/membres`)
+  await waitForHydration(page)
+  await expect(page.getByTestId('invitation-identite-requise')).toHaveCount(0)
+  await page.getByTestId('bouton-creer-lien').click()
+  await expect(page.getByTestId('lien-whatsapp')).toBeVisible()
+})
+
+test('un lien dont l’organisateur n’est pas vérifié ne s’ouvre pas : l’arrivant lit qu’il n’est pas encore actif', async ({ page, browser }) => {
+  // L'organisatrice est vérifiée : son lien s'ouvre, Koffi reprend son siège…
+  await inscription(page)
+  const numeroKoffi = numeroDeTest()
+  const { id, lien } = await tontinePubliee(page, [{ nom: 'Koffi N’Guessan', numero: numeroKoffi }])
+  const { contexte } = await rattacherMembre(browser, { president: page, id, lien }, numeroKoffi, 'Koffi', 'N’Guessan')
+  await contexte.close()
+
+  // … puis elle lui passe la présidence. L'organisateur, c'est désormais lui,
+  // et personne n'a vu sa pièce.
+  const koffi = await adhesionDe(page, id, 'Koffi N’Guessan')
+  const transfert = await page.request.fetch(`/api/v1/tontines/${id}/members/${koffi}`, {
+    method: 'PATCH',
+    data: { role: 'president' },
+  })
+  expect(transfert.ok()).toBe(true)
+
+  const anonyme = await browser.newContext()
+  const visiteur = await anonyme.newPage()
+  await visiteur.goto(lien)
+  await waitForHydration(visiteur)
+
+  const inactif = visiteur.getByTestId('lien-inactif')
+  await expect(inactif).toContainText('Ce lien n’est pas encore actif')
+  await expect(inactif).toContainText('faire vérifier son identité')
+  // Rien de la tontine, et rien pour la rejoindre.
+  await expect(visiteur.getByTestId('nom-tontine')).toHaveCount(0)
+  await expect(visiteur.getByTestId('bouton-rejoindre')).toHaveCount(0)
+
+  await anonyme.close()
 })

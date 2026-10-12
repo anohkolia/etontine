@@ -149,10 +149,25 @@ describe('envoi et messages', () => {
     expect(messages.reinitialisation('J').text).toMatch(/^https:\/\/tontine\.ci\/reinitialiser\?token=J$/m)
   })
 
+  it('le lien de confirmation d’un membre invité ramène sur son invitation, encodé', () => {
+    vi.stubEnv('NUXT_PUBLIC_SITE_URL', 'https://tontine.ci')
+    const { text } = messages.confirmation('JETON', '/join/Zx9_kQ2-mN4pL7wR1tY6vA')
+    expect(text).toMatch(/^https:\/\/tontine\.ci\/confirmer\?token=JETON&redirect=%2Fjoin%2FZx9_kQ2-mN4pL7wR1tY6vA$/m)
+  })
+
+  it('l’alerte « nouvel organisateur » cite le back-office quand son adresse est connue', () => {
+    vi.stubEnv('NUXT_ADMIN_SITE_URL', 'https://admin.tontine.ci/')
+    expect(messages.nouvelOrganisateur('3456').text).toMatch(/^https:\/\/admin\.tontine\.ci\/organisateurs$/m)
+
+    vi.stubEnv('NUXT_ADMIN_SITE_URL', '')
+    expect(messages.nouvelOrganisateur('3456').text).not.toMatch(/https?:\/\//)
+  })
+
   it('ne parle jamais d’argent : une boîte mail se partage comme un téléphone', () => {
     const tous = [
       messages.confirmation('t'), messages.changementEmail('t'), messages.reinitialisation('t'),
       messages.compteVerrouille('t'), messages.dejaInscrit(), messages.numeroChange('0001'), messages.emailChange('a@b.c'),
+      messages.confirmation('t', '/join/Zx9_kQ2-mN4pL7wR1tY6vA'), messages.nouvelOrganisateur('0001'),
     ]
     for (const m of tous) expect(`${m.subject} ${m.text}`).not.toMatch(/FCFA|XOF|\d{2,3}[ \u00A0\u202F]\d{3}/)
   })

@@ -2,7 +2,7 @@
 /**
  * Vérification d'identité — palier KYC 2.
  *
- * Exigé pour publier une tontine, et pour choisir l'accès « ouvert ». Deux
+ * Exigé pour valider une tontine, et pour en inviter les membres. Deux
  * pièces, déposées différemment parce qu'elles ne prouvent pas la même chose :
  *
  * - la **pièce d'identité** est un document existant, souvent déjà scanné —
@@ -56,6 +56,31 @@ const refuse = computed(() =>
 )
 const motifRefus = computed(() => session.user?.kycRejectionReason ?? null)
 const complet = computed(() => piece.value !== null && selfie.value !== null)
+
+/**
+ * On arrive ici depuis « Confirmer » une tontine en brouillon, ou depuis
+ * l'invitation de ses membres : l'écran dit d'abord pourquoi. Sans ce mot,
+ * l'organisateur tombait sur un formulaire de pièces sans savoir ce qui l'y
+ * avait mené. Le `redirect` le ramène ensuite là d'où il vient.
+ *
+ * Pour une tontine confirmée, il apprend aussi qu'il n'aura pas à revenir la
+ * confirmer : le serveur a retenu sa demande, et la validera à l'approbation.
+ */
+const motif = computed<{ id: MotifIdentite, message: string, suite: string | null } | null>(() => {
+  if (dejaVerifie.value) return null
+  switch (route.query.motif) {
+    case MOTIF_VALIDER_TONTINE:
+      return {
+        id: MOTIF_VALIDER_TONTINE,
+        message: t('profil.identite.verifie_ton_identite_pour'),
+        suite: t('profil.identite.elle_sera_validee_automatiquement'),
+      }
+    case MOTIF_INVITER:
+      return { id: MOTIF_INVITER, message: t('profil.identite.verifie_ton_identite_pour_2'), suite: null }
+    default:
+      return null
+  }
+})
 
 /**
  * Un PDF part tel quel : on ne sait pas le compresser dans le navigateur, et le
@@ -157,6 +182,27 @@ useHead({ title: t('profil.identite.verifier_mon_identite_etontine') })
 
 <template>
   <div class="flex flex-col gap-5">
+    <div
+      v-if="motif"
+      role="status"
+      class="flex items-start gap-2 rounded-control bg-late-surface p-3 text-sm text-late-ink"
+      :data-testid="`motif-${motif.id}`"
+    >
+      <Icon
+        name="lucide:shield-alert"
+        size="1rem"
+        class="mt-0.5 shrink-0"
+        aria-hidden="true"
+      />
+      <p class="flex flex-col gap-1">
+        <strong
+          class="font-semibold"
+          data-testid="motif-message"
+        >{{ motif.message }}</strong>
+        <span v-if="motif.suite">{{ motif.suite }}</span>
+      </p>
+    </div>
+
     <p class="text-sm text-ink-muted">
       {{ $t('profil.identite.une_piece_d_identite') }}
     </p>

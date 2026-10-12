@@ -7,6 +7,7 @@ import { apiError } from '../utils/errors.ts'
 import { isDevOrTest } from '../utils/env.ts'
 import { hashPin, verifyPin } from '../utils/pin.ts'
 import { envoyerEmail, messages } from './email.ts'
+import { alerterAdministrateurs } from './organisateurs.ts'
 
 type Db = ReturnType<typeof useDb>
 
@@ -225,10 +226,20 @@ async function jetonValide(db: Db, token: string, purposes: EmailToken['purpose'
  *   compte existe sur ce numéro ;
  * - e-mail déjà pris par un autre compte confirmé : rien n'est créé, et
  *   l'adresse reçoit un rappel qu'elle a déjà un compte.
+ *
+ * **Organisateur ou membre.** On ne rejoint une tontine que par le lien de son
+ * organisateur : sans `invitation`, le compte vient donc en organiser une, et
+ * il est marqué comme tel — le back-office sera alerté à la confirmation. Avec
+ * une invitation, c'est un membre, et le lien de confirmation le ramène sur
+ * l'invitation au lieu de le laisser sur son profil.
+ *
+ * Le jeton d'invitation n'est pas vérifié ici : il ne donne aucun droit, il
+ * dit seulement d'où l'on vient. Un lien expiré entre-temps se signale sur la
+ * page de l'invitation, où l'on peut en redemander un.
  */
 export async function inscrire(
   db: Db,
-  input: { phone: string, email: string, code: string },
+  input: { phone: string, email: string, code: string, invitation?: string },
   maintenant = new Date(),
 ): Promise<ResultatDemande> {
   const [parNumero] = await db.select().from(users).where(eq(users.phone, input.phone)).limit(1)
@@ -249,11 +260,15 @@ export async function inscrire(
     await db.update(users).set({ email: null }).where(eq(users.id, parEmail.id))
   }
 
+  // Une reprise suit la dernière inscription : venir cette fois par un lien
+  // d'invitation fait du compte un membre, et l'inverse un organisateur.
+  const organizerSince = input.invitation ? null : maintenant
+
   let userId: string
   if (parNumero) {
     userId = parNumero.id
     await db.update(users)
-      .set({ email: input.email, pinHash: hashPin(input.code), failedLogins: 0, lockedUntil: null })
+      .set({ email: input.email, pinHash: hashPin(input.code), failedLogins: 0, lockedUntil: null, organizerSince })
       .where(eq(users.id, userId))
   }
   else {
@@ -264,10 +279,15 @@ export async function inscrire(
       email: input.email,
       pinHash: hashPin(input.code),
       kycLevel: 0,
+      organizerSince,
     })
   }
 
-  return await emettreJeton(db, userId, 'confirm_email', input.email, CONFIRMATION_VALIDITE_MS, messages.confirmation, maintenant)
+  const suite = input.invitation ? `/join/${input.invitation}` : undefined
+  return await emettreJeton(
+    db, userId, 'confirm_email', input.email, CONFIRMATION_VALIDITE_MS,
+    token => messages.confirmation(token, suite), maintenant,
+  )
 }
 
 /**
@@ -309,6 +329,14 @@ export async function confirmerEmail(db: Db, token: string, maintenant = new Dat
     // L'ancienne adresse l'apprend : c'est là que quelqu'un qui a perdu la
     // main sur son compte le découvre.
     await envoyerEmail({ to: ancienneAdresse, ...messages.emailChange(jeton.email) })
+  }
+
+  // Un organisateur vient d'arriver : c'est **maintenant** que son compte
+  // existe, et maintenant que le back-office l'apprend. Une seule fois — un
+  // second lien de confirmation, ou un changement d'adresse plus tard, ne
+  // réalerte pas.
+  if (jeton.purpose === 'confirm_email' && !compte.emailVerifiedAt && compte.organizerSince) {
+    await alerterAdministrateurs(db, compte)
   }
 
   return { userId: compte.id, isNewUser: jeton.purpose === 'confirm_email' && !compte.firstName }

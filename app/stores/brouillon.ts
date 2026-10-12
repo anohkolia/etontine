@@ -10,10 +10,13 @@ import { defineStore } from 'pinia'
  *
  * Ce qui est persisté ici sert exactement à une chose : rouvrir l'application
  * sur l'étape où l'on s'était arrêté, au lieu de repartir du début.
+ *
+ * Les étapes vont de 1 à 5 : l'étape 0, le choix d'accès, a disparu avec
+ * l'accès « ouvert », sans décaler les autres.
  */
 export const useBrouillonStore = defineStore('brouillon-tontine', () => {
   const tontineId = ref<string | null>(null)
-  const etape = ref(0)
+  const etape = ref(1)
   /** Nombre de membres envisagé — sert au simulateur, pas au calcul réel. */
   const membresPrevus = ref(12)
 
@@ -29,7 +32,7 @@ export const useBrouillonStore = defineStore('brouillon-tontine', () => {
 
   function terminer() {
     tontineId.value = null
-    etape.value = 0
+    etape.value = 1
     membresPrevus.value = 12
   }
 

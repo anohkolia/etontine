@@ -68,6 +68,13 @@ export const emailAdresse = z
 export const jetonEmail = z.string().regex(/^[A-Za-z0-9_-]{32,64}$/, 'Lien invalide')
 
 /**
+ * Jeton d'un lien d'invitation (`/join/<jeton>`). Il finit dans l'adresse du
+ * lien de confirmation : la forme est donc bornée à l'alphabet base64url, rien
+ * qui puisse sortir du chemin.
+ */
+export const jetonInvitation = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, 'Lien d’invitation invalide')
+
+/**
  * Adresse d'une capture déposée par `POST /uploads/proof`.
  *
  * Le dépôt renvoie un chemin **relatif** à l'application
@@ -89,7 +96,13 @@ export const shortRef = z.string().regex(/^TON-[A-Z0-9]{4}$/)
 export const paymentChannel = z.enum(['wave', 'orange', 'mtn', 'moov', 'cash'])
 export const collectionProvider = z.enum(['wave', 'orange', 'mtn', 'moov'])
 export const frequency = z.enum(['daily', 'weekly', 'biweekly', 'monthly'])
-export const tontineAccess = z.enum(['private', 'open'])
+/**
+ * Une tontine ne se rejoint que par le lien de son organisateur : l'accès
+ * « ouvert » — visible de tous, n'importe qui demande à entrer — a été retiré.
+ * Le champ reste pour les clients déjà installés, qui envoient encore
+ * `private` ; `open` est refusé.
+ */
+export const tontineAccess = z.enum(['private'])
 export const rotationMode = z.enum(['draw', 'fixed'])
 export const feesBearer = z.enum(['member', 'tontine'])
 export const membershipRole = z.enum(['president', 'treasurer', 'auditor', 'member'])
@@ -194,11 +207,17 @@ export const ROUND_TRANSITIONS = {
  * Le compte n'existe vraiment qu'une fois le lien reçu par e-mail cliqué :
  * sans cette étape, n'importe qui pourrait s'inscrire avec le numéro d'un
  * autre et s'asseoir à sa place dans une tontine.
+ *
+ * `invitation` : le jeton du lien par lequel on arrive. On ne rejoint une
+ * tontine que par le lien de son organisateur ; qui s'inscrit **sans** lien
+ * vient donc en organiser une, et le back-office en est alerté. Avec un lien,
+ * le compte est celui d'un membre, et la confirmation ramène sur l'invitation.
  */
 export const registerInput = z.object({
   phone: phoneCI,
   email: emailAdresse,
   code: codeAcces,
+  invitation: jetonInvitation.optional(),
 })
 
 export const loginInput = z.object({ phone: phoneCI, code: codeSaisi })

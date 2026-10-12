@@ -32,6 +32,17 @@ interface Apercu {
 
 const { data: apercu, error, status, refresh } = await useFetch<Apercu>(`/api/v1/invites/${token}`)
 
+/**
+ * Le lien existe, mais son organisateur n'a pas encore fait vérifier son
+ * identité : il ne s'ouvre pas. Ce n'est ni un lien mort ni une panne — c'est
+ * « pas encore », et l'arrivant doit le lire ainsi plutôt que d'en redemander
+ * un qui ne marcherait pas mieux.
+ */
+const organisateurNonVerifie = computed(() =>
+  error.value?.statusCode === 403
+  && (error.value.data as { error?: { field?: string } } | undefined)?.error?.field === 'organizer',
+)
+
 const adhesion = ref<'repos' | 'envoi' | 'faite'>('repos')
 
 /**
@@ -119,6 +130,14 @@ useHead(() => ({
         :title="$t('public.join.ce_lien_n_est')"
         :description="$t('public.join.il_a_peut_etre')"
         icon="lucide:link-2-off"
+      />
+
+      <EmptyState
+        v-else-if="organisateurNonVerifie"
+        :title="$t('public.join.ce_lien_n_est_2')"
+        :description="$t('public.join.l_organisateur_de_cette')"
+        icon="lucide:shield-alert"
+        data-testid="lien-inactif"
       />
 
       <ErrorState
@@ -273,6 +292,20 @@ useHead(() => ({
           >
             {{ $t('public.join.aller_a_mes_tontines') }}
           </NuxtLink>
+
+          <!-- Sans compte, on s'inscrit **par ce lien** : le compte est alors
+               celui d'un membre, et la confirmation ramène ici. -->
+          <p
+            v-if="session.chargee && !session.connecte && adhesion !== 'faite'"
+            class="mt-3 text-center text-sm text-ink-muted"
+          >
+            {{ $t('public.join.pas_encore_de_compte') }}
+            <NuxtLink
+              :to="{ path: '/inscription', query: { invitation: token } }"
+              class="inline-flex min-h-touch items-center font-semibold text-brand underline underline-offset-4"
+              data-testid="lien-inscription-invitation"
+            >{{ $t('public.join.creer_mon_compte') }}</NuxtLink>
+          </p>
         </div>
       </template>
     </main>
@@ -282,7 +315,8 @@ useHead(() => ({
 <!--
   États d'écran (règle 14) :
   · chargement — squelette pendant la lecture de l'aperçu
-  · vide       — EmptyState quand le lien a expiré ou est épuisé
+  · vide       — EmptyState quand le lien a expiré ou est épuisé, et quand
+                 il n'est pas encore actif — organisateur non vérifié
   · erreur     — ErrorState avec reprise, distinct du lien invalide
   · hors-ligne — <OfflineBanner> en tête de page
   · contenu    — l'aperçu et la phrase d'engagement

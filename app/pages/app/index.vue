@@ -43,6 +43,8 @@ interface TontineDuTableau {
   potCollected: number
   potExpected: number
   beneficiaryName: string | null
+  /** « Confirmer » a été pressé avant la vérification d'identité : la demande attend. */
+  publishRequestedAt: string | null
 }
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
@@ -108,6 +110,21 @@ const enVedette = computed(() => tontines.value.find(t => t.roundIndex !== null)
 const enCours = computed(() => tontines.value.filter(t => t.status !== 'closed'))
 const terminees = computed(() => tontines.value.filter(t => t.status === 'closed'))
 const termineesOuvertes = ref(false)
+
+/**
+ * Un brouillon se confirme d'ici aussi : c'est là que l'organisateur le
+ * retrouve. Validé d'office si son identité est vérifiée, sinon direction la
+ * vérification, qui ramène sur la tontine.
+ */
+const { confirmer, enCours: confirmationEnCours, erreur: erreurConfirmation } = useConfirmationTontine()
+
+/** Un brouillon confirmé qui n'attend plus que la vérification d'identité de son président. */
+function validationDemandee(t: TontineDuTableau): boolean {
+  return t.status === 'draft'
+    && t.myRole === 'president'
+    && Boolean(t.publishRequestedAt)
+    && (session.user?.kycLevel ?? 0) < 2
+}
 
 async function charger() {
   etat.value = 'chargement'
@@ -440,8 +457,18 @@ useHead({ title: t('accueil.mes_tontines_etontine') })
               >
                 {{ $t('accueil.cotiser') }}
               </NuxtLink>
+              <!-- Un brouillon n'a aucune cotisation à confirmer : son
+                   « Confirmer » à lui, c'est la validation de la tontine. -->
+              <Button
+                v-if="tontine.status === 'draft' && tontine.myRole === 'president'"
+                :label="confirmationEnCours === tontine.id ? $t('commun.confirmation_en_cours') : $t('commun.confirmer')"
+                :disabled="confirmationEnCours === tontine.id"
+                class="bg-brand text-sm text-brand-ink hover:bg-brand-strong sm:flex-1"
+                :data-testid="`action-confirmer-tontine-${tontine.id}`"
+                @click="confirmer(tontine.id)"
+              />
               <NuxtLink
-                v-if="tontine.myRole === 'treasurer' || tontine.myRole === 'president'"
+                v-else-if="tontine.status !== 'draft' && (tontine.myRole === 'treasurer' || tontine.myRole === 'president')"
                 :to="`/app/tontine/${tontine.id}/confirmations`"
                 class="min-h-touch inline-flex items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold text-ink sm:flex-1"
               >
@@ -454,6 +481,36 @@ useHead({ title: t('accueil.mes_tontines_etontine') })
                 {{ $t('accueil.membres') }}
               </NuxtLink>
             </div>
+
+            <p
+              v-if="validationDemandee(tontine)"
+              role="status"
+              class="flex items-start gap-2 rounded-control bg-declared-surface p-3 text-sm text-declared-ink"
+              :data-testid="`validation-demandee-${tontine.id}`"
+            >
+              <Icon
+                name="lucide:hourglass"
+                size="1rem"
+                class="mt-0.5 shrink-0"
+                aria-hidden="true"
+              />
+              {{ $t('accueil.validation_demandee_en') }}
+            </p>
+
+            <p
+              v-if="erreurConfirmation?.tontineId === tontine.id"
+              role="alert"
+              class="flex items-start gap-2 rounded-control bg-disputed-surface p-3 text-sm text-disputed-ink"
+              :data-testid="`erreur-confirmation-${tontine.id}`"
+            >
+              <Icon
+                name="lucide:octagon-alert"
+                size="1rem"
+                class="mt-0.5 shrink-0"
+                aria-hidden="true"
+              />
+              {{ erreurConfirmation.message }}
+            </p>
           </li>
         </ul>
 

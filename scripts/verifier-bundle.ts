@@ -13,6 +13,11 @@ import { join } from 'node:path'
  * 2. **Les budgets de poids** (règle 15) : moins de 180 Ko de JS initial,
  *    moins de 250 Ko au premier chargement hors images.
  *
+ * Et ce qui rend l'application installable sur chaque plateforme : le
+ * manifeste, **lié depuis les pages** — il a longtemps été construit sans
+ * qu'aucune page n'y renvoie, et rien ne le signalait —, ses icônes à la
+ * taille annoncée, l'icône de l'iPhone.
+ *
  * Le coût mesuré est le coût **bloquant** : `modulepreload`, feuilles de style
  * et `preload`. Les `prefetch` partent au repos, après le rendu, et les compter
  * donnerait une image faussement alarmante.
@@ -161,12 +166,17 @@ if (manifestes.length === 0) {
 }
 else {
   const manifeste = JSON.parse(readFileSync(manifestes[0]!, 'utf8')) as {
+    id?: string
     name?: string
     short_name?: string
     display?: string
     start_url?: string
-    icons?: Array<{ sizes?: string, purpose?: string }>
+    icons?: Array<{ src?: string, sizes?: string, purpose?: string }>
   }
+
+  // Sans identité propre, une installation se confond avec la suivante dès
+  // que `start_url` bouge.
+  if (!manifeste.id) echecs.push('Le manifeste n’a pas d’id.')
 
   if (manifeste.display !== 'standalone') {
     echecs.push(`display vaut « ${manifeste.display} » : l’installation n’ouvrira pas en application.`)
@@ -187,8 +197,76 @@ else {
   if (!(manifeste.icons ?? []).some(i => i.purpose === 'maskable')) {
     echecs.push('Aucune icône « maskable » : Android encadrera l’icône dans un carré blanc.')
   }
+  // Safari sur Mac veut une icône pleine de 1024 px pour le Dock ; sans elle,
+  // il dessine la première lettre du titre.
+  if (!(manifeste.icons ?? []).some(i => i.purpose === 'maskable' && i.sizes === '1024x1024')) {
+    echecs.push('Aucune icône « maskable » de 1024 px : le Dock de Safari sur Mac n’aura pas la sienne.')
+  }
+
+  // Chaque icône annoncée existe, à la taille annoncée : un nom changé d'un
+  // côté seulement, et l'installation se fait sans icône, sans que rien échoue.
+  for (const icone of manifeste.icons ?? []) {
+    const fichier = join(RACINE, icone.src ?? '')
+    if (!icone.src || !existsSync(fichier)) {
+      echecs.push(`Icône ${icone.src} annoncée par le manifeste, absente du build.`)
+      continue
+    }
+    const png = readFileSync(fichier)
+    const taille = `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`
+    if (taille !== icone.sizes) echecs.push(`Icône ${icone.src} : ${taille}, le manifeste annonce ${icone.sizes}.`)
+  }
 
   console.info(`Manifeste                   : ${manifeste.name} — ${(manifeste.icons ?? []).length} icônes`)
+}
+
+// ---- 5. Ce que les pages disent aux navigateurs ----
+// La page d'accueil est pré-rendue : ses balises sont celles que lisent
+// Chrome pour proposer l'installation, et l'iPhone pour l'ajouter à l'écran
+// d'accueil.
+const accueil = join(RACINE, 'index.html')
+if (existsSync(accueil)) {
+  const html = readFileSync(accueil, 'utf8')
+  const attendus: Array<[RegExp, string]> = [
+    [/<link[^>]*rel="manifest"/, 'aucun <link rel="manifest"> : aucun navigateur ne proposera d’installer l’application.'],
+    [/<link[^>]*rel="apple-touch-icon"/, 'aucune apple-touch-icon : l’iPhone mettrait une capture de la page sur l’écran d’accueil.'],
+  ]
+  for (const [motif, defaut] of attendus) {
+    if (!motif.test(html)) echecs.push(`Page d’accueil : ${defaut}`)
+  }
+  // Et les deux liens mènent quelque part. L'ordre des attributs n'est pas
+  // garanti : on isole la balise, puis son `href`.
+  for (const rel of ['manifest', 'apple-touch-icon']) {
+    const balise = new RegExp(`<link[^>]*rel="${rel}"[^>]*>`).exec(html)?.[0]
+    const cible = balise ? /href="([^"]+)"/.exec(balise)?.[1] : undefined
+    if (cible && !existsSync(join(RACINE, cible))) echecs.push(`Page d’accueil : ${rel} mène à ${cible}, absent du build.`)
+  }
+}
+else {
+  echecs.push('Page d’accueil absente du build : son pré-rendu n’a pas eu lieu.')
+}
+
+// ---- 6. Le service worker ouvre l'application hors ligne ----
+// La retombée des navigations doit désigner une adresse **du cache** : sinon
+// Workbox lève `non-precached-url` au démarrage du service worker — en
+// silence, après avoir mis le reste en cache —, et l'application installée
+// affiche la page d'erreur du navigateur dès que le réseau tombe. Ce fut le
+// cas : `/app` n'est pas un fichier du build, le serveur la rend à la demande.
+const serviceWorker = join(RACINE, 'sw.js')
+if (existsSync(serviceWorker)) {
+  const code = readFileSync(serviceWorker, 'utf8')
+  const enCache = new Set([...code.matchAll(/url:"([^"]+)"/g)].map(m => `/${m[1]!.replace(/^\//, '')}`))
+  const retombee = /createHandlerBoundToURL\("([^"]+)"\)/.exec(code)?.[1]
+  if (retombee && !enCache.has(retombee)) {
+    echecs.push(`Le service worker retombe sur ${retombee}, absente de son cache : l’application ne s’ouvre pas hors ligne.`)
+  }
+  // L'application, et l'aide — promise consultable sans réseau.
+  for (const page of ['/app', '/aide']) {
+    if (!enCache.has(page)) echecs.push(`${page} n’est pas dans le cache du service worker : elle ne s’ouvre pas hors ligne.`)
+  }
+  console.info(`Hors ligne                  : retombée sur ${retombee ?? '—'}, ${enCache.size} adresses en cache`)
+}
+else {
+  echecs.push('Aucun service worker dans le build : rien ne s’ouvre hors ligne.')
 }
 
 if (echecs.length > 0) {

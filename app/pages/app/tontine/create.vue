@@ -6,21 +6,27 @@ import { tontineDraftInput, tontineFinanceInput, tontineRulesInput } from '#shar
 /**
  * Wizard de création d'une tontine.
  *
- * Six écrans, conformément à docs/cahier-des-charges.md § Module 3 : le choix
- * d'accès (étape 0) précède les cinq étapes de configuration. Le backlog parle
- * de « 5 étapes » — l'écart est signalé, la spécification détaillée fait foi.
+ * Cinq écrans, numérotés de 1 à 5. Le cahier des charges (§ Module 3) en
+ * prévoyait un sixième en tête, l'étape 0, pour choisir entre une tontine sur
+ * invitation et une tontine « ouverte ». L'accès ouvert a été retiré — on ne
+ * rejoint une tontine que par le lien de son organisateur —, et l'étape avec
+ * lui : un écran sans autre choix qu'une seule case cochée d'avance n'est pas
+ * une étape. La numérotation, elle, est restée : un brouillon gardé par le
+ * navigateur rouvre ainsi sur le même écran qu'avant.
  *
  * **Le brouillon vit côté serveur**, enregistré à chaque étape. Le magasin
  * persisté ne retient que la position dans le wizard : de l'état d'interface,
  * jamais un réglage financier (règle 12).
  */
-// Palier 1 pour ouvrir le wizard, palier 2 pour publier : voir la note de
+// Palier 1 pour ouvrir le wizard, palier 2 pour confirmer : voir la note de
 // server/api/v1/tontines/index.post.ts sur la contradiction de spécification.
 definePageMeta({ layout: 'app', middleware: ['auth', 'kyc-palier'], kycLevel: 1 })
 const { t } = useI18n()
 
 const brouillon = useBrouillonStore()
-const session = useSessionStore()
+// Un brouillon gardé par le navigateur sur l'ancienne étape 0 — le choix
+// d'accès, retiré depuis — rouvre sur la première étape qui existe.
+if (brouillon.etape < 1) brouillon.etape = 1
 const { format } = useMoney()
 const { phrase, potParTour } = useSimulateur()
 
@@ -28,9 +34,11 @@ const { phrase, potParTour } = useSimulateur()
 const EMOJIS = TONTINE_EMOJIS
 const seuilAlerte = useRuntimeConfig().public.potAlertThreshold as number
 
+/** Les écrans, de l'étape 1 à l'étape 5 : `ETAPES[etape - 1]`. */
 const ETAPES = [
-  t('tontine.create.acces'), t('tontine.create.informations'), t('tontine.create.argent'), t('tontine.create.ordre_de_passage'), t('tontine.create.regles'), t('tontine.create.recapitulatif'),
+  t('tontine.create.informations'), t('tontine.create.argent'), t('tontine.create.ordre_de_passage'), t('tontine.create.regles'), t('tontine.create.recapitulatif'),
 ] as const
+const DERNIERE_ETAPE = ETAPES.length
 
 const etat = ref<'chargement' | 'contenu' | 'erreur'>('chargement')
 const enregistrement = ref(false)
@@ -78,7 +86,6 @@ async function etapeValide(): Promise<boolean> {
 
 /** Les réglages en cours de saisie. Le serveur en garde la version qui fait foi. */
 const form = reactive({
-  access: 'private' as 'private' | 'open',
   name: '',
   emoji: null as TontineEmoji | null,
   description: '',
@@ -106,9 +113,6 @@ interface Canal {
   holderName: string
 }
 const canaux = ref<Canal[]>([])
-
-/** Le palier 2 est exigé pour publier une tontine ouverte. */
-const peutOuvrir = computed(() => (session.user?.kycLevel ?? 0) >= 2)
 
 const simulation = computed(() =>
   phrase(form.shareAmount, brouillon.membresPrevus, form.frequency),
@@ -170,8 +174,12 @@ async function charger() {
     if (brouillon.tontineId) {
       try {
         const t = await $fetch<Record<string, unknown>>(`/api/v1/tontines/${brouillon.tontineId}`)
+        // Confirmée entre-temps — depuis sa page ou depuis l'accueil : ce
+        // n'est plus un brouillon, le wizard repart d'une tontine neuve au
+        // lieu de proposer de valider une seconde fois ce qui l'est déjà.
+        if (t.status !== 'draft') throw new Error('plus un brouillon')
         Object.assign(form, {
-          access: t.access, name: t.name, description: t.description ?? '',
+          name: t.name, description: t.description ?? '',
           emoji: t.emoji ?? null,
           locality: t.locality ?? '', shareAmount: t.shareAmount, frequency: t.frequency,
           startDate: t.startDate, rotationMode: t.rotationMode, feesBearer: t.feesBearer,
@@ -181,7 +189,7 @@ async function charger() {
         })
       }
       catch {
-        // Brouillon disparu côté serveur : on repart proprement.
+        // Brouillon disparu ou déjà confirmé : on repart proprement.
         brouillon.terminer()
       }
     }
@@ -202,11 +210,6 @@ async function suivant() {
   if (!(await etapeValide())) return
   enregistrement.value = true
   try {
-    if (brouillon.etape === 0) {
-      brouillon.etape = 1
-      return
-    }
-
     if (!brouillon.tontineId) {
       const { id } = await $fetch<{ id: string }>('/api/v1/tontines', {
         method: 'POST',
@@ -215,7 +218,6 @@ async function suivant() {
           description: form.description || undefined,
           emoji: form.emoji ?? undefined,
           locality: form.locality || undefined,
-          access: form.access,
         },
       })
       brouillon.demarrer(id)
@@ -227,7 +229,7 @@ async function suivant() {
       method: 'PATCH',
       body: corpsDeLEtape(),
     })
-    brouillon.etape = Math.min(brouillon.etape + 1, ETAPES.length - 1)
+    brouillon.etape = Math.min(brouillon.etape + 1, DERNIERE_ETAPE)
   }
   catch (e) {
     erreur.value = message(e)
@@ -246,7 +248,6 @@ function corpsDeLEtape(): Record<string, unknown> {
         description: form.description || null,
         emoji: form.emoji,
         locality: form.locality || null,
-        access: form.access,
       }
     case 2:
       return {
@@ -270,19 +271,29 @@ function corpsDeLEtape(): Record<string, unknown> {
   }
 }
 
-async function publier() {
+/**
+ * « Confirmer » : la tontine est validée d'office si l'identité de
+ * l'organisateur est vérifiée ; sinon, direction la vérification, qui ramène
+ * sur la tontine. Le brouillon est déjà enregistré côté serveur à chaque
+ * étape : il ne se perd ni dans un cas ni dans l'autre.
+ */
+const { confirmer, erreur: erreurConfirmation } = useConfirmationTontine()
+
+async function confirmerTontine() {
+  if (!brouillon.tontineId) return
   erreur.value = null
   erreurCode.value = null
   enregistrement.value = true
   try {
-    await $fetch(`/api/v1/tontines/${brouillon.tontineId}/publish`, { method: 'POST' })
-    const id = brouillon.tontineId
+    const issue = await confirmer(brouillon.tontineId)
+    if (issue === 'refusee') {
+      erreur.value = erreurConfirmation.value?.message ?? null
+      return
+    }
+    // Validée, ou partie attendre la vérification d'identité — son bouton
+    // « Confirmer » l'attend alors sur la page de la tontine. Le wizard n'a
+    // plus à la rouvrir : « Créer une tontine » en commencera une neuve.
     brouillon.terminer()
-    await navigateTo(`/app/tontine/${id}/membres`)
-  }
-  catch (e) {
-    erreur.value = message(e)
-    erreurCode.value = code(e)
   }
   finally {
     enregistrement.value = false
@@ -322,11 +333,11 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
         >
           <span
             class="block h-1.5 rounded-full transition-colors"
-            :class="i <= brouillon.etape ? 'bg-brand' : 'bg-surface-sunken'"
+            :class="i < brouillon.etape ? 'bg-brand' : 'bg-surface-sunken'"
           />
           <span
             class="mt-1 block truncate text-[10px] font-semibold"
-            :class="i <= brouillon.etape ? 'text-brand' : 'text-ink-subtle'"
+            :class="i < brouillon.etape ? 'text-brand' : 'text-ink-subtle'"
           >{{ nom }}</span>
         </li>
       </ol>
@@ -334,7 +345,7 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
         class="text-sm text-ink-muted"
         data-testid="etape-courante"
       >
-        {{ $t('tontine.create.etape_p0_sur_p1', { p0: brouillon.etape + 1, p1: ETAPES.length, p2: ETAPES[brouillon.etape] }) }}
+        {{ $t('tontine.create.etape_p0_sur_p1', { p0: brouillon.etape, p1: DERNIERE_ETAPE, p2: ETAPES[brouillon.etape - 1] }) }}
       </p>
     </header>
 
@@ -351,83 +362,9 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
     />
 
     <template v-else>
-      <!-- Étape 0 — Type d'accès -->
-      <section
-        v-if="brouillon.etape === 0"
-        class="flex flex-col gap-3"
-        data-testid="etape-acces"
-      >
-        <label class="flex min-h-touch items-start gap-3 card-surface p-4">
-          <input
-            v-model="form.access"
-            type="radio"
-            value="private"
-            class="mt-1 size-5 shrink-0 accent-brand"
-            data-testid="acces-prive"
-          >
-          <span>
-            <span class="font-medium text-ink">{{ $t('tontine.create.tontine_privee') }}</span>
-            <span class="block text-sm text-ink-muted">
-              {{ $t('tontine.create.sur_invitation_personne_ne') }}
-            </span>
-          </span>
-        </label>
-
-        <!-- Grisée, jamais masquée : l'organisateur doit savoir que l'option
-           existe et ce qu'il faut pour y accéder (acceptation T10).
-
-           Elle reste grisée **pour tout le monde** tant que la page publique
-           de découverte n'existe pas : l'écran promettait une tontine
-           « visible publiquement » que personne ne pouvait trouver. On le dit,
-           plutôt que de laisser cocher une promesse vide. -->
-        <label
-          class="flex min-h-touch items-start gap-3 card-surface p-4 opacity-60"
-        >
-          <input
-            v-model="form.access"
-            type="radio"
-            value="open"
-            disabled
-            class="mt-1 size-5 shrink-0 accent-brand"
-            data-testid="acces-ouvert"
-          >
-          <span>
-            <span class="font-medium text-ink">{{ $t('tontine.create.tontine_ouverte') }}</span>
-            <span class="block text-sm text-ink-muted">
-              {{ $t('tontine.create.visible_publiquement_n_importe') }}
-            </span>
-            <span
-              class="mt-1 flex items-start gap-1.5 text-sm text-ink-muted"
-              data-testid="explication-decouverte"
-            >
-              <Icon
-                name="lucide:clock"
-                size="0.875rem"
-                class="mt-0.5 shrink-0"
-                aria-hidden="true"
-              />
-              {{ $t('tontine.create.bientot_la_page_ou') }}
-            </span>
-            <span
-              v-if="!peutOuvrir"
-              class="mt-1 flex items-start gap-1.5 text-sm text-late-ink"
-              data-testid="explication-kyc"
-            >
-              <Icon
-                name="lucide:lock"
-                size="0.875rem"
-                class="mt-0.5 shrink-0"
-                aria-hidden="true"
-              />
-              {{ $t('tontine.create.demande_une_piece_d') }}
-            </span>
-          </span>
-        </label>
-      </section>
-
       <!-- Étape 1 — Informations -->
       <section
-        v-else-if="brouillon.etape === 1"
+        v-if="brouillon.etape === 1"
         class="flex flex-col gap-3"
         data-testid="etape-informations"
       >
@@ -829,6 +766,21 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
           </p>
         </div>
 
+        <!-- Il n'y a plus d'accès à choisir : le récapitulatif dit celui
+             qu'elle aura, le seul. -->
+        <p
+          class="flex items-start gap-2 text-sm text-ink-muted"
+          data-testid="recap-acces"
+        >
+          <Icon
+            name="lucide:lock"
+            size="1rem"
+            class="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+          {{ $t('tontine.create.sur_invitation_personne_ne') }}
+        </p>
+
         <p class="text-sm text-ink-muted">
           {{ $t('tontine.create.apres_publication_tu_pourras') }}
         </p>
@@ -869,7 +821,7 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
       <!-- Règle 13 : les actions primaires en bas d'écran. -->
       <div class="mt-auto flex flex-col gap-2 pt-2 sm:flex-row-reverse">
         <Button
-          v-if="brouillon.etape < ETAPES.length - 1"
+          v-if="brouillon.etape < DERNIERE_ETAPE"
           :label="enregistrement ? $t('tontine.create.enregistrement') : $t('tontine.create.continuer')"
           :disabled="!peutAvancer || enregistrement"
           class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
@@ -878,15 +830,15 @@ useHead({ title: t('tontine.create.creer_une_tontine_etontine') })
         />
         <Button
           v-else
-          :label="enregistrement ? $t('tontine.create.publication') : $t('tontine.create.publier_la_tontine')"
+          :label="enregistrement ? $t('commun.confirmation_en_cours') : $t('commun.confirmer')"
           :disabled="enregistrement"
           class="bg-brand text-brand-ink hover:bg-brand-strong sm:flex-1"
-          data-testid="bouton-publier"
-          @click="publier"
+          data-testid="bouton-confirmer"
+          @click="confirmerTontine"
         />
 
         <Button
-          v-if="brouillon.etape > 0"
+          v-if="brouillon.etape > 1"
           :label="$t('tontine.create.retour')"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted sm:flex-1"
           data-testid="bouton-retour"

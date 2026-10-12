@@ -16,6 +16,14 @@ const session = useSessionStore()
 const route = useRoute()
 
 /**
+ * Installer l'application, à la demande. La proposition d'office n'a lieu
+ * qu'une fois par mois au plus, et pas du tout là où le navigateur ne la fait
+ * pas lui-même : ici, elle reste à portée pour qui la cherche — avec la marche
+ * à suivre de son appareil.
+ */
+const { installation, ouvrir: ouvrirInstallation } = useInstallation()
+
+/**
  * Le nom, validé par le schéma que le serveur applique (`profileInput`) :
  * deux lettres au moins, cinquante au plus, et l'erreur sous le champ avant
  * l'envoi plutôt qu'un `422` en bas d'écran après.
@@ -690,6 +698,21 @@ useHead({ title: t('profil.index.mon_profil_etontine') })
         />
         {{ $t('profil.index.mes_donnees_personnelles') }}
       </NuxtLink>
+
+      <button
+        v-if="installation.mode !== 'installee'"
+        type="button"
+        class="min-h-touch flex items-center gap-2 text-sm text-brand underline underline-offset-4"
+        data-testid="bouton-installer-application"
+        @click="ouvrirInstallation"
+      >
+        <Icon
+          name="lucide:download"
+          size="1rem"
+          aria-hidden="true"
+        />
+        {{ $t('profil.index.installer_l_application') }}
+      </button>
 
       <button
         type="button"

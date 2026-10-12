@@ -294,6 +294,15 @@ const engagement = computed(() =>
     : '',
 )
 
+/**
+ * Un lien d'invitation exige l'identité de l'organisateur vérifiée : on ne
+ * demande à personne d'envoyer son argent à quelqu'un dont nul n'a vu la
+ * pièce. L'écran le dit avant le clic, avec le chemin pour la faire vérifier,
+ * plutôt qu'un bouton qui échoue.
+ */
+const identiteAVerifier = computed(() => (session.user?.kycLevel ?? 0) < 2)
+const versVerification = adresseVerificationIdentite(MOTIF_INVITER, `/app/tontine/${tontineId}/membres`)
+
 async function creerLien() {
   erreur.value = null
   try {
@@ -303,6 +312,12 @@ async function creerLien() {
     )
   }
   catch (e) {
+    // Le serveur tranche : une session vieille d'avant un changement de
+    // palier n'y change rien. On suit sa réponse jusqu'à la vérification.
+    if ((e as { data?: { error?: { code?: string } } })?.data?.error?.code === 'KYC_REQUIRED') {
+      await navigateTo(versVerification)
+      return
+    }
     erreur.value = message(e)
   }
 }
@@ -836,8 +851,38 @@ useHead({ title: t('tontine.membres.membres_etontine') })
           {{ $t('tontine.membres.inviter') }}
         </h2>
 
+        <!-- Règle 10 : un mot et une icône, jamais la couleur seule. -->
+        <div
+          v-if="!invitation && identiteAVerifier"
+          class="flex flex-col gap-3"
+          data-testid="invitation-identite-requise"
+        >
+          <p class="flex items-start gap-2 rounded-control bg-late-surface p-3 text-sm text-late-ink">
+            <Icon
+              name="lucide:shield-alert"
+              size="1rem"
+              class="mt-0.5 shrink-0"
+              aria-hidden="true"
+            />
+            {{ $t('tontine.membres.verifie_ton_identite_pour') }}
+          </p>
+          <NuxtLink
+            :to="versVerification"
+            class="inline-flex min-h-touch items-center justify-center gap-1.5 rounded-control
+                   bg-brand px-4 font-medium text-brand-ink hover:bg-brand-strong"
+            data-testid="lien-verifier-identite-invitation"
+          >
+            <Icon
+              name="lucide:id-card"
+              size="1rem"
+              aria-hidden="true"
+            />
+            {{ $t('tontine.membres.verifier_mon_identite') }}
+          </NuxtLink>
+        </div>
+
         <Button
-          v-if="!invitation"
+          v-else-if="!invitation"
           :label="$t('tontine.membres.creer_un_lien_d')"
           class="border border-line-strong bg-surface text-ink hover:bg-surface-muted"
           data-testid="bouton-creer-lien"
